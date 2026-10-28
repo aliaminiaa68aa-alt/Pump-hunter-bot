@@ -1,5 +1,4 @@
 name: Pump Hunter
-
 'on':
 workflow_dispatch:
 
@@ -9,17 +8,14 @@ runs-on: ubuntu-latest
 steps:
 - name: Checkout
 uses: actions/checkout@v4
-
-  - name: Setup Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: '3.12'
-
-  - name: Install dependencies
-    run: python -m pip install -r requirements.txt
-
-  - name: Run bot scan
-    env:
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-      CHAT_ID: ${{ secrets.CHAT_ID }}
-    run: timeout 240s python bot.py
+- name: Setup Python
+uses: actions/setup-python@v5
+with:
+python-version: '3.12'
+- name: Install dependencies
+run: python -m pip install -r requirements.txt
+- name: Run bot scan
+env:
+BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+CHAT_ID: ${{ secrets.CHAT_ID }}
+run: timeout 240s python bot.py
