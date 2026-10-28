@@ -4,9 +4,9 @@ import requests
 
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-BASE = "https://api.bybit.com"
+BASE = "https://api.gateio.ws/api/v4"
 SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "PumpHunterBot/1.0"})
+SESSION.headers.update({"User-Agent": "PumpHunterBot/1.1"})
 
 
 def send_message(message):
@@ -22,81 +22,87 @@ def send_message(message):
 
 
 def get_json(path, params=None):
-    response = SESSION.get(BASE + path, params=params, timeout=15)
+    response = SESSION.get(BASE + path, params=params, timeout=20)
     response.raise_for_status()
-    data = response.json()
-    if data.get("retCode") != 0:
-        raise RuntimeError(f"Bybit API error: {data.get('retCode')} {data.get('retMsg')}")
-    return data.get("result", {})
+    return response.json()
 
 
 def scan():
-    result = get_json("/v5/market/tickers", {"category": "linear"})
-    tickers = result.get("list", [])
-    liquid = [
-        item for item in tickers
-        if item.get("symbol", "").endswith("USDT")
-        and float(item.get("turnover24h", 0)) >= 5_000_000
-    ]
-    coins = sorted(
-        liquid, key=lambda item: float(item.get("turnover24h", 0)), reverse=True
-    )[:30]
+    # Gate.io public USDT perpetual market data; no API key required.
+    tickers = get_json("/futures/usdt/tickers")
+    liquid = []
+    for item in tickers:
+        contract = item.get("contract", "")
+        turnover = float(item.get("volume_24h_usd", 0) or 0)
+        if contract.endswith("_USDT") and turnover >= 5_000_000:
+            liquid.append((item, turnover))
+    coins = sorted(liquid, key=lambda pair: pair[1], reverse=True)[:30]
+    print(f"Gate.io liquid contracts checked: {len(coins)}")
 
     alerts = 0
-    for ticker in coins:
-        symbol = ticker["symbol"]
+    for ticker, _turnover24h in coins:
+        contract = ticker["contract"]
         try:
-            kline_result = get_json(
-                "/v5/market/kline",
-                {"category": "linear", "symbol": symbol, "interval": "5", "limit": 22},
+            raw = get_json(
+                "/futures/usdt/candlesticks",
+                {"contract": contract, "interval": "5m", "limit": 25},
             )
-            # Bybit returns candles newest-first, so reverse to oldest-first.
-            candles = list(reversed(kline_result.get("list", [])))
+            # Normalize response order using the candle timestamp.
+            candles = sorted(raw, key=lambda candle: int(candle["t"]))
             if len(candles) < 22:
+                print(f"{contract}: not enough candle data")
                 continue
 
-            # Ignore the current, still-forming candle.
+            # Exclude the current, still-forming candle.
             closed = candles[-2]
             previous = candles[-22:-2]
-            avg_turnover = sum(float(candle[6]) for candle in previous) / len(previous)
-            turnover = float(closed[6])
-            open_price = float(closed[1])
-            close_price = float(closed[4])
+            avg_turnover = sum(float(c.get("sum", 0) or 0) for c in previous) / len(previous)
+            turnover = float(closed.get("sum", 0) or 0)
+            open_price = float(closed["o"])
+            close_price = float(closed["c"])
 
             if avg_turnover <= 0 or turnover < avg_turnover * 2 or close_price <= open_price:
                 continue
 
-            oi_result = get_json(
-                "/v5/market/open-interest",
-                {"category": "linear", "symbol": symbol, "intervalTime": "5min", "limit": 2},
+            now = int(time.time())
+            oi_rows = get_json(
+                "/futures/usdt/contract_stats",
+                {
+                    "contract": contract,
+                    "from": now - 900,
+                    "to": now,
+                    "interval": "5m",
+                    "limit": 3,
+                },
             )
-            oi_rows = list(reversed(oi_result.get("list", [])))
+            oi_rows = sorted(oi_rows, key=lambda row: int(row.get("time", 0)))
+            oi_rows = [row for row in oi_rows if row.get("open_interest") not in (None, "")]
             if len(oi_rows) < 2:
+                print(f"{contract}: not enough OI history")
                 continue
-            old_oi = float(oi_rows[-2]["openInterest"])
-            new_oi = float(oi_rows[-1]["openInterest"])
+            old_oi = float(oi_rows[-2]["open_interest"])
+            new_oi = float(oi_rows[-1]["open_interest"])
             if old_oi <= 0:
                 continue
             oi_change = (new_oi / old_oi - 1) * 100
-
             if oi_change < 0.5:
                 continue
 
             price_change = (close_price / open_price - 1) * 100
             message = (
-                f"🚨 احتمال شروع حرکت: {symbol} (Bybit USDT Perpetual)\n"
+                f"🚨 احتمال شروع حرکت: {contract.replace('_', '/')} (Gate.io USDT Perpetual)\n"
                 f"تغییر کندل بسته‌شده ۵ دقیقه: +{price_change:.2f}%\n"
                 f"ارزش معاملات نسبت به میانگین ۲۰ کندل: {turnover / avg_turnover:.1f} برابر\n"
-                f"تغییر OI در داده‌های ۵ دقیقه‌ای: +{oi_change:.2f}%\n"
+                f"تغییر OI در داده‌های اخیر: +{oi_change:.2f}%\n"
                 f"قیمت بسته‌شدن کندل: {close_price}\n"
                 "⚠️ هشدار برای بررسی بیشتر است؛ سیگنال قطعی خرید نیست."
             )
             send_message(message)
             alerts += 1
-            print(f"Alert sent: {symbol}")
+            print(f"Alert sent: {contract}")
             time.sleep(1)
         except Exception as error:
-            print(f"{symbol}: {error}")
+            print(f"{contract}: {type(error).__name__}: {error}")
 
     print(f"Scan finished. Alerts sent: {alerts}")
 
