@@ -1624,7 +1624,7 @@ def scan():
                     f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین ۲۰ کندل قبلی\n"
                     f"قیمت فعلیِ کندل بسته‌شده ۱۵دقیقه: {latest_close}\n"
                     f"کف حرکت اولیه: {float(candidate['impulse_low'])}\n\n"
-                    "هنوز سیگنال ورود نیست. ربات منتظر شکست ساختار ۵دقیقه، تأیید ۱۵دقیقه و روند ۱ساعته، سپس بررسی OI و Funding می‌ماند."
+                    "هنوز سیگنال ورود نیست. ربات منتظر شکست ساختار ۱۵دقیقه، تأیید روند ۱۵دقیقه و روند ۱ساعته، سپس بررسی OI و Funding می‌ماند."
                 )
                     send_message(early_message)
                     early_alerts_state[contract] = candidate["impulse_time"]
@@ -1701,7 +1701,7 @@ def scan():
 
             oi_rows = get_json(
                 "/futures/usdt/contract_stats",
-                {"contract": contract, "from": now - 900, "interval": "15m", "limit": 3},
+                {"contract": contract, "from": now - 900, "interval": "5m", "limit": 3},
             )
             oi_rows = sorted(oi_rows, key=lambda row: int(row.get("time", 0)))
             oi_rows = [row for row in oi_rows if row.get("open_interest") not in (None, "")]
