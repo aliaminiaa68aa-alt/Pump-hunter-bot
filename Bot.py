@@ -104,9 +104,9 @@ def scan():
     for item in tickers:
         contract = item.get("contract", "")
         turnover = float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or item.get("volume_24h") or 0)
-        if contract.endswith("_USDT") and turnover >= 2_000_000:
+        if contract.endswith("_USDT") and turnover >= 1_000_000:
             liquid.append((item, turnover))
-    coins = sorted(liquid, key=lambda pair: pair[1], reverse=True)[:60]
+    coins = sorted(liquid, key=lambda pair: pair[1], reverse=True)[:100]
     print(f"Gate.io liquid contracts checked: {len(coins)}")
 
     btc_ok, btc_change = btc_market_filter()
@@ -136,7 +136,7 @@ def scan():
             open_price = float(closed["o"])
             close_price = float(closed["c"])
 
-            if avg_turnover <= 0 or turnover < avg_turnover * 2.2 or close_price <= open_price or (close_price / open_price - 1) < 0.003:
+            if avg_turnover <= 0 or turnover < avg_turnover * 1.5 or close_price <= open_price or (close_price / open_price - 1) < 0.002:
                 continue
             volume_spikes += 1
             print(f"{contract}: 5m volume spike {turnover / avg_turnover:.2f}x, candle change {(close_price / open_price - 1) * 100:.2f}%")
