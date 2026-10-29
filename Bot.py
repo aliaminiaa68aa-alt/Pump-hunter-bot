@@ -375,25 +375,24 @@ def coinalyze_derivatives_check(contract, state):
             return {"configured": True, "valid": False, "reason": "داده هم‌زمان OI/Funding از حداقل دو صرافی Coinalyze کامل نیست"}
 
         oi_change = (new_total / old_total - 1.0) * 100.0
-        # Fail closed on implausible funding magnitudes. Coinalyze's documented
-        # decimal-ratio convention means 0.0001 = 0.01%; raw magnitudes above
-        # 0.01 would imply funding beyond 1% per funding interval and can
-        # otherwise dominate the aggregate or mislead the entry gate.
+        # Coinalyze returns funding values in percentage units (e.g. -0.0243 means
+        # -0.0243%, not -2.43%). Normalize to a decimal fraction internally so the
+        # rest of this bot can keep using fraction-based rates (0.0001 = 0.01%).
         extreme_funding = [
             f"{exchange_by_symbol.get(symbol, symbol)}={float(row['value']):+.8f}"
             for symbol, row in funding_by_symbol.items()
-            if row.get("value") not in (None, "") and abs(float(row["value"])) > 0.01
+            if row.get("value") not in (None, "") and abs(float(row["value"])) > 1.0
         ]
         if extreme_funding:
             print(
-                f"{contract}: Coinalyze funding rejected as implausible under decimal-ratio convention; "
-                f"raw_values=[{','.join(extreme_funding)}]"
+                f"{contract}: Coinalyze funding rejected as implausible (>1% per interval); "
+                f"raw_percent_values=[{','.join(extreme_funding)}]"
             )
             return {
                 "configured": True, "valid": False,
                 "reason": "Coinalyze funding magnitude failed sanity check",
             }
-        funding_avg = sum(funding_values) / len(funding_values)
+        funding_avg = sum(funding_values) / len(funding_values) / 100.0
         # Safe operational diagnostics: report data coverage and exchange names,
         # never the API key or request headers.
         print(
@@ -525,7 +524,8 @@ def coinalyze_spike_metrics(contract, ticker, market_cap, market_volume, state):
         funding_rows = coinalyze_request("/funding-rate", {"symbols": symbols})
         funding_values = [float(row["value"]) for row in funding_rows if row.get("value") not in (None, "")]
         if funding_values:
-            result["funding_avg"] = sum(funding_values) / len(funding_values)
+            # Coinalyze funding values are in percentage units; normalize to fraction.
+            result["funding_avg"] = (sum(funding_values) / len(funding_values)) / 100.0
 
         oi_rows = coinalyze_request("/open-interest-history", {
             "symbols": symbols, "interval": "1hour", "from": now - 86400, "to": now,
