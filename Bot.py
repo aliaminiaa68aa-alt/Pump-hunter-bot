@@ -1045,19 +1045,26 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
     # Rank qualifying candidates by actual Coinalyze OI change over 4h.
     prequalified = []
+    priority_contracts = set(early_pattern_details) | set(candidates)
     for item in tickers:
         contract0 = item.get("contract", "")
         if not is_crypto_contract(contract0):
             continue
         try:
-            funding0 = float(item.get("funding_rate"))
+            raw_funding0 = item.get("funding_rate")
+            funding0 = float(raw_funding0) if raw_funding0 not in (None, "") else None
+            # Tracked LEG SPIKE setups must reach Coinalyze even when Gate.io's
+            # single-venue funding is zero, positive, or missing. Aggregate
+            # funding is validated later by coinalyze_derivatives_check.
+            if (funding0 is None or funding0 >= 0) and not (COINALYZE_API_KEY and contract0 in priority_contracts):
+                continue
             symbol0 = contract0[:-5].upper()
             cap0 = caps.get(symbol0)
             vol0 = market_volumes.get(symbol0)
-            if funding0 >= 0 or not cap0 or symbol0 in ambiguous or not vol0 or float(vol0) / float(cap0) < FIB_MIN_VOLUME_TO_MARKET_CAP:
+            if not cap0 or symbol0 in ambiguous or not vol0 or float(vol0) / float(cap0) < FIB_MIN_VOLUME_TO_MARKET_CAP:
                 continue
             prequalified.append(item)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, ZeroDivisionError):
             continue
     # Diversify the small API-budget sample so it is not selected by turnover alone:
     # take candidates from turnover, volume/market-cap intensity, and 24h price change.
