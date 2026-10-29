@@ -158,7 +158,7 @@ def save_alert_state(state):
 
 
 def find_recent_impulse(candles):
-    """Return a recent closed 15m high-volume impulse candle, if present."""
+    """Return a recent closed 5m high-volume impulse candle, if present."""
     if len(candles) < 24:
         return None
     first_idx = max(20, len(candles) - 8)
@@ -1574,7 +1574,7 @@ def scan():
     for ticker, _turnover24h in coins:
         contract = ticker["contract"]
         try:
-            candles = closed_candles(contract, "15m", 40)
+            candles = closed_candles(contract, "5m", 40)
             if len(candles) < 24:
                 continue
             candle_checks += 1
@@ -1622,9 +1622,9 @@ def scan():
                     "🟦 HYPE/BOS | استراتژی اصلی\n"
                     f"👀 هشدار زودهنگام؛ هنوز تأیید نشده: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                     f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین ۲۰ کندل قبلی\n"
-                    f"قیمت فعلیِ کندل بسته‌شده ۱۵دقیقه: {latest_close}\n"
+                    f"قیمت فعلیِ کندل بسته‌شده ۵دقیقه: {latest_close}\n"
                     f"کف حرکت اولیه: {float(candidate['impulse_low'])}\n\n"
-                    "هنوز سیگنال ورود نیست. ربات منتظر شکست ساختار ۱۵دقیقه، تأیید روند ۱۵دقیقه و روند ۱ساعته، سپس بررسی OI و Funding می‌ماند."
+                    "هنوز سیگنال ورود نیست. ربات منتظر شکست ساختار ۵دقیقه، تأیید روند ۱۵دقیقه و روند ۱ساعته، سپس بررسی OI و Funding می‌ماند."
                 )
                     send_message(early_message)
                     early_alerts_state[contract] = candidate["impulse_time"]
@@ -1667,14 +1667,14 @@ def scan():
                     if setup_alerts.get(contract) != candidate["impulse_time"]:
                         setup_message = (
                             "🟦 HYPE/BOS | استراتژی اصلی\n"
-                            f"🟡 شکست ساختار ۱۵دقیقه‌ای: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
+                            f"🟡 شکست ساختار ۵دقیقه‌ای: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                             f"سطح شکست: {short_term_high}\n"
                             f"قیمت کندل بسته‌شده: {latest_close}\n\n"
                             "این مرحله از هشدار اولیه قوی‌تر است، اما هنوز تأیید ورود نیست. ربات منتظر کندل ۱۵دقیقه‌ای، روند ۱ساعته و بررسی OI/Funding می‌ماند."
                         )
                         send_message(setup_message)
                         setup_alerts[contract] = candidate["impulse_time"]
-                    print(f"{contract}: 15m break of structure detected at {short_term_high}")
+                    print(f"{contract}: 5m break of structure detected at {short_term_high}")
 
             # If BOS occurred earlier, wait for confirmation while price remains above its level.
             bos_level = candidate.get("bos_level")
@@ -1802,7 +1802,7 @@ def scan():
             message = (
                 "🟦 HYPE/BOS | استراتژی اصلی\n"
                 f"✅ تأیید نهایی ستاپ صعودی: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
-                f"شکست ساختار ۱۵دقیقه‌ای ثبت شده و قیمت بالای سطح شکست است\n"
+                f"شکست ساختار ۵دقیقه‌ای ثبت شده و قیمت بالای سطح شکست است\n"
                 f"کندل ۱۵دقیقه: تأیید صعودی ({change15:+.2f}%)\n"
                 f"روند ۱ساعته: قیمت بالای EMA20 صعودی ({change1h_text})\n"
                 f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین\n"
