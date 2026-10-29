@@ -1031,14 +1031,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             print(f"{contract}: LEG SPIKE early scan failed: {type(error).__name__}: {error}")
 
     if not confirmed_entries:
-        print("LEG SPIKE: confirmed-entry checks paused by BTC filter; independent early scan completed.")
-        print(
-            "LEG SPIKE diagnostics: " +
-            ", ".join(f"{key}={value}" for key, value in counts.items()) +
-            f", active={len(candidates)}, caps_cached={len(caps)}, ambiguous_symbols={len(ambiguous)}"
-        )
-        print("LEG SPIKE early-pattern samples: " + ("; ".join(early_pattern_samples) or "none"))
-        return
+        print("BTC filter: keeping LEG SPIKE Stage-2 monitoring active; only final-entry alerts are paused.")
 
     coinalyze_checks_this_scan = 0
     # Prioritize active early-pattern symbols for derivative validation, and allow
@@ -1326,6 +1319,10 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 send_message(watch_message)
                 setup_sent[contract] = setup_key
                 print(f"{contract}: stage-2 setup alert sent")
+            if not confirmed_entries:
+                print(f"{contract}: Stage-2 monitoring allowed; Stage-3 entry paused by BTC filter")
+                continue
+
             price = float(candles[-1]["c"])
             low = float(candidate["low"])
             high = float(candidate["high"])
