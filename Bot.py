@@ -698,60 +698,129 @@ FIB_MIN_TOTAL_PUMP_PCT = 4.0
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
 
-def get_market_caps(state):
-    """Cache CoinGecko market caps for 15 minutes; exclude ambiguous duplicate symbols."""
+def get_market_caps(state, requested_symbols=None):
+    """Use CoinGecko first, then CoinMarketCap keyless quotes for missing symbols; cache for 15 minutes."""
     cache = state.get("market_cap_cache", {})
     now = int(time.time())
-    if (cache.get("fetched_at") and now - int(cache["fetched_at"]) < 900
-            and isinstance(cache.get("volumes"), dict)):
-        return cache.get("caps", {}), cache.get("ambiguous", [])
-    all_rows = []
-    try:
-        # Four pages cover the first 1,000 assets by market cap; avoid a request per coin.
-        for page in range(1, 5):
+    requested = {str(symbol).upper() for symbol in (requested_symbols or []) if symbol}
+    fresh = (
+        cache.get("fetched_at") and now - int(cache["fetched_at"]) < 900
+        and isinstance(cache.get("volumes"), dict)
+    )
+    if fresh:
+        caps = dict(cache.get("caps", {}))
+        volumes = dict(cache.get("volumes", {}))
+        ambiguous = set(cache.get("ambiguous", []))
+        checked = set(cache.get("cmc_checked_symbols", []))
+    else:
+        all_rows = []
+        caps, volumes, ambiguous, checked = {}, {}, set(), set()
+        try:
+            # Four pages cover the first 1,000 assets by market cap.
+            for page in range(1, 5):
+                response = SESSION.get(
+                    f"{COINGECKO_BASE}/coins/markets",
+                    params={"vs_currency": "usd", "order": "market_cap_desc",
+                            "per_page": 250, "page": page, "sparkline": "false"},
+                    timeout=20,
+                )
+                response.raise_for_status()
+                rows = response.json()
+                if not isinstance(rows, list):
+                    raise RuntimeError("CoinGecko market-cap response was not a list")
+                all_rows.extend(rows)
+                time.sleep(0.25)
+            counts = {}
+            for row in all_rows:
+                symbol = str(row.get("symbol", "")).upper()
+                cap = row.get("market_cap")
+                if not symbol or cap in (None, "") or float(cap) <= 0:
+                    continue
+                counts[symbol] = counts.get(symbol, 0) + 1
+                if counts[symbol] == 1:
+                    caps[symbol] = float(cap)
+                    volume = row.get("total_volume")
+                    if volume not in (None, "") and float(volume) > 0:
+                        volumes[symbol] = float(volume)
+            ambiguous = {symbol for symbol, count in counts.items() if count > 1}
+            for symbol in ambiguous:
+                caps.pop(symbol, None)
+                volumes.pop(symbol, None)
+            print(
+                f"CoinGecko market data refreshed: {len(caps)} unique market caps, "
+                f"{len(volumes)} 24h volumes; {len(ambiguous)} ambiguous symbols"
+            )
+        except Exception as error:
+            print(f"CoinGecko market-cap lookup unavailable: {type(error).__name__}: {error}")
+            # Continue to CoinMarketCap rather than failing the market-cap lookup entirely.
+
+    # Only ask CMC for symbols that CoinGecko could not identify unambiguously.
+    # CMC's keyless Quotes Latest endpoint supports symbol lookups without credentials.
+    missing = sorted((requested - set(caps)) | (requested & ambiguous))
+    missing = [symbol for symbol in missing if symbol not in checked]
+    cmc_resolved, cmc_ambiguous = 0, set()
+    for offset in range(0, len(missing), 15):
+        batch = missing[offset:offset + 15]
+        if not batch:
+            continue
+        try:
             response = SESSION.get(
-                f"{COINGECKO_BASE}/coins/markets",
-                params={"vs_currency": "usd", "order": "market_cap_desc",
-                        "per_page": 250, "page": page, "sparkline": "false"},
+                "https://pro-api.coinmarketcap.com/public-api/v3/cryptocurrency/quotes/latest",
+                params={"symbol": ",".join(batch), "convert": "USD"},
+                headers={"Accept": "application/json"},
                 timeout=20,
             )
             response.raise_for_status()
-            rows = response.json()
-            if not isinstance(rows, list):
-                raise RuntimeError("CoinGecko market-cap response was not a list")
-            all_rows.extend(rows)
-            time.sleep(0.25)
-        by_symbol = {}
-        volume_by_symbol = {}
-        ambiguous = set()
-        for row in all_rows:
-            symbol = str(row.get("symbol", "")).upper()
-            cap = row.get("market_cap")
-            total_volume = row.get("total_volume")
-            if not symbol or not cap or float(cap) <= 0:
-                continue
-            if symbol in by_symbol:
-                ambiguous.add(symbol)
-            else:
-                by_symbol[symbol] = float(cap)
-                if total_volume not in (None, "") and float(total_volume) > 0:
-                    volume_by_symbol[symbol] = float(total_volume)
-        for symbol in ambiguous:
-            by_symbol.pop(symbol, None)
-            volume_by_symbol.pop(symbol, None)
-        state["market_cap_cache"] = {
-            "fetched_at": now, "caps": by_symbol, "volumes": volume_by_symbol,
-            "ambiguous": sorted(ambiguous)
-        }
+            payload = response.json()
+            data = payload.get("data", {})
+            # Quotes Latest is keyed by CMC ID; a symbol may map to multiple assets.
+            rows = []
+            if isinstance(data, dict):
+                for value in data.values():
+                    rows.extend(value if isinstance(value, list) else [value])
+            elif isinstance(data, list):
+                rows = data
+            grouped = {}
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                symbol = str(row.get("symbol", "")).upper()
+                quote = (row.get("quote") or {}).get("USD") or {}
+                cap, volume = quote.get("market_cap"), quote.get("volume_24h")
+                if symbol not in batch or cap in (None, "") or float(cap) <= 0:
+                    continue
+                grouped.setdefault(symbol, []).append((float(cap), volume))
+            for symbol in batch:
+                checked.add(symbol)
+                matches = grouped.get(symbol, [])
+                if len(matches) == 1:
+                    caps[symbol] = matches[0][0]
+                    if matches[0][1] not in (None, "") and float(matches[0][1]) > 0:
+                        volumes[symbol] = float(matches[0][1])
+                    ambiguous.discard(symbol)
+                    cmc_resolved += 1
+                elif len(matches) > 1:
+                    caps.pop(symbol, None)
+                    volumes.pop(symbol, None)
+                    ambiguous.add(symbol)
+                    cmc_ambiguous.add(symbol)
+            time.sleep(0.2)
+        except Exception as error:
+            # Do not permanently mark failed requests as checked; a later scan can retry.
+            print(f"CoinMarketCap fallback unavailable for batch {batch[:3]}: {type(error).__name__}: {error}")
+
+    state["market_cap_cache"] = {
+        "fetched_at": now if not fresh else cache.get("fetched_at", now),
+        "caps": caps, "volumes": volumes,
+        "ambiguous": sorted(ambiguous),
+        "cmc_checked_symbols": sorted(checked),
+    }
+    if cmc_resolved or cmc_ambiguous:
         print(
-            f"CoinGecko market data refreshed: {len(by_symbol)} unique market caps, "
-            f"{len(volume_by_symbol)} 24h volumes; {len(ambiguous)} ambiguous symbols"
+            f"CoinMarketCap fallback: resolved={cmc_resolved}, "
+            f"still_ambiguous={len(cmc_ambiguous)}"
         )
-        return by_symbol, sorted(ambiguous)
-    except Exception as error:
-        print(f"CoinGecko market-cap lookup unavailable: {type(error).__name__}: {error}")
-        # Use a still-existing cache if available; otherwise fail closed for this filter.
-        return cache.get("caps", {}), cache.get("ambiguous", [])
+    return caps, sorted(ambiguous)
 
 
 def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=FIB_MIN_TOTAL_PUMP_PCT):
@@ -801,7 +870,7 @@ def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=F
 
 def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     """Scan LEG SPIKE with staged diagnostics and avoid ratio API calls before a real pump exists."""
-    caps, ambiguous = get_market_caps(state)
+    caps, ambiguous = get_market_caps(state, [item.get('contract', '').replace('_', '/').split('/')[0] for item in tickers])
     market_volumes = state.get("market_cap_cache", {}).get("volumes", {})
     candidates = state["fib_candidates"]
     sent = state["fib_alerts"]
