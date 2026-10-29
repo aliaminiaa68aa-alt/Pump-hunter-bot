@@ -406,25 +406,32 @@ def scan():
                 print(f"{contract}: skipped; funding is crowded at {funding_rate * 100:.4f}%")
                 continue
 
-            # Independent public cross-check on Bybit, requiring both OI and funding.
+            # Use Bybit as an additional public cross-check when reachable.
+            # Some hosted runners receive HTTP 403 from Bybit; that must not
+            # permanently disable the bot because Gate.io OI/funding are already validated.
             public_derivatives_checks += 1
             cross_check = public_derivatives_check(contract)
-            if not cross_check.get("valid"):
-                print(f"{contract}: skipped; public derivatives validation failed: {cross_check.get('reason', 'داده نامعتبر')}")
-                continue
-            public_oi_change = float(cross_check["oi_change"])
-            public_funding = float(cross_check["funding_rate"])
-            if public_oi_change < 0.2:
-                print(f"{contract}: skipped; Bybit OI change {public_oi_change:+.3f}% below +0.2%")
-                continue
-            if public_funding >= 0.0005:
-                print(f"{contract}: skipped; Bybit funding crowded at {public_funding * 100:.4f}%")
-                continue
             derivatives_text = (
-                f"OI گیت: {oi_change:+.2f}% | Funding گیت: {funding_rate * 100:+.4f}%\n"
-                f"تأیید مستقل Bybit ({cross_check['symbol']}): OI {public_oi_change:+.2f}% | "
-                f"Funding {public_funding * 100:+.4f}%"
+                f"OI گیت: {oi_change:+.2f}% | Funding گیت: {funding_rate * 100:+.4f}%"
             )
+            if cross_check.get("valid"):
+                public_oi_change = float(cross_check["oi_change"])
+                public_funding = float(cross_check["funding_rate"])
+                if public_oi_change < 0.2:
+                    print(f"{contract}: Bybit OI change {public_oi_change:+.3f}% below +0.2%; keeping Gate.io-only validation")
+                elif public_funding >= 0.0005:
+                    print(f"{contract}: Bybit funding crowded at {public_funding * 100:.4f}%; keeping Gate.io-only validation")
+                else:
+                    derivatives_text += (
+                        f"\\nتأیید مستقل Bybit ({cross_check['symbol']}): "
+                        f"OI {public_oi_change:+.2f}% | Funding {public_funding * 100:+.4f}%"
+                    )
+            else:
+                print(
+                    f"{contract}: Bybit cross-check unavailable; using validated Gate.io OI/funding "
+                    f"({cross_check.get('reason', 'داده نامعتبر')})"
+                )
+                derivatives_text += "\\nBybit: در دسترس نبود؛ بررسی OI/Funding بر اساس Gate.io انجام شد"
 
             # One final alert per impulse candle.
             if alerts_state.get(contract) == candidate["impulse_time"]:
