@@ -1004,7 +1004,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
         return
 
     coinalyze_checks_this_scan = 0
-    max_coinalyze_checks_per_scan = 6
+    # Prioritize active early-pattern symbols for derivative validation, and allow
+    # a few more checks: the previous quota skipped several candidates each scan.
+    max_coinalyze_checks_per_scan = 10
     def _turnover_rank(item):
         try:
             return float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0)
@@ -1044,10 +1046,17 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
     selected_for_oi = []
     selected_contracts = set()
+    early_contracts = set(early_pattern_details)
+    early_prequalified = [item for item in prequalified if item.get("contract", "") in early_contracts]
+    other_prequalified = [item for item in prequalified if item.get("contract", "") not in early_contracts]
     ranked_pools = [
-        sorted(prequalified, key=_turnover_rank, reverse=True),
-        sorted(prequalified, key=_volume_cap_rank, reverse=True),
-        sorted(prequalified, key=_change24_rank, reverse=True),
+        # Give an actual early pump candidate first chance at Coinalyze checks.
+        sorted(early_prequalified, key=_turnover_rank, reverse=True),
+        sorted(early_prequalified, key=_volume_cap_rank, reverse=True),
+        sorted(early_prequalified, key=_change24_rank, reverse=True),
+        sorted(other_prequalified, key=_turnover_rank, reverse=True),
+        sorted(other_prequalified, key=_volume_cap_rank, reverse=True),
+        sorted(other_prequalified, key=_change24_rank, reverse=True),
     ]
     while len(selected_for_oi) < max_coinalyze_checks_per_scan:
         added = False
