@@ -968,6 +968,19 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             contract0 = item.get("contract", "")
             ranked_checks[contract0] = coinalyze_derivatives_check(contract0, state)
             coinalyze_checks_this_scan += 1
+        oi4_ranked = sorted(
+            [
+                (contract, check.get("oi_change4h"))
+                for contract, check in ranked_checks.items()
+                if check.get("valid") and check.get("oi_change4h") is not None
+            ],
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+        print(
+            "OI4h ranked candidates: " +
+            (", ".join(f"{contract}={change:+.3f}%" for contract, change in oi4_ranked) or "no valid 4h OI data")
+        )
         scan_tickers = sorted(
             tickers,
             key=lambda item: (
