@@ -1067,10 +1067,12 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     continue
                 oi_usd = aggregate_oi
                 funding = aggregate_funding
+                oi_change4h = coinalyze_check.get("oi_change4h")
                 if contract in early_pattern_details:
                     early_filter_status[contract] = "Coinalyze aggregate OI/funding passed"
             else:
                 # Safe fallback only when no Coinalyze API key is configured.
+                oi_change4h = None
                 stats = get_json(
                     "/futures/usdt/contract_stats",
                     {"contract": contract, "from": int(time.time()) - 600,
@@ -1130,6 +1132,10 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             # Stage 3 remains the final entry alert after Fib reaction and all confirmations.
             setup_sent = state.setdefault("setup_alerts", {})
             setup_key = str(candidate["end_time"])
+            oi4_message = (
+                f"{float(oi_change4h):+.2f}%"
+                if oi_change4h is not None else "داده در دسترس نیست"
+            )
             if setup_sent.get(contract) != setup_key:
                 raw_change = ticker.get("change_percentage")
                 try:
@@ -1142,7 +1148,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     f"🪙 ارز: {contract.replace('_', '/')}\n"
                     f"📈 حرکت ۵دقیقه‌ای: {float(candidate['pump_pct']):.2f}% در {int(candidate['body_count'])} کندل\n"
                     f"💵 تغییر ۲۴ساعته: {change24_text} | 💧 حجم/مارکت‌کپ: {volume_mc:.2f}x\n"
-                    f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} | Funding: {funding * 100:+.4f}%\n"
+                    f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} | OI چهار‌ساعته: {oi4_message}\n"
+                    f"💸 Funding: {funding * 100:+.4f}%\n"
                     f"🎯 محدوده پول‌بک فیبو: {float(candidate['fib66']):.10g} تا {float(candidate['fib50']):.10g}\n"
                     "⏳ هنوز نقطه ورود نیست؛ منتظر واکنش کندل بسته‌شده در فیبو و تأیید لانگ/شورت می‌مانیم.\n"
                     "🟠━━━━━━━━━━━━━━━━━━🟠"
