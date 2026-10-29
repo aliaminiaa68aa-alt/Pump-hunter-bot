@@ -1173,16 +1173,18 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 candidates.pop(contract, None)
                 print(f"{contract}: LEG SPIKE invalidated; impulse low breached")
                 continue
-            levels = (("0.50", float(candidate["fib50"])), ("0.66", float(candidate["fib66"])))
+            # Check the deeper 0.66 retracement first so a genuine deeper rejection
+            # is not mislabeled as a shallower 0.50 entry on the same candle.
+            levels = (("0.66", float(candidate["fib66"])), ("0.50", float(candidate["fib50"])))
             for level_name, level in levels:
                 alert_key = f'{candidate["end_time"]}:{level_name}'
                 if sent.get(contract) == alert_key:
                     continue
-                previous_close = float(candles[-2]["c"])
                 current_low = float(candles[-1]["l"])
-                # Require a confirmed Fib rejection: previous close above the level,
-                # current candle touches/breaches it intrabar, then closes back above.
-                if previous_close > level and current_low <= level and price > level and price > low:
+                # Confirm rejection on the latest closed candle: it touched/breached
+                # this Fib level intrabar and closed back above it. The prior candle
+                # does not have to close above the level (valid recoveries can start below).
+                if current_low <= level and price > level and price > low:
                     counts["fib_reactions"] += 1
                     risk = level - low
                     reward = high - level
