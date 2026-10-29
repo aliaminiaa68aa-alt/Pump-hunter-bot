@@ -5,6 +5,27 @@ import requests
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BASE = "https://api.gateio.ws/api/v4"
+
+# Explicitly exclude tokenized equities, equity indices, ETFs and common stock symbols.
+# The scanner is for crypto assets only, even if a non-crypto perpetual is quoted in USDT.
+NON_CRYPTO_BASES = {
+    "AAPL", "AMZN", "AMD", "BA", "BABA", "COIN", "COST", "DIS", "GOOG", "GOOGL",
+    "HOOD", "INTC", "JNJ", "JPM", "META", "MSFT", "MSTR", "NFLX", "NVDA", "ORCL",
+    "PLTR", "TSLA", "TSM", "WMT", "XOM",
+    "DIA", "IWM", "QQQ", "SPY", "SPX", "NDX",
+    "GLD", "SLV", "USO",
+}
+
+
+def is_crypto_contract(contract):
+    """Accept USDT-quoted contracts except known equity/index/ETF/commodity products."""
+    if not isinstance(contract, str) or not contract.endswith("_USDT"):
+        return False
+    base = contract[:-5].upper()
+    if not base or base in NON_CRYPTO_BASES:
+        return False
+    return True
+
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "PumpHunterBot/1.3"})
 
@@ -612,7 +633,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     liquid_for_early = []
     for item in tickers:
         symbol = item.get("contract", "")
-        if not symbol.endswith("_USDT"):
+        if not is_crypto_contract(symbol):
             continue
         try:
             turnover = float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0)
@@ -693,7 +714,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
     for ticker in tickers:
         contract = ticker.get("contract", "")
-        if not contract.endswith("_USDT"):
+        if not is_crypto_contract(contract):
             continue
         counts["tickers"] += 1
         try:
@@ -915,7 +936,7 @@ def scan():
     for item in tickers:
         contract = item.get("contract", "")
         turnover24 = float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or item.get("volume_24h") or 0)
-        if contract.endswith("_USDT") and turnover24 >= 1_000_000:
+        if is_crypto_contract(contract) and turnover24 >= 1_000_000:
             liquid.append((item, turnover24))
     coins = sorted(liquid, key=lambda pair: pair[1], reverse=True)[:100]
     print(f"Gate.io liquid contracts checked: {len(coins)}")
