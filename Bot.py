@@ -14,6 +14,10 @@ NON_CRYPTO_BASES = {
     "PLTR", "TSLA", "TSM", "WMT", "XOM",
     "DIA", "IWM", "QQQ", "SPY", "SPX", "NDX",
     "GLD", "SLV", "USO",
+    # Leveraged/inverse equity and sector ETFs sometimes listed as USDT perpetuals.
+    "SOXS", "SOXL", "SQQQ", "TQQQ", "SPXS", "SPXL", "UVXY", "LABU", "LABD",
+    "FNGU", "FNGD", "NVDL", "NVD", "TSLL", "TSLQ", "CONL", "CONY", "MSTU",
+    "MSTX", "BITX", "ETHU", "YINN", "YANG", "KOLD", "BOIL", "TZA", "TNA",
 }
 
 
