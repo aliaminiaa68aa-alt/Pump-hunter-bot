@@ -421,6 +421,8 @@ def coinalyze_derivatives_check(contract, state):
             f"OI_history={len(oi_exchanges)}[{','.join(oi_exchanges)}] "
             f"funding={len(funding_values)}[{','.join(funding_exchanges)}] "
             f"aggregate_OI_change={oi_change:+.3f}% "
+            f"aggregate_OI_change_4h={(f'{oi_change4h:+.3f}%' if oi_change4h is not None else 'unavailable')} "
+            f"OI_4h_exchanges={oi4_exchanges} "
             f"aggregate_OI_USD={new_total:.0f} average_funding={funding_avg*100:+.4f}% "
             f"funding_raw_values=[{','.join(funding_raw_diagnostics)}]"
         )
