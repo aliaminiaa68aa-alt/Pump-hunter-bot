@@ -342,6 +342,10 @@ def coinalyze_derivatives_check(contract, state):
             "/open-interest-history",
             {"symbols": symbols, "interval": "5min", "from": now - 1800, "to": now, "convert_to_usd": "true"},
         )
+        oi4_rows = coinalyze_request(
+            "/open-interest-history",
+            {"symbols": symbols, "interval": "1hour", "from": now - 5 * 3600, "to": now, "convert_to_usd": "true"},
+        )
         funding_rows = coinalyze_request("/funding-rate", {"symbols": symbols})
 
         oi_by_symbol = {str(row.get("symbol", "")): row for row in oi_rows}
@@ -377,6 +381,21 @@ def coinalyze_derivatives_check(contract, state):
             return {"configured": True, "valid": False, "reason": "داده هم‌زمان OI/Funding از حداقل دو صرافی Coinalyze کامل نیست"}
 
         oi_change = (new_total / old_total - 1.0) * 100.0
+        oi4_old_total = oi4_new_total = 0.0
+        oi4_exchanges = 0
+        oi4_by_symbol = {str(row.get("symbol", "")): row for row in oi4_rows}
+        for symbol in seen:
+            history4 = sorted(oi4_by_symbol.get(symbol, {}).get("history", []), key=lambda point: int(point.get("t", 0)))
+            recent4 = [point for point in history4 if int(point.get("t", 0)) >= now - 4 * 3600]
+            if len(recent4) < 2:
+                continue
+            old4 = float(recent4[0].get("c", 0) or 0)
+            new4 = float(recent4[-1].get("c", 0) or 0)
+            if old4 > 0 and new4 > 0:
+                oi4_old_total += old4
+                oi4_new_total += new4
+                oi4_exchanges += 1
+        oi_change4h = ((oi4_new_total / oi4_old_total - 1.0) * 100.0) if oi4_exchanges >= 2 and oi4_old_total > 0 else None
         # Coinalyze returns funding values in percentage units (e.g. -0.0243 means
         # -0.0243%, not -2.43%). Normalize to a decimal fraction internally so the
         # rest of this bot can keep using fraction-based rates (0.0001 = 0.01%).
@@ -407,7 +426,7 @@ def coinalyze_derivatives_check(contract, state):
         )
         return {
             "configured": True, "valid": True,
-            "oi_change": oi_change, "funding_rate": funding_avg,
+            "oi_change": oi_change, "oi_change4h": oi_change4h, "funding_rate": funding_avg,
             "oi_usd": new_total,
             "oi_exchanges": oi_exchanges, "funding_exchanges": funding_exchanges,
             "symbol": base + "USDT",
@@ -887,7 +906,43 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             return float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0)
         except (TypeError, ValueError):
             return 0.0
-    scan_tickers = sorted(tickers, key=_turnover_rank, reverse=True)
+
+    # Rank qualifying candidates by actual Coinalyze OI change over 4h.
+    prequalified = []
+    for item in tickers:
+        contract0 = item.get("contract", "")
+        if not is_crypto_contract(contract0):
+            continue
+        try:
+            funding0 = float(item.get("funding_rate"))
+            symbol0 = contract0[:-5].upper()
+            cap0 = caps.get(symbol0)
+            vol0 = market_volumes.get(symbol0)
+            if funding0 >= 0 or not cap0 or symbol0 in ambiguous or not vol0 or float(vol0) / float(cap0) < FIB_MIN_VOLUME_TO_MARKET_CAP:
+                continue
+            prequalified.append(item)
+        except (TypeError, ValueError):
+            continue
+    prequalified.sort(key=_turnover_rank, reverse=True)
+    ranked_checks = {}
+    if COINALYZE_API_KEY:
+        for item in prequalified[:max_coinalyze_checks_per_scan]:
+            contract0 = item.get("contract", "")
+            ranked_checks[contract0] = coinalyze_derivatives_check(contract0, state)
+            coinalyze_checks_this_scan += 1
+        scan_tickers = sorted(
+            tickers,
+            key=lambda item: (
+                0 if item.get("contract", "") in ranked_checks
+                   and ranked_checks[item.get("contract", "")].get("valid")
+                   and ranked_checks[item.get("contract", "")].get("oi_change4h") is not None else 1,
+                -(float(ranked_checks[item.get("contract", "")].get("oi_change4h") or -1e9)
+                  if item.get("contract", "") in ranked_checks else -1e9),
+                -_turnover_rank(item),
+            ),
+        )
+    else:
+        scan_tickers = sorted(tickers, key=_turnover_rank, reverse=True)
     for ticker in scan_tickers:
         contract = ticker.get("contract", "")
         if not is_crypto_contract(contract):
@@ -934,12 +989,15 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             # Coinalyze is the primary OI/funding source when configured. Do not
             # reject a candidate using Gate.io OI before checking the requested aggregate.
             # Bound weighted API usage per scan; prioritize earlier (more liquid) ticker rows.
-            if COINALYZE_API_KEY and coinalyze_checks_this_scan >= max_coinalyze_checks_per_scan:
-                if contract in early_pattern_details:
-                    early_filter_status[contract] = "Coinalyze scan quota reached; skipped this cycle"
-                continue
-            coinalyze_checks_this_scan += 1
-            coinalyze_check = coinalyze_derivatives_check(contract, state)
+            if contract in ranked_checks:
+                coinalyze_check = ranked_checks[contract]
+            else:
+                if COINALYZE_API_KEY and coinalyze_checks_this_scan >= max_coinalyze_checks_per_scan:
+                    if contract in early_pattern_details:
+                        early_filter_status[contract] = "Coinalyze scan quota reached; skipped this cycle"
+                    continue
+                coinalyze_checks_this_scan += 1
+                coinalyze_check = coinalyze_derivatives_check(contract, state)
             if coinalyze_check.get("configured"):
                 if not coinalyze_check.get("valid"):
                     if contract in early_pattern_details:
