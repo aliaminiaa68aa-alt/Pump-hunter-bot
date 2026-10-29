@@ -694,8 +694,11 @@ def leg_spike_long_short_filter(contract):
 # "Several times market cap" is set to >=2x by default and can be tuned here.
 FIB_MIN_VOLUME_TO_MARKET_CAP = 0.50
 FIB_MIN_OI_TO_MARKET_CAP = 0.20
-FIB_MIN_BODY_PCT = 0.8
-FIB_MIN_TOTAL_PUMP_PCT = 4.0
+# Stage-2 impulse detection: slightly more inclusive so valid developing
+# setups are tracked; Stage-3 entry confirmation remains fully gated by Fib,
+# OI, funding, and long/short checks.
+FIB_MIN_BODY_PCT = 0.7
+FIB_MIN_TOTAL_PUMP_PCT = 3.5
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
 
@@ -898,7 +901,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
         "tickers": 0, "negative_funding": 0, "cap_available": 0,
         "early_scan_checked": 0, "early_patterns_seen": 0, "early_warnings_sent": 0,
         "early_duplicate_suppressed": 0, "early_recent_suppressed": 0, "early_candle_errors": 0, "volume_pass": 0, "oi_pass": 0,
-        "pump_detected": 0, "ratio_pass": 0, "ratio_rejected": 0,
+        "pump_detected": 0, "pump_pattern_rejected": 0,
+        "coinalyze_unavailable": 0, "oi_rejected": 0, "quota_skipped": 0,
+        "ratio_pass": 0, "ratio_rejected": 0,
         "ratio_unavailable": 0, "fib_reactions": 0,
         "missing_cap": 0, "missing_market_volume": 0,
     }
@@ -1142,6 +1147,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 coinalyze_check = ranked_checks[contract]
             else:
                 if COINALYZE_API_KEY and coinalyze_checks_this_scan >= max_coinalyze_checks_per_scan:
+                    counts["quota_skipped"] += 1
                     if contract in early_pattern_details:
                         early_filter_status[contract] = "Coinalyze scan quota reached; skipped this cycle"
                     continue
@@ -1149,12 +1155,14 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 coinalyze_check = coinalyze_derivatives_check(contract, state)
             if coinalyze_check.get("configured"):
                 if not coinalyze_check.get("valid"):
+                    counts["coinalyze_unavailable"] += 1
                     if contract in early_pattern_details:
                         early_filter_status[contract] = "Coinalyze data unavailable"
                     continue
                 aggregate_oi = float(coinalyze_check.get("oi_usd") or 0)
                 aggregate_funding = float(coinalyze_check["funding_rate"])
                 if aggregate_oi <= 0 or aggregate_oi / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
+                    counts["oi_rejected"] += 1
                     if contract in early_pattern_details:
                         early_filter_status[contract] = f"Coinalyze OI/MC rejected ({aggregate_oi/market_cap:.1%})"
                     continue
@@ -1207,7 +1215,13 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             if candidate is None:
                 candidate = detect_fib_pump(candles)
                 if not candidate:
-                    if contract in early_pattern_details: early_filter_status[contract] = "Pump pattern no longer valid in final scan"
+                    counts["pump_pattern_rejected"] += 1
+                    print(
+                        f"{contract}: LEG SPIKE passed volume/OI/funding but no strict recent "
+                        f"2-3 candle impulse met body>={FIB_MIN_BODY_PCT:.1f}% and "
+                        f"total-move>={FIB_MIN_TOTAL_PUMP_PCT:.1f}%"
+                    )
+                    if contract in early_pattern_details: early_filter_status[contract] = "Volume/OI/funding passed; impulse below Stage-2 threshold or too old"
                     continue
                 candidate.update({
                     "market_cap": market_cap, "volume24": total_market_volume,
