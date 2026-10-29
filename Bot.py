@@ -1233,13 +1233,13 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     candidates.pop(contract, None)
                     candidate = None
             if candidate is None:
-                candidate = detect_fib_pump(candles)
+                # Stage 2 uses early-impulse thresholds; Stage 3 still requires closed-candle Fib reaction and confirmations.
+                candidate = detect_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0)
                 if not candidate:
                     counts["pump_pattern_rejected"] += 1
                     print(
-                        f"{contract}: LEG SPIKE passed volume/OI/funding but no strict recent "
-                        f"2-3 candle impulse met body>={FIB_MIN_BODY_PCT:.1f}% and "
-                        f"total-move>={FIB_MIN_TOTAL_PUMP_PCT:.1f}%"
+                        f"{contract}: LEG SPIKE passed volume/OI/funding but no recent "
+                        "2-3 candle impulse met body>=0.6% and total-move>=3.0%"
                     )
                     if contract in early_pattern_details: early_filter_status[contract] = "Volume/OI/funding passed; impulse below Stage-2 threshold or too old"
                     continue
