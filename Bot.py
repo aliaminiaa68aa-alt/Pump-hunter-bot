@@ -852,48 +852,54 @@ def get_market_caps(state, requested_symbols=None):
     return caps, sorted(ambiguous)
 
 def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=FIB_MIN_TOTAL_PUMP_PCT):
-    """Find a recent 2- or 3-candle bullish impulse; early alerts may use softer thresholds."""
+    """Find a recent bullish impulse with a closed bullish FVG and at least two strong bodies."""
     if len(candles) < 10:
         return None
-    # Prefer the strongest recent sequence, but only start a setup if it is still recent.
     start_min = max(0, len(candles) - 7)
-    best = None
-    for end in range(len(candles) - 1, start_min + 1, -1):
-        for count in (3, 2):
-            start = end - count + 1
-            if start < start_min:
+    # A classic bullish FVG is confirmed when candle C's low is above candle A's high.
+    for end_idx in range(len(candles) - 1, max(start_min + 1, 1), -1):
+        first_idx = end_idx - 2
+        if first_idx < start_min:
+            continue
+        try:
+            a, b, c = candles[first_idx], candles[first_idx + 1], candles[end_idx]
+            if float(c["l"]) <= float(a["h"]) or float(c["c"]) <= float(c["o"]):
                 continue
-            seq = candles[start:end + 1]
-            bodies = []
-            valid = True
-            for candle in seq:
-                op = float(candle["o"])
-                cl = float(candle["c"])
-                body_pct = (cl / op - 1) * 100 if op else 0
-                if cl <= op or body_pct < min_body_pct:
-                    valid = False
-                    break
-                bodies.append(body_pct)
-            if not valid:
-                continue
-            low = min(float(x["l"]) for x in seq)
-            high = max(float(x["h"]) for x in seq)
-            total_pct = (high / low - 1) * 100 if low else 0
-            if total_pct < min_total_pump_pct or high <= low:
-                continue
-            # Candidate must have its latest impulse candle among the last 3 closed candles.
-            if end < len(candles) - 3:
-                continue
-            best = {
-                "start_time": str(seq[0].get("t", start)),
-                "end_time": str(seq[-1].get("t", end)),
-                "low": low, "high": high, "pump_pct": total_pct,
-                "body_count": count,
-                "fib50": high - (high - low) * 0.50,
-                "fib66": high - (high - low) * 0.66,
-            }
-            return best
-    return best
+            options = []
+            # Fib starts at the OPEN/body-start, not the wick low.
+            for anchor_idx in (first_idx, first_idx + 1):
+                seq = candles[anchor_idx:end_idx + 1]
+                strong = 0
+                for item in seq:
+                    op, cl = float(item["o"]), float(item["c"])
+                    if op > 0 and cl > op and (cl / op - 1) * 100 >= min_body_pct:
+                        strong += 1
+                if strong < 2:
+                    continue
+                body_start = float(seq[0]["o"])
+                high = max(float(item["h"]) for item in seq)
+                pump_pct = (high / body_start - 1) * 100 if body_start > 0 else 0
+                if pump_pct < min_total_pump_pct or high <= body_start:
+                    continue
+                options.append({
+                    "start_time": str(seq[0].get("t", anchor_idx)),
+                    "end_time": str(seq[-1].get("t", end_idx)),
+                    "low": body_start,
+                    "high": high,
+                    "pump_pct": pump_pct,
+                    "body_count": strong,
+                    "candle_count": len(seq),
+                    "fvg_low": float(a["h"]),
+                    "fvg_high": float(c["l"]),
+                    "fib50": high - (high - body_start) * 0.50,
+                    "fib66": high - (high - body_start) * 0.66,
+                })
+            if options:
+                options.sort(key=lambda x: (x["candle_count"], x["pump_pct"]), reverse=True)
+                return options[0]
+        except (TypeError, ValueError, KeyError, ZeroDivisionError):
+            continue
+    return None
 
 
 def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
