@@ -805,7 +805,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     counts = {
         "tickers": 0, "negative_funding": 0, "cap_available": 0,
         "early_scan_checked": 0, "early_patterns_seen": 0, "early_warnings_sent": 0,
-        "early_candle_errors": 0, "volume_pass": 0, "oi_pass": 0,
+        "early_duplicate_suppressed": 0, "early_recent_suppressed": 0, "early_candle_errors": 0, "volume_pass": 0, "oi_pass": 0,
         "pump_detected": 0, "ratio_pass": 0, "ratio_rejected": 0,
         "ratio_unavailable": 0, "fib_reactions": 0,
         "missing_cap": 0, "missing_market_volume": 0,
@@ -849,6 +849,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             early_key = str(early_candidate["end_time"])
             early_sent = state["fib_early_alerts"]
             if early_sent.get(contract) == early_key:
+                counts["early_duplicate_suppressed"] += 1
+                print(f"{contract}: LEG SPIKE early alert suppressed; same candle already alerted")
                 continue
             # Avoid duplicate early messages across LEG SPIKE and the regular strategy.
             recent_early = state.setdefault("early_any", {})
@@ -858,6 +860,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 last_early_time = 0
             if int(time.time()) - last_early_time < 3600:
                 early_sent[contract] = early_key
+                counts["early_recent_suppressed"] += 1
                 print(f"{contract}: LEG SPIKE early alert suppressed; another strategy alerted within 1h")
                 continue
             raw_funding = item.get("funding_rate")
