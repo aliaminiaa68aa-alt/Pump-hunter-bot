@@ -28,5 +28,4 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          TEST_TELEGRAM: ${{ github.event_name == 'push' && '1' || '0' }}
         run: timeout 240s python Bot.py
