@@ -169,123 +169,65 @@ def check_derivatives_data(tickers):
 
 
 
-COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY")
-COINALYZE_BASE = "https://api.coinalyze.net/v1"
-COINALYZE_EXCHANGE_PREFERENCE = ("BINANCE", "BYBIT", "OKX", "GATEIO", "BITGET")
-COINALYZE_MAX_CHECKS_PER_SCAN = 4
+
+BYBIT_BASE = "https://api.bybit.com"
 
 
-def coinalyze_get_json(path, params=None):
-    if not COINALYZE_API_KEY:
-        raise RuntimeError("COINALYZE_API_KEY is not configured")
-    headers = {"api_key": COINALYZE_API_KEY, "User-Agent": "PumpHunterBot/1.4"}
-    response = SESSION.get(COINALYZE_BASE + path, params=params, headers=headers, timeout=20)
+def bybit_get_json(path, params=None):
+    response = SESSION.get(BYBIT_BASE + path, params=params, timeout=15)
     response.raise_for_status()
-    return response.json()
+    payload = response.json()
+    if payload.get("retCode") != 0:
+        raise RuntimeError(f"Bybit API error: {payload.get('retMsg', payload)}")
+    return payload.get("result", {})
 
 
-def load_coinalyze_markets():
-    """Fetch official market mapping so symbols are never guessed."""
-    if not COINALYZE_API_KEY:
-        print("Coinalyze: disabled; COINALYZE_API_KEY secret is not set")
-        return None
-    try:
-        markets = coinalyze_get_json("/future-markets")
-        print(f"Coinalyze: loaded {len(markets)} futures markets")
-        return markets
-    except Exception as error:
-        print(f"Coinalyze market-list request failed: {type(error).__name__}: {error}")
-        return None
-
-
-def coinalyze_derivatives_check(contract, markets):
+def public_derivatives_check(contract):
     """
-    Cross-check OI and funding across up to three mapped stablecoin-margined
-    perpetual markets. Returns None when data is unavailable; callers should
-    fail closed when the API key is configured but data cannot be validated.
+    Validate the setup using Bybit's public linear-perpetual OI history and
+    funding endpoint. No API key is required. Gate.io remains the primary
+    price/candle source and its OI/funding are independently checked as well.
     """
-    if not COINALYZE_API_KEY:
-        return {"enabled": False}
-    if not markets:
-        return {"valid": False, "reason": "بازارهای Coinalyze در دسترس نیست"}
-
     base_asset = contract[:-5] if contract.endswith("_USDT") else contract
-    eligible = [
-        market for market in markets
-        if str(market.get("base_asset", "")).upper() == base_asset.upper()
-        and str(market.get("quote_asset", "")).upper() == "USDT"
-        and market.get("is_perpetual") is True
-        and str(market.get("margined", "")).upper() == "STABLE"
-    ]
-    eligible.sort(key=lambda market: (
-        COINALYZE_EXCHANGE_PREFERENCE.index(str(market.get("exchange", "")).upper())
-        if str(market.get("exchange", "")).upper() in COINALYZE_EXCHANGE_PREFERENCE
-        else len(COINALYZE_EXCHANGE_PREFERENCE),
-        str(market.get("exchange", "")).upper(),
-    ))
-    selected = []
-    seen_exchanges = set()
-    for market in eligible:
-        exchange = str(market.get("exchange", "")).upper()
-        symbol = market.get("symbol")
-        if not symbol or exchange in seen_exchanges:
-            continue
-        selected.append(market)
-        seen_exchanges.add(exchange)
-        if len(selected) >= 3:
-            break
-    if len(selected) < 2:
-        return {"valid": False, "reason": "کمتر از دو بازار USDT پرپچوال در Coinalyze پیدا شد"}
+    symbol = base_asset + "USDT"
+    try:
+        oi_result = bybit_get_json(
+            "/v5/market/open-interest",
+            {"category": "linear", "symbol": symbol, "intervalTime": "5min", "limit": 3},
+        )
+        rows = oi_result.get("list", [])
+        rows = sorted(rows, key=lambda row: int(row.get("timestamp", 0)))
+        rows = [row for row in rows if row.get("openInterest") not in (None, "")]
+        if len(rows) < 2:
+            return {"valid": False, "reason": "تاریخچه OI عمومی Bybit کافی نیست"}
 
-    now = int(time.time())
-    symbol_list = ",".join(str(market["symbol"]) for market in selected)
-    oi_data = coinalyze_get_json(
-        "/open-interest-history",
-        {"symbols": symbol_list, "interval": "5min", "from": now - 1800,
-         "to": now, "convert_to_usd": "true"},
-    )
-    funding_data = coinalyze_get_json("/funding-rate", {"symbols": symbol_list})
+        old_oi = float(rows[-2]["openInterest"])
+        new_oi = float(rows[-1]["openInterest"])
+        if old_oi <= 0:
+            return {"valid": False, "reason": "مقدار OI عمومی Bybit نامعتبر است"}
+        oi_change = (new_oi / old_oi - 1) * 100
 
-    oi_by_symbol = {item.get("symbol"): item for item in oi_data}
-    previous_total = 0.0
-    current_total = 0.0
-    oi_market_count = 0
-    for market in selected:
-        item = oi_by_symbol.get(market["symbol"], {})
-        history = item.get("history", [])
-        history = sorted(history, key=lambda row: int(row.get("t", 0)))
-        history = [row for row in history if row.get("c") not in (None, "")]
-        if len(history) < 2:
-            continue
-        previous_total += float(history[-2]["c"])
-        current_total += float(history[-1]["c"])
-        oi_market_count += 1
-
-    if oi_market_count < 2 or previous_total <= 0:
-        return {"valid": False, "reason": "تاریخچه OI چندصرافی کافی نیست"}
-
-    oi_change = (current_total / previous_total - 1) * 100
-    funding_values = [
-        float(item["value"]) for item in funding_data
-        if item.get("value") not in (None, "") and item.get("symbol") in {m["symbol"] for m in selected}
-    ]
-    if len(funding_values) < 2:
-        return {"valid": False, "reason": "Funding از حداقل دو صرافی دریافت نشد"}
-    average_funding = sum(funding_values) / len(funding_values)
-    return {
-        "valid": True,
-        "oi_change": oi_change,
-        "funding_rate": average_funding,
-        "oi_exchanges": oi_market_count,
-        "funding_exchanges": len(funding_values),
-        "exchanges": [str(market.get("exchange", "?")) for market in selected],
-    }
-
+        funding_result = bybit_get_json(
+            "/v5/market/funding/history",
+            {"category": "linear", "symbol": symbol, "limit": 1},
+        )
+        funding_rows = funding_result.get("list", [])
+        if not funding_rows or funding_rows[0].get("fundingRate") in (None, ""):
+            return {"valid": False, "reason": "Funding عمومی Bybit در دسترس نیست"}
+        funding_rate = float(funding_rows[0]["fundingRate"])
+        return {
+            "valid": True,
+            "oi_change": oi_change,
+            "funding_rate": funding_rate,
+            "symbol": symbol,
+        }
+    except Exception as error:
+        print(f"{contract}: public Bybit derivatives check failed: {type(error).__name__}: {error}")
+        return {"valid": False, "reason": "داده عمومی OI/Funding از Bybit دریافت نشد"}
 
 def scan():
     tickers = get_json("/futures/usdt/tickers")
     check_derivatives_data(tickers)
-    coinalyze_markets = load_coinalyze_markets()
     liquid = []
     print(f"Gate.io tickers received: {len(tickers)}")
     for item in tickers:
@@ -315,7 +257,7 @@ def scan():
     confirms1h = 0
     oi_checks = 0
     funding_checks = 0
-    coinalyze_checks = 0
+    public_derivatives_checks = 0
     now = int(time.time())
 
     for ticker, _turnover24h in coins:
@@ -448,35 +390,25 @@ def scan():
                 print(f"{contract}: skipped; funding is crowded at {funding_rate * 100:.4f}%")
                 continue
 
-            coinalyze_text = "Coinalyze: غیرفعال (کلید API تنظیم نشده)"
-            if COINALYZE_API_KEY:
-                if coinalyze_checks >= COINALYZE_MAX_CHECKS_PER_SCAN:
-                    print(f"{contract}: Coinalyze per-scan request budget reached; delaying confirmation")
-                    continue
-                coinalyze_checks += 1
-                try:
-                    cross_check = coinalyze_derivatives_check(contract, coinalyze_markets)
-                except Exception as error:
-                    print(f"{contract}: Coinalyze check failed: {type(error).__name__}: {error}")
-                    continue
-                if not cross_check or not cross_check.get("valid"):
-                    reason = cross_check.get("reason", "داده نامعتبر") if cross_check else "داده نامعتبر"
-                    print(f"{contract}: skipped; Coinalyze validation failed: {reason}")
-                    continue
-                aggregate_oi_change = float(cross_check["oi_change"])
-                aggregate_funding = float(cross_check["funding_rate"])
-                if aggregate_oi_change < 0.2:
-                    print(f"{contract}: skipped; Coinalyze aggregated OI change {aggregate_oi_change:+.3f}% below +0.2%")
-                    continue
-                if aggregate_funding >= 0.0005:
-                    print(f"{contract}: skipped; Coinalyze average funding crowded at {aggregate_funding * 100:.4f}%")
-                    continue
-                coinalyze_text = (
-                    f"Coinalyze OI چندصرافی: {aggregate_oi_change:+.2f}% "
-                    f"({cross_check['oi_exchanges']} صرافی) | "
-                    f"Funding میانگین: {aggregate_funding * 100:+.4f}% "
-                    f"({cross_check['funding_exchanges']} صرافی)"
-                )
+            # Independent public cross-check on Bybit, requiring both OI and funding.
+            public_derivatives_checks += 1
+            cross_check = public_derivatives_check(contract)
+            if not cross_check.get("valid"):
+                print(f"{contract}: skipped; public derivatives validation failed: {cross_check.get('reason', 'داده نامعتبر')}")
+                continue
+            public_oi_change = float(cross_check["oi_change"])
+            public_funding = float(cross_check["funding_rate"])
+            if public_oi_change < 0.2:
+                print(f"{contract}: skipped; Bybit OI change {public_oi_change:+.3f}% below +0.2%")
+                continue
+            if public_funding >= 0.0005:
+                print(f"{contract}: skipped; Bybit funding crowded at {public_funding * 100:.4f}%")
+                continue
+            derivatives_text = (
+                f"OI گیت: {oi_change:+.2f}% | Funding گیت: {funding_rate * 100:+.4f}%\n"
+                f"تأیید مستقل Bybit ({cross_check['symbol']}): OI {public_oi_change:+.2f}% | "
+                f"Funding {public_funding * 100:+.4f}%"
+            )
 
             # One final alert per impulse candle.
             if alerts_state.get(contract) == candidate["impulse_time"]:
@@ -503,8 +435,7 @@ def scan():
                 f"کندل ۱۵دقیقه: تأیید صعودی ({change15:+.2f}%)\n"
                 f"روند ۱ساعته: قیمت بالای EMA20 صعودی ({change1h_text})\n"
                 f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین\n"
-                f"تغییر OI گیت: {oi_change:+.2f}% | Funding گیت: {funding_text}\n"
-                f"{coinalyze_text}\n"
+                f"{derivatives_text}\n"
                 f"BTC در ۱۵دقیقه: {btc_text}\n\n"
                 f"ورود پیشنهادی: {entry}\n"
                 f"حد ضرر پیشنهادی زیر کف پول‌بک: {stop}\n"
@@ -526,7 +457,7 @@ def scan():
         f"Diagnostics: candle_checks={candle_checks}, recent_impulses={recent_impulses}, "
         f"bos_confirmations={bos_checks}, confirmations_15m={confirms15}, "
         f"confirmations_1h={confirms1h}, oi_checks={oi_checks}, funding_checks={funding_checks}, "
-        f"coinalyze_checks={coinalyze_checks}"
+        f"public_derivatives_checks={public_derivatives_checks}"
     )
     print(f"Scan finished. Confirmed entry alerts sent: {alerts}")
 
