@@ -107,6 +107,9 @@ def load_alert_state():
     if "alerts" not in data or "candidates" not in data:
         data = {"alerts": data if isinstance(data, dict) else {}, "candidates": {}}
     data.setdefault("early_alerts", {})
+    data.setdefault("fib_candidates", {})
+    data.setdefault("fib_alerts", {})
+    data.setdefault("market_cap_cache", {})
     return data
 
 
@@ -227,6 +230,209 @@ def public_derivatives_check(contract):
         print(f"{contract}: public Bybit derivatives check failed: {type(error).__name__}: {error}")
         return {"valid": False, "reason": "داده عمومی OI/Funding از Bybit دریافت نشد"}
 
+
+# Fibonacci pullback strategy configuration.
+# "Several times market cap" is set to >=2x by default and can be tuned here.
+FIB_MIN_VOLUME_TO_MARKET_CAP = 2.0
+FIB_MAX_OI_TO_MARKET_CAP = 0.50
+FIB_MIN_BODY_PCT = 0.8
+FIB_MIN_TOTAL_PUMP_PCT = 4.0
+COINGECKO_BASE = "https://api.coingecko.com/api/v3"
+
+
+def get_market_caps(state):
+    """Cache CoinGecko market caps for 15 minutes; exclude ambiguous duplicate symbols."""
+    cache = state.get("market_cap_cache", {})
+    now = int(time.time())
+    if cache.get("fetched_at") and now - int(cache["fetched_at"]) < 900:
+        return cache.get("caps", {}), cache.get("ambiguous", [])
+    all_rows = []
+    try:
+        # Four pages cover the first 1,000 assets by market cap; avoid a request per coin.
+        for page in range(1, 5):
+            response = SESSION.get(
+                f"{COINGECKO_BASE}/coins/markets",
+                params={"vs_currency": "usd", "order": "market_cap_desc",
+                        "per_page": 250, "page": page, "sparkline": "false"},
+                timeout=20,
+            )
+            response.raise_for_status()
+            rows = response.json()
+            if not isinstance(rows, list):
+                raise RuntimeError("CoinGecko market-cap response was not a list")
+            all_rows.extend(rows)
+            time.sleep(0.25)
+        by_symbol = {}
+        ambiguous = set()
+        for row in all_rows:
+            symbol = str(row.get("symbol", "")).upper()
+            cap = row.get("market_cap")
+            if not symbol or not cap or float(cap) <= 0:
+                continue
+            if symbol in by_symbol:
+                ambiguous.add(symbol)
+            else:
+                by_symbol[symbol] = float(cap)
+        for symbol in ambiguous:
+            by_symbol.pop(symbol, None)
+        state["market_cap_cache"] = {
+            "fetched_at": now, "caps": by_symbol, "ambiguous": sorted(ambiguous)
+        }
+        print(f"CoinGecko market-cap cache refreshed: {len(by_symbol)} unique symbols; {len(ambiguous)} ambiguous")
+        return by_symbol, sorted(ambiguous)
+    except Exception as error:
+        print(f"CoinGecko market-cap lookup unavailable: {type(error).__name__}: {error}")
+        # Use a still-existing cache if available; otherwise fail closed for this filter.
+        return cache.get("caps", {}), cache.get("ambiguous", [])
+
+
+def detect_fib_pump(candles):
+    """Find a 2- or 3-candle bullish impulse with large bodies among recent closed 5m candles."""
+    if len(candles) < 10:
+        return None
+    # Prefer the strongest recent sequence, but only start a setup if it is still recent.
+    start_min = max(0, len(candles) - 7)
+    best = None
+    for end in range(len(candles) - 1, start_min + 1, -1):
+        for count in (3, 2):
+            start = end - count + 1
+            if start < start_min:
+                continue
+            seq = candles[start:end + 1]
+            bodies = []
+            valid = True
+            for candle in seq:
+                op = float(candle["o"])
+                cl = float(candle["c"])
+                body_pct = (cl / op - 1) * 100 if op else 0
+                if cl <= op or body_pct < FIB_MIN_BODY_PCT:
+                    valid = False
+                    break
+                bodies.append(body_pct)
+            if not valid:
+                continue
+            low = min(float(x["l"]) for x in seq)
+            high = max(float(x["h"]) for x in seq)
+            total_pct = (high / low - 1) * 100 if low else 0
+            if total_pct < FIB_MIN_TOTAL_PUMP_PCT or high <= low:
+                continue
+            # Candidate must have its latest impulse candle among the last 3 closed candles.
+            if end < len(candles) - 3:
+                continue
+            best = {
+                "start_time": str(seq[0].get("t", start)),
+                "end_time": str(seq[-1].get("t", end)),
+                "low": low, "high": high, "pump_pct": total_pct,
+                "body_count": count,
+                "fib50": high - (high - low) * 0.50,
+                "fib66": high - (high - low) * 0.66,
+            }
+            return best
+    return best
+
+
+def scan_fib_pullbacks(tickers, state):
+    """Send separate Fib 0.5/0.66 pullback alerts only when derivatives/market-cap filters pass."""
+    caps, ambiguous = get_market_caps(state)
+    candidates = state["fib_candidates"]
+    sent = state["fib_alerts"]
+    checked = 0
+    for ticker in tickers:
+        contract = ticker.get("contract", "")
+        if not contract.endswith("_USDT"):
+            continue
+        try:
+            volume24 = float(ticker.get("volume_24h_quote") or ticker.get("volume_24h_usd") or 0)
+            funding = float(ticker.get("funding_rate"))
+            symbol = contract[:-5].upper()
+            if funding >= 0:
+                continue
+            market_cap = caps.get(symbol)
+            if not market_cap or symbol in ambiguous:
+                continue
+            if volume24 / market_cap < FIB_MIN_VOLUME_TO_MARKET_CAP:
+                continue
+
+            # Gate.io contract_stats reports open_interest_usd in quote-currency terms.
+            stats = get_json(
+                "/futures/usdt/contract_stats",
+                {"contract": contract, "from": int(time.time()) - 300,
+                 "interval": "5m", "limit": 2},
+            )
+            stats = sorted(stats, key=lambda row: int(row.get("time", 0)))
+            oi_usd = None
+            for row in reversed(stats):
+                value = row.get("open_interest_usd")
+                if value not in (None, ""):
+                    oi_usd = float(value)
+                    break
+            if oi_usd is None or oi_usd / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
+                continue
+
+            candles = closed_candles(contract, "5m", 20)
+            if len(candles) < 10:
+                continue
+            checked += 1
+            candidate = candidates.get(contract)
+            if candidate:
+                try:
+                    end_time = int(candidate["end_time"])
+                    if int(candles[-1]["t"]) - end_time > 3600:
+                        candidates.pop(contract, None)
+                        candidate = None
+                except (TypeError, ValueError, KeyError):
+                    candidates.pop(contract, None)
+                    candidate = None
+            if candidate is None:
+                candidate = detect_fib_pump(candles)
+                if not candidate:
+                    continue
+                candidate.update({
+                    "market_cap": market_cap, "volume24": volume24,
+                    "oi_usd": oi_usd, "funding": funding,
+                })
+                candidates[contract] = candidate
+
+            price = float(candles[-1]["c"])
+            low = float(candidate["low"])
+            high = float(candidate["high"])
+            # Invalidate if the impulse floor is breached or the target high has already broken.
+            if price <= low:
+                candidates.pop(contract, None)
+                continue
+            levels = (("0.50", float(candidate["fib50"])), ("0.66", float(candidate["fib66"])))
+            for level_name, level in levels:
+                alert_key = f'{candidate["end_time"]}:{level_name}'
+                if sent.get(contract) == alert_key:
+                    continue
+                # Trigger only on a genuine retracement from above the level to/through it.
+                previous_close = float(candles[-2]["c"])
+                if previous_close > level and price <= level and price > low:
+                    risk = level - low
+                    reward = high - level
+                    if risk <= 0:
+                        continue
+                    message = (
+                        f"🎯 ستاپ فیبوناچی پامپ: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
+                        f"اصلاح به فیبو {level_name}؛ ورود پیشنهادی: {level:.10g}\n"
+                        f"سقف پامپ/هدف: {high:.10g} | کف پامپ/حد ضرر: {low:.10g}\n"
+                        f"حرکت پامپ: {float(candidate['pump_pct']):.2f}% با {int(candidate['body_count'])} کندل بدنه‌بزرگ ۵دقیقه‌ای\n"
+                        f"Funding: {funding * 100:+.4f}% (منفی)\n"
+                        f"حجم ۲۴ساعته/مارکت‌کپ: {volume24 / market_cap:.2f}x (حداقل {FIB_MIN_VOLUME_TO_MARKET_CAP:.1f}x)\n"
+                        f"OI/مارکت‌کپ: {oi_usd / market_cap:.2%} (حداکثر {FIB_MAX_OI_TO_MARKET_CAP:.0%})\n"
+                        f"نسبت سود به ریسک تا سقف: {reward / risk:.2f}:1\n"
+                        "⚠️ هشدار الگوریتمی است؛ ورود تضمینی نیست. در ورود فیبو 0.66 نسبت سود به ریسک ممکن است ضعیف باشد."
+                    )
+                    send_message(message)
+                    sent[contract] = alert_key
+                    print(f"Fib pullback alert sent: {contract} fib={level_name}")
+                    # One alert per coin per run to avoid duplicate messages.
+                    break
+        except Exception as error:
+            print(f"{contract}: Fib strategy skipped: {type(error).__name__}: {error}")
+    print(f"Fib strategy diagnostics: candidates_checked={checked}, active={len(candidates)}")
+
+
 def scan():
     tickers = get_json("/futures/usdt/tickers")
     check_derivatives_data(tickers)
@@ -264,6 +470,8 @@ def scan():
         print("BTC filter: paused confirmed entry alerts due to a sharply bearish 15m candle.")
         save_alert_state(state)
         return
+
+    scan_fib_pullbacks(coins and [item[0] for item in coins], state)
 
     alerts = 0
     candle_checks = 0
