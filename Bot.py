@@ -442,6 +442,7 @@ def scan_fib_pullbacks(tickers, state):
     early_candle_cache = {}
     early_pattern_samples = []
     early_pattern_details = {}
+    early_filter_status = {}
 
     # Early heads-up scan is deliberately independent of funding, market-cap,
     # volume/MC, OI and long/short filters. Those remain mandatory for confirmed entries.
@@ -518,21 +519,26 @@ def scan_fib_pullbacks(tickers, state):
             volume24 = float(raw_volume)
             raw_funding = ticker.get("funding_rate")
             if raw_funding in (None, ""):
+                if contract in early_pattern_details: early_filter_status[contract] = "Funding missing"
                 continue
             funding = float(raw_funding)
             if funding >= 0:
+                if contract in early_pattern_details: early_filter_status[contract] = f"Funding non-negative ({funding*100:+.4f}%)"
                 continue
+            if contract in early_pattern_details: early_filter_status[contract] = "Funding passed; checking market cap"
             counts["negative_funding"] += 1
 
             symbol = contract[:-5].upper()
             market_cap = caps.get(symbol)
             if not market_cap or symbol in ambiguous:
                 counts["missing_cap"] += 1
+                if contract in early_pattern_details: early_filter_status[contract] = "Market cap missing/ambiguous"
                 continue
             counts["cap_available"] += 1
             total_market_volume = market_volumes.get(symbol)
             if not total_market_volume or float(total_market_volume) <= 0:
                 counts["missing_market_volume"] += 1
+                if contract in early_pattern_details: early_filter_status[contract] = "CoinGecko 24h volume missing"
                 continue
             # Use CoinGecko aggregate 24h market volume, not Gate.io-only turnover.
             total_market_volume = float(total_market_volume)
@@ -540,8 +546,10 @@ def scan_fib_pullbacks(tickers, state):
             volume_samples.append((volume_mc, contract, total_market_volume, market_cap, funding))
 
             if volume_mc < FIB_MIN_VOLUME_TO_MARKET_CAP:
+                if contract in early_pattern_details: early_filter_status[contract] = f"Volume/MC rejected ({volume_mc:.3f}x)"
                 continue
             counts["volume_pass"] += 1
+            if contract in early_pattern_details: early_filter_status[contract] = "Volume/MC passed; checking OI"
 
             stats = get_json(
                 "/futures/usdt/contract_stats",
@@ -556,8 +564,11 @@ def scan_fib_pullbacks(tickers, state):
                     oi_usd = float(value)
                     break
             if oi_usd is None or oi_usd / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
+                if contract in early_pattern_details:
+                    early_filter_status[contract] = "OI missing" if oi_usd is None else f"OI/MC rejected ({oi_usd/market_cap:.1%})"
                 continue
             counts["oi_pass"] += 1
+            if contract in early_pattern_details: early_filter_status[contract] = "OI passed; checking pump"
 
             candles = early_candle_cache.get(contract)
             if candles is None:
@@ -577,6 +588,7 @@ def scan_fib_pullbacks(tickers, state):
             if candidate is None:
                 candidate = detect_fib_pump(candles)
                 if not candidate:
+                    if contract in early_pattern_details: early_filter_status[contract] = "Pump pattern no longer valid in final scan"
                     continue
                 candidate.update({
                     "market_cap": market_cap, "volume24": total_market_volume,
@@ -593,6 +605,8 @@ def scan_fib_pullbacks(tickers, state):
             # market-cap/volume/OI checks and an actual impulse exists.
             ls = leg_spike_long_short_filter(contract)
             if not ls.get("valid") or not ls.get("passed"):
+                if contract in early_pattern_details:
+                    early_filter_status[contract] = ("Long/short ratio rejected" if ls.get("valid") else "OKX ratio data unavailable")
                 if ls.get("valid"):
                     counts["ratio_rejected"] += 1
                     print(
@@ -604,6 +618,7 @@ def scan_fib_pullbacks(tickers, state):
                     counts["ratio_unavailable"] += 1
                 continue
             counts["ratio_pass"] += 1
+            if contract in early_pattern_details: early_filter_status[contract] = "Data filters passed; waiting for closed-candle Fib reaction"
 
             price = float(candles[-1]["c"])
             low = float(candidate["low"])
@@ -669,6 +684,7 @@ def scan_fib_pullbacks(tickers, state):
         ratio_label = f"{float(volume) / float(cap):.3f}x" if cap and volume and symbol not in ambiguous else "missing/ambiguous"
         early_filter_snapshot.append(f"{contract}: funding={funding_label}, vol/MC={ratio_label}")
     print("LEG SPIKE early-pattern filter snapshot: " + ("; ".join(early_filter_snapshot) or "none"))
+    print("LEG SPIKE early-pattern filter results: " + ("; ".join(f"{k}={v}" for k, v in early_filter_status.items()) or "none"))
     print(f"LEG SPIKE highest volume/market-cap candidates: {top_volume}")
 
 def scan():
