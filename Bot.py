@@ -657,7 +657,18 @@ def scan_fib_pullbacks(tickers, state):
         f", active={len(candidates)}, caps_cached={len(caps)}, ambiguous_symbols={len(ambiguous)}"
     )
     print("LEG SPIKE early-pattern samples: " + ("; ".join(early_pattern_samples) or "none"))
-    print("LEG SPIKE early-pattern filter snapshot: " + ("; ".join(f"{k}: funding={next((float(t.get(chr(102)+chr(117)+chr(110)+chr(100)+chr(105)+chr(110)+chr(103)+chr(95)+chr(114)+chr(97)+chr(116)+chr(101)))*100 for t in tickers if t.get(chr(99)+chr(111)+chr(110)+chr(116)+chr(114)+chr(97)+chr(99)+chr(116)) == k and t.get(chr(102)+chr(117)+chr(110)+chr(100)+chr(105)+chr(110)+chr(103)+chr(95)+chr(114)+chr(97)+chr(116)+chr(101)) not in (None, chr(34)+chr(34))), None)}%, vol/MC={((market_volumes.get(k[:-5].upper(), 0) / caps.get(k[:-5].upper(), 1)) if caps.get(k[:-5].upper()) and market_volumes.get(k[:-5].upper()) else 0):.3f}x" for k in early_pattern_details) or "none"))
+    early_filter_snapshot = []
+    ticker_by_contract = {item.get("contract", ""): item for item in tickers}
+    for contract, impulse in early_pattern_details.items():
+        item = ticker_by_contract.get(contract, {})
+        raw_funding = item.get("funding_rate")
+        symbol = contract[:-5].upper()
+        cap = caps.get(symbol)
+        volume = market_volumes.get(symbol)
+        funding_label = "missing" if raw_funding in (None, "") else f"{float(raw_funding) * 100:+.4f}%"
+        ratio_label = f"{float(volume) / float(cap):.3f}x" if cap and volume and symbol not in ambiguous else "missing/ambiguous"
+        early_filter_snapshot.append(f"{contract}: funding={funding_label}, vol/MC={ratio_label}")
+    print("LEG SPIKE early-pattern filter snapshot: " + ("; ".join(early_filter_snapshot) or "none"))
     print(f"LEG SPIKE highest volume/market-cap candidates: {top_volume}")
 
 def scan():
