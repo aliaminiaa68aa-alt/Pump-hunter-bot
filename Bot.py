@@ -434,7 +434,8 @@ def scan_fib_pullbacks(tickers, state):
         "tickers": 0, "negative_funding": 0, "cap_available": 0,
         "early_scan_checked": 0, "early_patterns_seen": 0, "early_warnings_sent": 0,
         "early_candle_errors": 0, "volume_pass": 0, "oi_pass": 0,
-        "pump_detected": 0, "ratio_pass": 0, "fib_reactions": 0,
+        "pump_detected": 0, "ratio_pass": 0, "ratio_rejected": 0,
+        "ratio_unavailable": 0, "fib_reactions": 0,
         "missing_cap": 0, "missing_market_volume": 0,
     }
     volume_samples = []
@@ -481,8 +482,11 @@ def scan_fib_pullbacks(tickers, state):
                 funding_text = "نامعتبر"
             symbol = contract[:-5].upper()
             cap = caps.get(symbol)
-            volume24 = _turnover
-            vol_mc_text = f"{volume24 / float(cap):.3f}x" if cap and symbol not in ambiguous else "ناموجود"
+            total_market_volume = market_volumes.get(symbol)
+            vol_mc_text = (
+                f"{float(total_market_volume) / float(cap):.3f}x"
+                if cap and total_market_volume and symbol not in ambiguous else "ناموجود"
+            )
             early_message = (
                 f"👀 هشدار اولیه LEG SPIKE؛ هنوز تأیید نشده: {contract.replace('_', '/')}\\n"
                 f"حرکت شناسایی‌شده: {float(early_candidate['pump_pct']):.2f}% "
@@ -588,11 +592,14 @@ def scan_fib_pullbacks(tickers, state):
             ls = leg_spike_long_short_filter(contract)
             if not ls.get("valid") or not ls.get("passed"):
                 if ls.get("valid"):
+                    counts["ratio_rejected"] += 1
                     print(
                         f"{contract}: LEG SPIKE ratio rejected; "
                         f"15m={ls['ratio_15m']:.1f}%, 1h={ls['ratio_1h']:.1f}%, "
                         f"1d={ls['ratio_1d']:.1f}%"
                     )
+                else:
+                    counts["ratio_unavailable"] += 1
                 continue
             counts["ratio_pass"] += 1
 
