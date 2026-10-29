@@ -1030,6 +1030,51 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     top_alerts[contract] = top_key
                     print(f"{contract}: Stage-1 top-break alert sent at {top_price:.10g}")
 
+            # Monitor the saved Stage-1 impulse on every scan, before derivatives
+            # gates. The user wants a top-touch/break alert, not a filtered entry call.
+            tracked_for_top = candidates.get(contract) or early_candidate
+            try:
+                top_low = float(tracked_for_top["low"])
+                top_high = float(tracked_for_top["high"])
+                top_end = int(tracked_for_top["end_time"])
+                top_price = float(candles[-1]["c"])
+                top_state = state.setdefault("fib_top_alerts", {})
+                top_key_stage1 = str(top_end)
+                if top_price <= top_low:
+                    if contract in candidates:
+                        candidates.pop(contract, None)
+                    print(f"{contract}: LEG SPIKE invalidated at Stage 1; impulse low breached")
+                elif top_state.get(contract) != top_key_stage1:
+                    top_break_candle = None
+                    for candle_idx in range(1, len(candles)):
+                        prev_candle, closed_candle = candles[candle_idx - 1], candles[candle_idx]
+                        try:
+                            if int(closed_candle["t"]) <= top_end:
+                                continue
+                            if float(prev_candle["c"]) < top_high and float(closed_candle["h"]) >= top_high:
+                                top_break_candle = closed_candle
+                        except (TypeError, ValueError, KeyError):
+                            continue
+                    if top_break_candle is not None:
+                        confirmed_top = float(top_break_candle["h"])
+                        top_message = (
+                            "🚀 LEG SPIKE | هشدار رسیدن به سقف پامپ\\n"
+                            "🟢━━━━━━━━━━━━━━━━━━🟢\\n"
+                            "🔔 قیمت به سقف حرکت شناسایی‌شده رسید/آن را شکست\\n"
+                            f"🪙 ارز: {contract.replace('_', '/')}\\n"
+                            f"🎯 سقف حرکت: {top_high:.10g}\\n"
+                            f"📍 بیشترین قیمت کندل تأیید: {confirmed_top:.10g}\\n"
+                            f"💰 آخرین قیمت بسته‌شده: {top_price:.10g}\\n"
+                            f"📈 اندازه حرکت: {float(tracked_for_top['pump_pct']):.2f}% در {int(tracked_for_top['body_count'])} کندل ۵دقیقه‌ای\\n"
+                            "⚠️ این هشدار فقط رسیدن/شکست سقف را اعلام می‌کند؛ نقطه ورود، حدضرر و تارگت را خودت تعیین کن.\\n"
+                            "🟢━━━━━━━━━━━━━━━━━━🟢"
+                        )
+                        send_message(top_message)
+                        top_state[contract] = top_key_stage1
+                        print(f"{contract}: Stage-1 top-break alert sent at {confirmed_top:.10g}")
+            except (TypeError, ValueError, KeyError, IndexError) as error:
+                print(f"{contract}: Stage-1 top monitor skipped: {error}")
+
             if len(early_pattern_samples) < 8:
                 early_pattern_samples.append(
                     f"{contract}:{early_candidate['pump_pct']:.2f}%/{early_candidate['body_count']}c"
@@ -1384,56 +1429,13 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     f"💵 تغییر ۲۴ساعته: {change24_text} | 💧 حجم/مارکت‌کپ: {volume_mc:.2f}x\n"
                     f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} | OI چهار‌ساعته: {oi4_message}\n"
                     f"💸 Funding: {funding * 100:+.4f}%\n"
-                    f"🎯 محدوده پول‌بک فیبو: {float(candidate['fib66']):.10g} تا {float(candidate['fib50']):.10g}\n"
-                    "⏳ هنوز نقطه ورود نیست؛ منتظر واکنش کندل بسته‌شده در فیبو و تأیید لانگ/شورت می‌مانیم.\n"
+                    f"🎯 سقف حرکت شناسایی‌شده: {float(candidate['high']):.10g}\n"
+                    "⏳ این هشدار تأیید قدرت ستاپ است؛ منتظر هشدار رسیدن/شکست سقف باشید و نقطه ورود را خودتان تعیین کنید.\n"
                     "🟠━━━━━━━━━━━━━━━━━━🟠"
                 )
                 send_message(watch_message)
                 setup_sent[contract] = setup_key
                 print(f"{contract}: stage-2 setup alert sent")
-            # User-requested trigger: alert when price revisits/breaks the impulse top.
-            # This is a WATCH/SIGNAL alert, not an entry recommendation; the user chooses entry.
-            # It is independent of Fib and is allowed even when the BTC final-entry filter pauses.
-            price = float(candles[-1]["c"])
-            low = float(candidate["low"])
-            high = float(candidate["high"])
-            if price <= low:
-                candidates.pop(contract, None)
-                print(f"{contract}: LEG SPIKE invalidated; impulse low breached")
-                continue
-
-            top_alerts = state.setdefault("fib_top_alerts", {})
-            top_key = str(candidate["end_time"])
-            if top_alerts.get(contract) != top_key:
-                top_break_candle = None
-                # Require a CLOSED candle after the detected impulse to touch/break its high,
-                # with the preceding closed candle still below that high.
-                for idx in range(1, len(candles)):
-                    prev_candle, closed_candle = candles[idx - 1], candles[idx]
-                    try:
-                        if int(closed_candle["t"]) <= int(candidate["end_time"]):
-                            continue
-                        if float(prev_candle["c"]) < high and float(closed_candle["h"]) >= high:
-                            top_break_candle = closed_candle
-                    except (TypeError, ValueError, KeyError):
-                        continue
-                if top_break_candle is not None:
-                    top_price = float(top_break_candle["h"])
-                    top_message = (
-                        "🚀 LEG SPIKE | هشدار رسیدن به سقف پامپ\\n"
-                        "🟢━━━━━━━━━━━━━━━━━━🟢\\n"
-                        "🔔 قیمت به سقف حرکت شناسایی‌شده رسید/آن را شکست\\n"
-                        f"🪙 ارز: {contract.replace('_', '/')}\\n"
-                        f"🎯 سقف حرکت: {high:.10g}\\n"
-                        f"📍 بیشترین قیمت کندل تأیید: {top_price:.10g}\\n"
-                        f"💰 آخرین قیمت بسته‌شده: {price:.10g}\\n"
-                        f"📈 اندازه حرکت شناسایی‌شده: {float(candidate['pump_pct']):.2f}% در {int(candidate['body_count'])} کندل ۵دقیقه‌ای\\n"
-                        "⚠️ این هشدار فقط رسیدن/شکست سقف را اعلام می‌کند؛ نقطه ورود، حدضرر و تارگت را خودت تعیین کن.\\n"
-                        "🟢━━━━━━━━━━━━━━━━━━🟢"
-                    )
-                    send_message(top_message)
-                    top_alerts[contract] = top_key
-                    print(f"{contract}: LEG SPIKE top-break alert sent at {top_price:.10g}")
             # Do not wait for Fibonacci or emit an algorithmic Fib entry. The user will
             # determine the actual entry manually after the top-break alert.
             continue
