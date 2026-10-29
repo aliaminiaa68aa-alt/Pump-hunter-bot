@@ -4,7 +4,7 @@ import requests
 
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-BASE = "https://fapi1.binance.com"
+BASE = "https://api.gateio.ws/api/v4"
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "PumpHunterBot/1.3"})
 
@@ -29,29 +29,17 @@ def get_json(path, params=None):
 
 def closed_candles(contract, interval, limit):
     raw = get_json(
-        "/fapi/v1/klines",
-        {"symbol": contract, "interval": interval, "limit": limit},
+        "/futures/usdt/candlesticks",
+        {"contract": contract, "interval": interval, "limit": limit},
     )
-    # Binance kline rows: open time, OHLC, volume, close time, quote volume, ...
-    candles = [
-        {
-            "t": int(row[0]) // 1000,
-            "o": row[1],
-            "h": row[2],
-            "l": row[3],
-            "c": row[4],
-            "v": row[5],
-            "sum": row[7],
-        }
-        for row in raw
-    ]
-    # Binance includes the currently forming candle as the final row.
+    candles = sorted(raw, key=lambda candle: int(candle["t"]))
+    # Gate.io includes the currently forming candle; discard it.
     return candles[:-1]
 
 
 def btc_market_filter():
     """Avoid new alerts when the last closed 15m BTC candle is sharply bearish."""
-    candles = closed_candles("BTCUSDT", "15m", 4)
+    candles = closed_candles("BTC_USDT", "15m", 4)
     if len(candles) < 2:
         print("BTC filter: insufficient 15m candle data; allowing scan")
         return True, None
@@ -156,23 +144,16 @@ def find_recent_impulse(candles):
 
 
 def scan():
-    tickers = get_json("/fapi/v1/ticker/24hr")
-    exchange_info = get_json("/fapi/v1/exchangeInfo")
-    perpetual_usdt = {
-        item["symbol"] for item in exchange_info.get("symbols", [])
-        if item.get("status") == "TRADING"
-        and item.get("contractType") == "PERPETUAL"
-        and item.get("quoteAsset") == "USDT"
-    }
+    tickers = get_json("/futures/usdt/tickers")
     liquid = []
-    print(f"Binance USDⓈ-M tickers received: {len(tickers)}")
+    print(f"Gate.io tickers received: {len(tickers)}")
     for item in tickers:
-        contract = item.get("symbol", "")
-        turnover24 = float(item.get("quoteVolume") or 0)
-        if contract in perpetual_usdt and turnover24 >= 1_000_000:
+        contract = item.get("contract", "")
+        turnover24 = float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or item.get("volume_24h") or 0)
+        if contract.endswith("_USDT") and turnover24 >= 1_000_000:
             liquid.append((item, turnover24))
     coins = sorted(liquid, key=lambda pair: pair[1], reverse=True)[:100]
-    print(f"Binance liquid USDT perpetual contracts checked: {len(coins)}")
+    print(f"Gate.io liquid contracts checked: {len(coins)}")
 
     state = load_alert_state()
     alerts_state = state["alerts"]
@@ -277,17 +258,17 @@ def scan():
             confirms1h += 1
 
             oi_rows = get_json(
-                "/futures/data/openInterestHist",
-                {"symbol": contract, "period": "5m", "limit": 3},
+                "/futures/usdt/contract_stats",
+                {"contract": contract, "from": now - 900, "to": now, "interval": "5m", "limit": 3},
             )
-            oi_rows = sorted(oi_rows, key=lambda row: int(row.get("timestamp", 0)))
-            oi_rows = [row for row in oi_rows if row.get("sumOpenInterest") not in (None, "")]
+            oi_rows = sorted(oi_rows, key=lambda row: int(row.get("time", 0)))
+            oi_rows = [row for row in oi_rows if row.get("open_interest") not in (None, "")]
             if len(oi_rows) < 2:
-                print(f"{contract}: not enough Binance OI history")
+                print(f"{contract}: not enough OI history")
                 continue
             oi_checks += 1
-            old_oi = float(oi_rows[-2]["sumOpenInterest"])
-            new_oi = float(oi_rows[-1]["sumOpenInterest"])
+            old_oi = float(oi_rows[-2]["open_interest"])
+            new_oi = float(oi_rows[-1]["open_interest"])
             if old_oi <= 0:
                 continue
             oi_change = (new_oi / old_oi - 1) * 100
@@ -311,7 +292,7 @@ def scan():
             tp2 = entry + 2 * risk
             btc_text = f"{btc_change:+.2f}%" if btc_change is not None else "نامشخص"
             change1h_text = f"{change1h:+.2f}%" if change1h is not None else "نامشخص"
-            raw_funding = get_json("/fapi/v1/premiumIndex", {"symbol": contract}).get("lastFundingRate")
+            raw_funding = ticker.get("funding_rate")
             try:
                 funding_pct = float(raw_funding) * 100 if raw_funding not in (None, "") else None
             except (TypeError, ValueError):
@@ -319,7 +300,7 @@ def scan():
             funding_text = f"{funding_pct:+.4f}%" if funding_pct is not None else "نامشخص"
 
             message = (
-                f"✅ تأیید نهایی ستاپ صعودی: {contract.replace('USDT', '/USDT')} (Binance USDⓈ-M Perpetual)\n"
+                f"✅ تأیید نهایی ستاپ صعودی: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                 f"شکست ساختار ۵دقیقه‌ای ثبت شده و قیمت بالای سطح شکست است\n"
                 f"کندل ۱۵دقیقه: تأیید صعودی ({change15:+.2f}%)\n"
                 f"روند ۱ساعته: قیمت بالای EMA20 صعودی ({change1h_text})\n"
