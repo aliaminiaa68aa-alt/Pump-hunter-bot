@@ -1055,11 +1055,10 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
         print("BTC filter: keeping LEG SPIKE Stage-2 monitoring active; only final-entry alerts are paused.")
 
     coinalyze_checks_this_scan = 0
-    # Prioritize active early-pattern symbols for derivative validation. Each
-    # candidate uses a small bundle of Coinalyze endpoints (OI, 4h OI history,
-    # funding); 8 candidates stays below the documented 40 calls/minute budget
-    # in a normal scan and reduces starvation of tracked Stage-1 setups.
-    max_coinalyze_checks_per_scan = 8
+    # Coinalyze's practical endpoint quota was hit when checking 8 symbols
+    # in one scan (HTTP 429 on OI history). Keep the per-scan budget conservative;
+    # tracked Stage-1 candidates are already ranked ahead of general symbols.
+    max_coinalyze_checks_per_scan = 5
     def _turnover_rank(item):
         try:
             return float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0)
