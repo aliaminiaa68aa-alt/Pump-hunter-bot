@@ -110,6 +110,8 @@ def load_alert_state():
     data.setdefault("fib_candidates", {})
     data.setdefault("fib_alerts", {})
     data.setdefault("fib_early_alerts", {})
+    data.setdefault("early_any", {})
+    data.setdefault("setup_alerts", {})
     data.setdefault("market_cap_cache", {})
     return data
 
@@ -638,6 +640,16 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             early_sent = state["fib_early_alerts"]
             if early_sent.get(contract) == early_key:
                 continue
+            # Avoid duplicate early messages across LEG SPIKE and the regular strategy.
+            recent_early = state.setdefault("early_any", {})
+            try:
+                last_early_time = int(recent_early.get(contract, 0))
+            except (TypeError, ValueError):
+                last_early_time = 0
+            if int(time.time()) - last_early_time < 3600:
+                early_sent[contract] = early_key
+                print(f"{contract}: LEG SPIKE early alert suppressed; another strategy alerted within 1h")
+                continue
             raw_funding = item.get("funding_rate")
             try:
                 funding_text = f"{float(raw_funding) * 100:+.4f}%" if raw_funding not in (None, "") else "ناموجود"
@@ -662,6 +674,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             )
             send_message(early_message)
             early_sent[contract] = early_key
+            recent_early[contract] = int(time.time())
             counts["early_warnings_sent"] += 1
             print(f"LEG SPIKE early warning sent: {contract}; pump={early_candidate['pump_pct']:.2f}%")
         except Exception as error:
@@ -972,16 +985,26 @@ def scan():
 
             # Send one early heads-up per impulse, then keep scanning for full confirmation.
             if early_alerts_state.get(contract) != candidate["impulse_time"]:
-                early_message = (
+                recent_early = state.setdefault("early_any", {})
+                try:
+                    last_early_time = int(recent_early.get(contract, 0))
+                except (TypeError, ValueError):
+                    last_early_time = 0
+                if int(time.time()) - last_early_time < 3600:
+                    early_alerts_state[contract] = candidate["impulse_time"]
+                    print(f"{contract}: regular early alert suppressed; another strategy alerted within 1h")
+                else:
+                    early_message = (
                     f"👀 هشدار زودهنگام؛ هنوز تأیید نشده: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                     f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین ۲۰ کندل قبلی\n"
                     f"قیمت فعلیِ کندل بسته‌شده ۵دقیقه: {latest_close}\n"
                     f"کف حرکت اولیه: {float(candidate['impulse_low'])}\n\n"
                     "هنوز سیگنال ورود نیست. ربات منتظر شکست ساختار ۵دقیقه، تأیید ۱۵دقیقه و روند ۱ساعته، سپس بررسی OI و Funding می‌ماند."
                 )
-                send_message(early_message)
-                early_alerts_state[contract] = candidate["impulse_time"]
-                print(f"Early warning sent: {contract}")
+                    send_message(early_message)
+                    early_alerts_state[contract] = candidate["impulse_time"]
+                    recent_early[contract] = int(time.time())
+                    print(f"Early warning sent: {contract}")
 
             try:
                 impulse_time = int(candidate["impulse_time"])
@@ -1010,11 +1033,21 @@ def scan():
 
             # Detect and remember a closed-candle break above the previous 3-candle high.
             previous_three = candles[-4:-1]
-            if len(previous_three) == 3 and latest_close > latest_open:
+            if candidate.get("bos_level") is None and len(previous_three) == 3 and latest_close > latest_open:
                 short_term_high = max(float(item["h"]) for item in previous_three)
                 if latest_close > short_term_high:
                     candidate["bos_level"] = short_term_high
                     candidate["bos_time"] = str(latest.get("t", ""))
+                    setup_alerts = state.setdefault("setup_alerts", {})
+                    if setup_alerts.get(contract) != candidate["impulse_time"]:
+                        setup_message = (
+                            f"🟡 شکست ساختار ۵دقیقه‌ای: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
+                            f"سطح شکست: {short_term_high}\n"
+                            f"قیمت کندل بسته‌شده: {latest_close}\n\n"
+                            "این مرحله از هشدار اولیه قوی‌تر است، اما هنوز تأیید ورود نیست. ربات منتظر کندل ۱۵دقیقه‌ای، روند ۱ساعته و بررسی OI/Funding می‌ماند."
+                        )
+                        send_message(setup_message)
+                        setup_alerts[contract] = candidate["impulse_time"]
                     print(f"{contract}: 5m break of structure detected at {short_term_high}")
 
             # If BOS occurred earlier, wait for confirmation while price remains above its level.
