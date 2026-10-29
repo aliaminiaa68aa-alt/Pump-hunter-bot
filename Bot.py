@@ -925,10 +925,46 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             prequalified.append(item)
         except (TypeError, ValueError):
             continue
-    prequalified.sort(key=_turnover_rank, reverse=True)
+    # Diversify the small API-budget sample so it is not selected by turnover alone:
+    # take candidates from turnover, volume/market-cap intensity, and 24h price change.
+    def _volume_cap_rank(item):
+        try:
+            symbol = item.get("contract", "")[:-5].upper()
+            return float(market_volumes.get(symbol) or 0) / float(caps.get(symbol) or 1)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return 0.0
+
+    def _change24_rank(item):
+        try:
+            return float(item.get("change_percentage") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    selected_for_oi = []
+    selected_contracts = set()
+    ranked_pools = [
+        sorted(prequalified, key=_turnover_rank, reverse=True),
+        sorted(prequalified, key=_volume_cap_rank, reverse=True),
+        sorted(prequalified, key=_change24_rank, reverse=True),
+    ]
+    while len(selected_for_oi) < max_coinalyze_checks_per_scan:
+        added = False
+        for pool in ranked_pools:
+            for candidate in pool:
+                candidate_contract = candidate.get("contract", "")
+                if candidate_contract not in selected_contracts:
+                    selected_for_oi.append(candidate)
+                    selected_contracts.add(candidate_contract)
+                    added = True
+                    break
+            if len(selected_for_oi) >= max_coinalyze_checks_per_scan:
+                break
+        if not added:
+            break
+    print("OI4h precheck sample: " + (", ".join(selected_contracts) if selected_contracts else "none"))
     ranked_checks = {}
     if COINALYZE_API_KEY:
-        for item in prequalified[:max_coinalyze_checks_per_scan]:
+        for item in selected_for_oi:
             contract0 = item.get("contract", "")
             ranked_checks[contract0] = coinalyze_derivatives_check(contract0, state)
             coinalyze_checks_this_scan += 1
