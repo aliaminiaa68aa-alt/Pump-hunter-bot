@@ -1073,7 +1073,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         f"ورود ۲ (فیبو 0.66): {float(candidate['fib66']):.10g}\n"
                         f"سقف پامپ/هدف: {high:.10g} | کف پامپ/حد ضرر: {low:.10g}\n"
                         f"حرکت پامپ: {float(candidate['pump_pct']):.2f}% با {int(candidate['body_count'])} کندل قوی ۵دقیقه‌ای\n"
-                        f"نسبت لانگ OKX: ۱۵دقیقه {ls['ratio_15m']:.1f}% | ۱ساعت {ls['ratio_1h']:.1f}% | روزانه {ls['ratio_1d']:.1f}%\n"
+                        f"نسبت لانگ CoinAlayze: ۱۵دقیقه {metrics['long15m']:.1f}% | ۱ساعت {metrics['long1h']:.1f}% | روزانه {metrics['long1d']:.1f}%\n"
                         f"{daily_warning}\n"
                         f"{spike_metric_text(metrics)}\n"
                         f"Funding مؤثر برای فیلتر: {alert_funding * 100:+.4f}% | OI مؤثر: {alert_oi / market_cap:.2%} از مارکت‌کپ\n"
