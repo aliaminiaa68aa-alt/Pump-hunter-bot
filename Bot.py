@@ -924,6 +924,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     # they have temporarily fallen outside the top-300 turnover list. Otherwise
     # tracked setups can never reach Stage 2/3 simply because their symbol was
     # omitted from the current market-cap lookup universe.
+    candidates = state.setdefault("fib_candidates", {})
     cap_symbols = [item.get("contract", "").split("_")[0] for item in cmc_priority]
     live_contracts = {item.get("contract", "") for item in tickers}
     tracked_symbols = [
@@ -933,7 +934,6 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     cap_symbols = list(dict.fromkeys(cap_symbols + tracked_symbols))
     caps, ambiguous = get_market_caps(state, cap_symbols)
     market_volumes = state.get("market_cap_cache", {}).get("volumes", {})
-    candidates = state["fib_candidates"]
     sent = state["fib_alerts"]
     counts = {
         "tickers": 0, "negative_funding": 0, "cap_available": 0,
