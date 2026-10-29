@@ -590,7 +590,8 @@ def scan():
         save_alert_state(state)
         return
 
-    scan_fib_pullbacks(coins and [item[0] for item in coins], state)
+    # LEG SPIKE scans the full Gate.io USDT perpetual universe; the regular strategy stays top-100 liquid only.
+    scan_fib_pullbacks(tickers, state)
 
     alerts = 0
     candle_checks = 0
