@@ -295,7 +295,12 @@ def scan():
             # when the same impulse is seen again.
             if impulse:
                 recent_impulses += 1
-                if not candidate or candidate.get("impulse_time") != impulse["impulse_time"]:
+                # Do not reset an active setup whenever a newer qualifying impulse
+                # appears in the rolling candle window. That can repeatedly erase
+                # the BOS/confirmation progress and leave the bot sending only
+                # early warnings. Track the first active setup until it confirms,
+                # invalidates, or expires.
+                if not candidate:
                     candidate = {
                         **impulse,
                         "bos_level": None,
