@@ -18,6 +18,8 @@ NON_CRYPTO_BASES = {
     "SOXS", "SOXL", "SQQQ", "TQQQ", "SPXS", "SPXL", "UVXY", "LABU", "LABD",
     "FNGU", "FNGD", "NVDL", "NVD", "TSLL", "TSLQ", "CONL", "CONY", "MSTU",
     "MSTX", "BITX", "ETHU", "YINN", "YANG", "KOLD", "BOIL", "TZA", "TNA",
+    # Equity-linked contracts observed in Gate.io futures scans (not crypto assets).
+    "SNXX", "INTW", "SNDK", "SKHY", "CXMT", "DRAM", "CRWV",
 }
 
 
