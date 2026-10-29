@@ -486,7 +486,7 @@ def leg_spike_long_short_filter(contract):
         ratio_15m = okx_contract_long_ratio(contract, "15m")
         ratio_1h = okx_contract_long_ratio(contract, "1H")
         ratio_1d = okx_currency_daily_long_ratio(contract)
-        passed = ratio_15m > 50.0 and ratio_1h > 50.0 and ratio_1d <= 70.0
+        passed = ratio_15m > 50.0 and ratio_1h >= 60.0 and ratio_1d <= 70.0
         return {
             "valid": True, "passed": passed,
             "ratio_15m": ratio_15m, "ratio_1h": ratio_1h, "ratio_1d": ratio_1d,
@@ -499,8 +499,8 @@ def leg_spike_long_short_filter(contract):
 
 # Fibonacci pullback strategy configuration.
 # "Several times market cap" is set to >=2x by default and can be tuned here.
-FIB_MIN_VOLUME_TO_MARKET_CAP = 2.0
-FIB_MAX_OI_TO_MARKET_CAP = 0.50
+FIB_MIN_VOLUME_TO_MARKET_CAP = 0.50
+FIB_MIN_OI_TO_MARKET_CAP = 0.20
 FIB_MIN_BODY_PCT = 0.8
 FIB_MIN_TOTAL_PUMP_PCT = 4.0
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
@@ -767,7 +767,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 if value not in (None, ""):
                     oi_usd = float(value)
                     break
-            if oi_usd is None or oi_usd / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
+            if oi_usd is None or oi_usd / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
                 if contract in early_pattern_details:
                     early_filter_status[contract] = "Gate.io OI missing" if oi_usd is None else f"Gate.io OI/MC rejected ({oi_usd/market_cap:.1%})"
                 continue
@@ -782,7 +782,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     continue
                 aggregate_oi = float(coinalyze_check.get("oi_usd") or 0)
                 aggregate_funding = float(coinalyze_check["funding_rate"])
-                if aggregate_oi <= 0 or aggregate_oi / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
+                if aggregate_oi <= 0 or aggregate_oi / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
                     if contract in early_pattern_details:
                         early_filter_status[contract] = "Coinalyze aggregate OI/MC missing or over 50%"
                     continue
@@ -877,7 +877,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         f"حرکت پامپ: {float(candidate['pump_pct']):.2f}% با {int(candidate['body_count'])} کندل قوی ۵دقیقه‌ای\n"
                         f"Funding: {funding * 100:+.4f}% (منفی)\n"
                         f"حجم ۲۴ساعته/مارکت‌کپ: {volume_mc:.2f}x (حداقل {FIB_MIN_VOLUME_TO_MARKET_CAP:.1f}x)\n"
-                        f"OI/مارکت‌کپ: {oi_usd / market_cap:.2%} (حداکثر {FIB_MAX_OI_TO_MARKET_CAP:.0%})\n"
+                        f"OI/مارکت‌کپ: {oi_usd / market_cap:.2%} (حداقل {FIB_MIN_OI_TO_MARKET_CAP:.0%})\n"
                         f"نسبت لانگ: ۱۵دقیقه {ls['ratio_15m']:.1f}% | ۱ساعت {ls['ratio_1h']:.1f}% | روزانه {ls['ratio_1d']:.1f}%\n"
                         f"نسبت سود به ریسک تا سقف: {reward / risk:.2f}:1\n"
                         "⚠️ هشدار الگوریتمی است؛ ورود تضمینی نیست. ورود 0.66 ممکن است نسبت سود به ریسک ضعیف‌تری داشته باشد."
