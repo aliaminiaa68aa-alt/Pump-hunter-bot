@@ -143,7 +143,25 @@ def scan():
 
             confirmed, change_15m = confirms_15m(contract)
             if not confirmed:
+                candle_change_pct = (close_price / open_price - 1) * 100
+                relative_volume = turnover / avg_turnover
                 print(f"{contract}: skipped; 15m candle did not confirm bullish momentum")
+                # Early-watch alert: catch unusually strong 5m moves before 15m confirmation.
+                # This is deliberately labeled as unconfirmed and uses stricter thresholds.
+                if relative_volume >= 5 and candle_change_pct >= 1:
+                    btc_text = f"{btc_change:+.2f}%" if btc_change is not None else "نامشخص"
+                    watch_message = (
+                        f"👀 هشدار زودهنگام (هنوز تأیید نشده): {contract.replace('_', '/')}\n"
+                        f"کندل بسته‌شده ۵ دقیقه: +{candle_change_pct:.2f}%\n"
+                        f"حجم نسبت به میانگین ۲۰ کندل: {relative_volume:.1f} برابر\n"
+                        f"تغییر کندل ۱۵دقیقه: {change_15m:+.2f}%؛ هنوز تأیید صعودی نداده\n"
+                        f"تغییر کندل ۱۵دقیقه BTC: {btc_text}\n"
+                        f"قیمت بسته‌شدن ۵دقیقه: {close_price}\n"
+                        "⚠️ فقط برای زیرنظرگرفتن؛ ورود خرید بدون تأیید پول‌بک/شکست ساختار پرریسک است."
+                    )
+                    send_message(watch_message)
+                    alerts += 1
+                    print(f"Early-watch alert sent: {contract}")
                 continue
             confirmations_15m += 1
 
