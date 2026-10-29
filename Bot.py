@@ -1035,8 +1035,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if metrics.get("change24") not in (None, "") and float(metrics["change24"]) <= 0:
                         print(f"{contract}: LEG SPIKE rejected; 24h price change is not positive")
                         continue
-                    if metrics.get("oi_change4h") is not None and metrics["oi_change4h"] <= 0:
-                        print(f"{contract}: LEG SPIKE rejected; Coinalyze OI 4h change is not positive")
+                    if metrics.get("oi_change4h") is None or metrics["oi_change4h"] <= 0:
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze OI 4h change is missing or not positive")
                         continue
                     if metrics.get("funding_avg") is not None and metrics["funding_avg"] >= 0:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze average funding is non-negative")
