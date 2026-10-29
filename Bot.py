@@ -476,6 +476,170 @@ def okx_currency_daily_long_ratio(contract):
     return okx_ratio_to_long_pct(raw_ratio)
 
 
+def coinalyze_spike_metrics(contract, ticker, market_cap, market_volume, state):
+    """Fetch Coinalyze derivatives metrics for confirmed LEG SPIKE alerts."""
+    result = {"coin": contract.replace("_", "/"), "price": ticker.get("last"),
+              "change24": ticker.get("change_percentage"), "market_cap": market_cap,
+              "market_volume": market_volume, "oi_usd": None, "oi_change24": None,
+              "oi_change4h": None, "oi_volume24": None, "funding_avg": None,
+              "liquidations24": None, "long1h": None, "short1h": None,
+              "long1d": None, "short1d": None}
+    if not COINALYZE_API_KEY:
+        return result
+    try:
+        now = int(time.time())
+        cache = state.get("coinalyze_market_cache", {})
+        if not cache.get("fetched_at") or now - int(cache["fetched_at"]) >= 21600:
+            markets = coinalyze_request("/future-markets")
+            state["coinalyze_market_cache"] = {"fetched_at": now, "markets": markets}
+        else:
+            markets = cache.get("markets", [])
+        base = contract[:-5].upper() if contract.endswith("_USDT") else contract.upper()
+        eligible = [row for row in markets
+                    if str(row.get("base_asset", "")).upper() == base
+                    and str(row.get("quote_asset", "")).upper() == "USDT"
+                    and row.get("is_perpetual") is True
+                    and str(row.get("margined", "")).upper() == "STABLE" and row.get("symbol")]
+        names = state.get("coinalyze_exchange_cache", {}).get("names", {})
+        def exname(row):
+            raw = str(row.get("exchange", "unknown"))
+            return str(names.get(raw.upper(), raw)).upper()
+        priority = {"BINANCE": 0, "BYBIT": 1, "OKX": 2, "GATEIO": 3, "GATE.IO": 3}
+        eligible.sort(key=lambda row: (priority.get(exname(row).replace(" ", ""), 10), exname(row)))
+        selected, seen = [], set()
+        for row in eligible:
+            symbol = str(row["symbol"])
+            if symbol not in seen:
+                selected.append(row)
+                seen.add(symbol)
+            if len(selected) == 3:
+                break
+        if not selected:
+            return result
+        symbols = ",".join(str(row["symbol"]) for row in selected)
+        current = coinalyze_request("/open-interest", {"symbols": symbols, "convert_to_usd": "true"})
+        values = [float(row["value"]) for row in current
+                  if row.get("value") not in (None, "") and float(row["value"]) > 0]
+        if values:
+            result["oi_usd"] = sum(values)
+        funding_rows = coinalyze_request("/funding-rate", {"symbols": symbols})
+        funding_values = [float(row["value"]) for row in funding_rows if row.get("value") not in (None, "")]
+        if funding_values:
+            result["funding_avg"] = sum(funding_values) / len(funding_values)
+
+        oi_rows = coinalyze_request("/open-interest-history", {
+            "symbols": symbols, "interval": "1hour", "from": now - 86400, "to": now,
+            "convert_to_usd": "true"})
+        first_total = last_total = old4_total = new4_total = 0.0
+        nfirst = nlast = n4 = 0
+        for row in oi_rows:
+            hist = sorted(row.get("history", []), key=lambda p: int(p.get("t", 0)))
+            if len(hist) < 2:
+                continue
+            first, last = float(hist[0].get("c", 0) or 0), float(hist[-1].get("c", 0) or 0)
+            if first > 0 and last > 0:
+                first_total += first; last_total += last; nfirst += 1; nlast += 1
+            recent = [p for p in hist if int(p.get("t", 0)) >= now - 4 * 3600]
+            if len(recent) >= 2:
+                old4, new4 = float(recent[0].get("c", 0) or 0), float(recent[-1].get("c", 0) or 0)
+                if old4 > 0 and new4 > 0:
+                    old4_total += old4; new4_total += new4; n4 += 1
+        if nfirst and nlast and first_total > 0:
+            result["oi_change24"] = (last_total / first_total - 1) * 100
+        if n4 and old4_total > 0:
+            result["oi_change4h"] = (new4_total / old4_total - 1) * 100
+
+        liq_rows = coinalyze_request("/liquidation-history", {
+            "symbols": symbols, "interval": "1hour", "from": now - 86400, "to": now,
+            "convert_to_usd": "true"})
+        liq_sum, liq_found = 0.0, False
+        for row in liq_rows:
+            for point in row.get("history", []):
+                for key in ("l", "s"):
+                    if point.get(key) not in (None, ""):
+                        liq_sum += float(point[key]); liq_found = True
+        if liq_found:
+            result["liquidations24"] = liq_sum
+
+        for label, interval, since in (("1h", "1hour", now - 2 * 3600),
+                                       ("1d", "daily", now - 2 * 86400)):
+            try:
+                ratio_rows = coinalyze_request("/long-short-ratio-history", {
+                    "symbols": symbols, "interval": interval, "from": since, "to": now})
+                longs, shorts = [], []
+                for row in ratio_rows:
+                    hist = sorted(row.get("history", []), key=lambda p: int(p.get("t", 0)))
+                    if not hist:
+                        continue
+                    point = hist[-1]
+                    if point.get("l") not in (None, "") and point.get("s") not in (None, ""):
+                        lv, sv = float(point["l"]), float(point["s"])
+                        if lv <= 1 and sv <= 1:
+                            lv *= 100; sv *= 100
+                        longs.append(lv); shorts.append(sv)
+                    elif point.get("r") not in (None, ""):
+                        ratio = float(point["r"])
+                        if ratio >= 0:
+                            longs.append(ratio / (1 + ratio) * 100)
+                            shorts.append(100 / (1 + ratio))
+                if longs and shorts:
+                    result["long" + label] = sum(longs) / len(longs)
+                    result["short" + label] = sum(shorts) / len(shorts)
+            except Exception as error:
+                print(f"{contract}: Coinalyze long/short {label} unavailable: {type(error).__name__}")
+
+        # Futures OHLCV volume is converted from base units to USD using each candle close.
+        try:
+            vol_rows = coinalyze_request("/ohlcv-history", {
+                "symbols": symbols, "interval": "1hour", "from": now - 86400, "to": now})
+            total_usd, found = 0.0, False
+            for row in vol_rows:
+                for point in row.get("history", []):
+                    vol, close = float(point.get("v", 0) or 0), float(point.get("c", 0) or 0)
+                    if vol > 0 and close > 0:
+                        total_usd += vol * close; found = True
+            if found:
+                result["oi_volume24"] = total_usd
+        except Exception as error:
+            print(f"{contract}: Coinalyze futures volume unavailable: {type(error).__name__}")
+    except Exception as error:
+        print(f"{contract}: Coinalyze spike metrics unavailable: {type(error).__name__}: {error}")
+    return result
+
+
+def spike_metric_text(metrics):
+    def money(value):
+        if value in (None, ""): return "ناموجود"
+        value = float(value)
+        if abs(value) >= 1_000_000_000: return "$" + format(value / 1_000_000_000, ".2f") + "B"
+        if abs(value) >= 1_000_000: return "$" + format(value / 1_000_000, ".2f") + "M"
+        if abs(value) >= 1_000: return "$" + format(value / 1_000, ".2f") + "K"
+        return "$" + format(value, ".2f")
+    def pct(value, decimals=2):
+        return "ناموجود" if value in (None, "") else format(float(value), "+." + str(decimals) + "f") + "%"
+    def ratio(numerator, denominator):
+        if numerator in (None, "") or denominator in (None, "") or float(denominator) <= 0:
+            return "ناموجود"
+        return format(float(numerator) / float(denominator) * 100, ".1f") + "%"
+    return (
+        f"⚪️ Coin: {metrics.get('coin', 'نامشخص')}\n"
+        f"⚪️ Price: {metrics.get('price') if metrics.get('price') not in (None, '') else 'ناموجود'}\n"
+        f"⚪️ Chg 24h: {pct(metrics.get('change24'))}\n"
+        f"⚪️ Mkt Cap: {money(metrics.get('market_cap'))}\n"
+        f"⚪️ Vol 24h: {money(metrics.get('market_volume'))}\n"
+        f"⚪️ Open Interest: {money(metrics.get('oi_usd'))}\n"
+        f"⚪️ OI Chg 24h %: {pct(metrics.get('oi_change24'))}\n"
+        f"⚪️ OI Chg 4h %: {pct(metrics.get('oi_change4h'))}\n"
+        f"⚪️ OI / Mkt Cap: {ratio(metrics.get('oi_usd'), metrics.get('market_cap'))}\n"
+        f"⚪️ OI Vol 24h: {money(metrics.get('oi_volume24'))}\n"
+        f"⚪️ Vol 24h / Mkt Cap: {ratio(metrics.get('market_volume'), metrics.get('market_cap'))}\n"
+        f"⚪️ FR Avg: {pct(None if metrics.get('funding_avg') is None else float(metrics['funding_avg']) * 100, 4)}\n"
+        f"⚪️ Liqs 24h: {money(metrics.get('liquidations24'))}\n"
+        f"⚪️ Long 1h: {pct(metrics.get('long1h'))} | Short 1h: {pct(metrics.get('short1h'))}\n"
+        f"⚪️ Long 1d: {pct(metrics.get('long1d'))} | Short 1d: {pct(metrics.get('short1d'))}"
+    )
+
+
 def leg_spike_long_short_filter(contract):
     """
     LEG SPIKE crowding filter using public OKX account-ratio data:
@@ -867,20 +1031,38 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     reward = high - level
                     if risk <= 0:
                         continue
+                    metrics = coinalyze_spike_metrics(contract, ticker, market_cap, total_market_volume, state)
+                    if metrics.get("oi_change4h") is not None and metrics["oi_change4h"] <= 0:
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze OI 4h change is not positive")
+                        continue
+                    if metrics.get("funding_avg") is not None and metrics["funding_avg"] >= 0:
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze average funding is non-negative")
+                        continue
+                    alert_oi = metrics.get("oi_usd") or oi_usd
+                    alert_funding = metrics.get("funding_avg")
+                    if alert_funding is None:
+                        alert_funding = funding
+                    if alert_oi / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
+                        print(f"{contract}: LEG SPIKE rejected; OI/market cap below minimum")
+                        continue
+                    daily_long = metrics.get("long1d")
+                    daily_warning = ("⚠️ هشدار شلوغی لانگ روزانه؛ ریسک ازدحام بالا"
+                                     if daily_long is not None and daily_long > 60
+                                     else "لانگ روزانه زیر آستانه هشدار")
                     message = (
-                        f"🎯 🚀 LEG SPIKE — Fibonacci + OI Filter\n"
+                        f"🎯 🚀 LEG SPIKE — CoinAlayze + Fibonacci\n"
                         f"{contract.replace('_', '/')} (Gate.io Perpetual)\n"
                         f"واکنش به فیبو {level_name}؛ ورود پیشنهادی: {level:.10g}\n"
                         f"ورود ۱ (فیبو 0.50): {float(candidate['fib50']):.10g}\n"
                         f"ورود ۲ (فیبو 0.66): {float(candidate['fib66']):.10g}\n"
                         f"سقف پامپ/هدف: {high:.10g} | کف پامپ/حد ضرر: {low:.10g}\n"
                         f"حرکت پامپ: {float(candidate['pump_pct']):.2f}% با {int(candidate['body_count'])} کندل قوی ۵دقیقه‌ای\n"
-                        f"Funding: {funding * 100:+.4f}% (منفی)\n"
-                        f"حجم ۲۴ساعته/مارکت‌کپ: {volume_mc:.2f}x (حداقل {FIB_MIN_VOLUME_TO_MARKET_CAP:.1f}x)\n"
-                        f"OI/مارکت‌کپ: {oi_usd / market_cap:.2%} (حداقل {FIB_MIN_OI_TO_MARKET_CAP:.0%})\n"
-                        f"نسبت لانگ: ۱۵دقیقه {ls['ratio_15m']:.1f}% | ۱ساعت {ls['ratio_1h']:.1f}% | روزانه {ls['ratio_1d']:.1f}%\n"
+                        f"نسبت لانگ OKX: ۱۵دقیقه {ls['ratio_15m']:.1f}% | ۱ساعت {ls['ratio_1h']:.1f}% | روزانه {ls['ratio_1d']:.1f}%\n"
+                        f"{daily_warning}\n"
+                        f"{spike_metric_text(metrics)}\n"
+                        f"Funding مؤثر برای فیلتر: {alert_funding * 100:+.4f}% | OI مؤثر: {alert_oi / market_cap:.2%} از مارکت‌کپ\n"
                         f"نسبت سود به ریسک تا سقف: {reward / risk:.2f}:1\n"
-                        "⚠️ هشدار الگوریتمی است؛ ورود تضمینی نیست. ورود 0.66 ممکن است نسبت سود به ریسک ضعیف‌تری داشته باشد."
+                        "⚠️ داده ناموجود از منبع در دسترس نبود؛ هشدار الگوریتمی است و ورود تضمینی نیست."
                     )
                     send_message(message)
                     sent[contract] = alert_key
