@@ -327,7 +327,8 @@ def get_market_caps(state):
     """Cache CoinGecko market caps for 15 minutes; exclude ambiguous duplicate symbols."""
     cache = state.get("market_cap_cache", {})
     now = int(time.time())
-    if cache.get("fetched_at") and now - int(cache["fetched_at"]) < 900:
+    if (cache.get("fetched_at") and now - int(cache["fetched_at"]) < 900
+            and isinstance(cache.get("volumes"), dict)):
         return cache.get("caps", {}), cache.get("ambiguous", [])
     all_rows = []
     try:
@@ -346,22 +347,31 @@ def get_market_caps(state):
             all_rows.extend(rows)
             time.sleep(0.25)
         by_symbol = {}
+        volume_by_symbol = {}
         ambiguous = set()
         for row in all_rows:
             symbol = str(row.get("symbol", "")).upper()
             cap = row.get("market_cap")
+            total_volume = row.get("total_volume")
             if not symbol or not cap or float(cap) <= 0:
                 continue
             if symbol in by_symbol:
                 ambiguous.add(symbol)
             else:
                 by_symbol[symbol] = float(cap)
+                if total_volume not in (None, "") and float(total_volume) > 0:
+                    volume_by_symbol[symbol] = float(total_volume)
         for symbol in ambiguous:
             by_symbol.pop(symbol, None)
+            volume_by_symbol.pop(symbol, None)
         state["market_cap_cache"] = {
-            "fetched_at": now, "caps": by_symbol, "ambiguous": sorted(ambiguous)
+            "fetched_at": now, "caps": by_symbol, "volumes": volume_by_symbol,
+            "ambiguous": sorted(ambiguous)
         }
-        print(f"CoinGecko market-cap cache refreshed: {len(by_symbol)} unique symbols; {len(ambiguous)} ambiguous")
+        print(
+            f"CoinGecko market data refreshed: {len(by_symbol)} unique market caps, "
+            f"{len(volume_by_symbol)} 24h volumes; {len(ambiguous)} ambiguous symbols"
+        )
         return by_symbol, sorted(ambiguous)
     except Exception as error:
         print(f"CoinGecko market-cap lookup unavailable: {type(error).__name__}: {error}")
@@ -417,13 +427,15 @@ def detect_fib_pump(candles):
 def scan_fib_pullbacks(tickers, state):
     """Scan LEG SPIKE with staged diagnostics and avoid ratio API calls before a real pump exists."""
     caps, ambiguous = get_market_caps(state)
+    market_volumes = state.get("market_cap_cache", {}).get("volumes", {})
     candidates = state["fib_candidates"]
     sent = state["fib_alerts"]
     counts = {
         "tickers": 0, "negative_funding": 0, "cap_available": 0,
         "early_scan_checked": 0, "early_patterns_seen": 0, "early_warnings_sent": 0,
         "early_candle_errors": 0, "volume_pass": 0, "oi_pass": 0,
-        "pump_detected": 0, "ratio_pass": 0, "fib_reactions": 0, "missing_cap": 0,
+        "pump_detected": 0, "ratio_pass": 0, "fib_reactions": 0,
+        "missing_cap": 0, "missing_market_volume": 0,
     }
     volume_samples = []
     early_candle_cache = {}
@@ -512,8 +524,14 @@ def scan_fib_pullbacks(tickers, state):
                 counts["missing_cap"] += 1
                 continue
             counts["cap_available"] += 1
-            volume_mc = volume24 / market_cap
-            volume_samples.append((volume_mc, contract, volume24, market_cap, funding))
+            total_market_volume = market_volumes.get(symbol)
+            if not total_market_volume or float(total_market_volume) <= 0:
+                counts["missing_market_volume"] += 1
+                continue
+            # Use CoinGecko aggregate 24h market volume, not Gate.io-only turnover.
+            total_market_volume = float(total_market_volume)
+            volume_mc = total_market_volume / market_cap
+            volume_samples.append((volume_mc, contract, total_market_volume, market_cap, funding))
 
             if volume_mc < FIB_MIN_VOLUME_TO_MARKET_CAP:
                 continue
@@ -555,7 +573,7 @@ def scan_fib_pullbacks(tickers, state):
                 if not candidate:
                     continue
                 candidate.update({
-                    "market_cap": market_cap, "volume24": volume24,
+                    "market_cap": market_cap, "volume24": total_market_volume,
                     "oi_usd": oi_usd, "funding": funding,
                 })
                 candidates[contract] = candidate
