@@ -817,7 +817,8 @@ def get_market_caps(state, requested_symbols=None):
 
     # Independent free fallback: CoinPaprika, used only for symbols still missing/ambiguous.
     # It avoids relying on CoinMarketCap's keyless endpoint, which may rate-limit requests.
-    paprika_missing = [symbol for symbol in missing if symbol not in caps or symbol in ambiguous]
+    # Let CoinPaprika cover all requested high-priority symbols still missing after CoinGecko/CMC, not only the first 50 CMC query symbols.
+    paprika_missing = list(dict.fromkeys(symbol for symbol in requested if symbol not in caps or symbol in ambiguous))
     if paprika_missing:
         try:
             response = SESSION.get("https://api.coinpaprika.com/v1/tickers",
