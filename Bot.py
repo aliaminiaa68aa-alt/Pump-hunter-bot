@@ -131,8 +131,11 @@ def load_alert_state():
     data.setdefault("fib_candidates", {})
     data.setdefault("fib_alerts", {})
     data.setdefault("fib_early_alerts", {})
-    data.setdefault("early_any", {})
-    data.setdefault("setup_alerts", {})
+    data.setdefault("early_any", {})  # Regular BOS strategy cooldowns
+    data.setdefault("fib_early_any", {})  # LEG SPIKE cooldowns are independent
+    data.setdefault("setup_alerts", {})  # Backward-compatible legacy state
+    data.setdefault("regular_setup_alerts", {})
+    data.setdefault("fib_setup_alerts", {})
     data.setdefault("market_cap_cache", {})
     return data
 
@@ -853,7 +856,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 print(f"{contract}: LEG SPIKE early alert suppressed; same candle already alerted")
                 continue
             # Avoid duplicate early messages across LEG SPIKE and the regular strategy.
-            recent_early = state.setdefault("early_any", {})
+            recent_early = state.setdefault("fib_early_any", {})
             try:
                 last_early_time = int(recent_early.get(contract, 0))
             except (TypeError, ValueError):
@@ -1135,7 +1138,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
             # Stage 2: one stronger watch alert after volume/MC, OI/MC and funding pass.
             # Stage 3 remains the final entry alert after Fib reaction and all confirmations.
-            setup_sent = state.setdefault("setup_alerts", {})
+            setup_sent = state.setdefault("fib_setup_alerts", {})
             setup_key = str(candidate["end_time"])
             oi4_message = (
                 f"{float(oi_change4h):+.2f}%"
@@ -1410,7 +1413,7 @@ def scan():
                 if latest_close > short_term_high:
                     candidate["bos_level"] = short_term_high
                     candidate["bos_time"] = str(latest.get("t", ""))
-                    setup_alerts = state.setdefault("setup_alerts", {})
+                    setup_alerts = state.setdefault("regular_setup_alerts", {})
                     if setup_alerts.get(contract) != candidate["impulse_time"]:
                         setup_message = (
                             f"🟡 شکست ساختار ۵دقیقه‌ای: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
