@@ -1083,7 +1083,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
     selected_for_oi = []
     selected_contracts = set()
-    early_contracts = set(early_pattern_details)
+    # Prioritize both fresh Stage-1 detections and persisted candidates from earlier scans.
+    # Otherwise a tracked coin can be starved by the five-call Coinalyze quota after its first scan.
+    early_contracts = set(early_pattern_details) | set(candidates)
     early_prequalified = [item for item in prequalified if item.get("contract", "") in early_contracts]
     other_prequalified = [item for item in prequalified if item.get("contract", "") not in early_contracts]
     ranked_pools = [
