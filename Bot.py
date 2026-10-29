@@ -950,6 +950,26 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 continue
             counts["early_patterns_seen"] += 1
             early_pattern_details[contract] = early_candidate
+
+            # Persist the exact coin and impulse immediately after Stage 1.
+            # This lets later scans monitor this same setup even if it temporarily
+            # falls outside the early-scan top 150 or fails a filter this cycle.
+            tracked_candidate = candidates.get(contract)
+            replace_tracked = tracked_candidate is None
+            if tracked_candidate is not None:
+                try:
+                    tracked_age = int(early_candidate["end_time"]) - int(tracked_candidate["end_time"])
+                    tracked_expired = int(time.time()) - int(tracked_candidate["end_time"]) > 3600
+                    replace_tracked = tracked_expired or tracked_age > 0
+                except (TypeError, ValueError, KeyError):
+                    replace_tracked = True
+            if replace_tracked:
+                candidates[contract] = dict(early_candidate)
+                print(
+                    f"{contract}: Stage-1 impulse saved for continued monitoring; "
+                    f"pump={float(early_candidate['pump_pct']):.2f}%"
+                )
+
             if len(early_pattern_samples) < 8:
                 early_pattern_samples.append(
                     f"{contract}:{early_candidate['pump_pct']:.2f}%/{early_candidate['body_count']}c"
@@ -1252,6 +1272,15 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     f"{contract}: LEG SPIKE pump found: {candidate['pump_pct']:.2f}% "
                     f"in {candidate['body_count']} candles; waiting for Fib retracement"
                 )
+
+            # Refresh filter values every scan, including candidates first stored
+            # at Stage 1, so persisted candidates have complete current metadata.
+            candidate.update({
+                "market_cap": market_cap,
+                "volume24": total_market_volume,
+                "oi_usd": oi_usd,
+                "funding": funding,
+            })
             counts["pump_detected"] += 1
 
             # Use Coinalyze long/short data at the actual closed-candle Fib reaction
