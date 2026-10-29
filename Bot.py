@@ -4,7 +4,7 @@ import requests
 
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-BASE = "https://fapi.binance.com"
+BASE = "https://fapi1.binance.com"
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "PumpHunterBot/1.3"})
 
