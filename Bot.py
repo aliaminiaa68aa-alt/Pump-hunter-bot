@@ -421,15 +421,18 @@ def scan_fib_pullbacks(tickers, state):
     counts = {
         "tickers": 0, "negative_funding": 0, "cap_available": 0,
         "volume_pass": 0, "oi_pass": 0, "pump_detected": 0,
-        "ratio_pass": 0, "fib_reactions": 0,
+        "ratio_pass": 0, "fib_reactions": 0, "missing_cap": 0,
     }
+    volume_samples = []
     for ticker in tickers:
         contract = ticker.get("contract", "")
         if not contract.endswith("_USDT"):
             continue
         counts["tickers"] += 1
         try:
-            volume24 = float(ticker.get("volume_24h_quote") or ticker.get("volume_24h_usd") or 0)
+            # Gate documents volume_24h_quote as quote-currency turnover; USDT contracts quote in USDT.
+            raw_volume = ticker.get("volume_24h_quote") or ticker.get("volume_24h_usd") or 0
+            volume24 = float(raw_volume)
             raw_funding = ticker.get("funding_rate")
             if raw_funding in (None, ""):
                 continue
@@ -441,9 +444,11 @@ def scan_fib_pullbacks(tickers, state):
             symbol = contract[:-5].upper()
             market_cap = caps.get(symbol)
             if not market_cap or symbol in ambiguous:
+                counts["missing_cap"] += 1
                 continue
             counts["cap_available"] += 1
             volume_mc = volume24 / market_cap
+            volume_samples.append((volume_mc, contract, volume24, market_cap, funding))
             if volume_mc < FIB_MIN_VOLUME_TO_MARKET_CAP:
                 continue
             counts["volume_pass"] += 1
@@ -546,11 +551,17 @@ def scan_fib_pullbacks(tickers, state):
                     break
         except Exception as error:
             print(f"{contract}: LEG SPIKE skipped: {type(error).__name__}: {error}")
+    volume_samples.sort(reverse=True)
+    top_volume = "; ".join(
+        f"{contract}:vol/MC={ratio:.3f}x,vol=${volume:,.0f},MC=${cap:,.0f},funding={funding*100:+.4f}%"
+        for ratio, contract, volume, cap, funding in volume_samples[:5]
+    ) or "none"
     print(
         "LEG SPIKE diagnostics: " +
         ", ".join(f"{key}={value}" for key, value in counts.items()) +
         f", active={len(candidates)}, caps_cached={len(caps)}, ambiguous_symbols={len(ambiguous)}"
     )
+    print(f"LEG SPIKE highest volume/market-cap candidates: {top_volume}")
 
 def scan():
     tickers = get_json("/futures/usdt/tickers")
