@@ -252,9 +252,12 @@ def okx_contract_long_ratio(contract, period):
     )
     response.raise_for_status()
     payload = response.json()
-    if payload.get("code") != "0":
-        raise RuntimeError(f"OKX API error: {payload.get('msg', payload)}")
-    rows = payload.get("data", [])
+    if isinstance(payload, list):
+        rows = payload
+    else:
+        if payload.get("code") != "0":
+            raise RuntimeError(f"OKX API error: {payload.get('msg', payload)}")
+        rows = payload.get("data", [])
     if not rows:
         raise RuntimeError(f"No OKX long/short data for {inst_id}/{period}")
     row = rows[-1]
@@ -274,9 +277,12 @@ def okx_currency_daily_long_ratio(contract):
     )
     response.raise_for_status()
     payload = response.json()
-    if payload.get("code") != "0":
-        raise RuntimeError(f"OKX API error: {payload.get('msg', payload)}")
-    rows = payload.get("data", [])
+    if isinstance(payload, list):
+        rows = payload
+    else:
+        if payload.get("code") != "0":
+            raise RuntimeError(f"OKX API error: {payload.get('msg', payload)}")
+        rows = payload.get("data", [])
     if not rows:
         raise RuntimeError(f"No OKX daily long/short data for {base_asset}")
     raw_ratio = rows[-1].get("longShortRatio")
