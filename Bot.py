@@ -1200,8 +1200,11 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                                      if daily_long is not None and daily_long > 60
                                      else "لانگ روزانه زیر آستانه هشدار")
                     message = (
+                        "🟢━━━━━━━━━━━━━━━━━━🟢\n"
+                        "✅ مرحله ۳ از ۳ | نقطه ورود تأیید شد\n"
+                        "🟢━━━━━━━━━━━━━━━━━━🟢\n"
                         f"🎯 🚀 LEG SPIKE — CoinAlayze + Fibonacci\n"
-                        f"{contract.replace('_', '/')} (Gate.io Perpetual)\n"
+                        f"🪙 {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                         f"واکنش به فیبو {level_name}؛ ورود پیشنهادی: {level:.10g}\n"
                         f"ورود ۱ (فیبو 0.50): {float(candidate['fib50']):.10g}\n"
                         f"ورود ۲ (فیبو 0.66): {float(candidate['fib66']):.10g}\n"
