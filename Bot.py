@@ -873,14 +873,14 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 if cap and total_market_volume and symbol not in ambiguous else "ناموجود"
             )
             early_message = (
-                f"👀 هشدار اولیه LEG SPIKE؛ هنوز تأیید نشده: {contract.replace('_', '/')}\\n"
+                f"🟡━━━━━━━━━━━━━━━━━━🟡\n👀 مرحله ۱ از ۳ | هشدار اولیه؛ هنوز تأیید نشده: {contract.replace('_', '/')}\n"
                 f"حرکت شناسایی‌شده: {float(early_candidate['pump_pct']):.2f}% "
-                f"در {int(early_candidate['body_count'])} کندل صعودی ۵دقیقه‌ای\\n"
-                f"سقف: {float(early_candidate['high']):.10g} | کف: {float(early_candidate['low']):.10g}\\n"
+                f"در {int(early_candidate['body_count'])} کندل صعودی ۵دقیقه‌ای\n"
+                f"سقف: {float(early_candidate['high']):.10g} | کف: {float(early_candidate['low']):.10g}\n"
                 f"فیبو 0.50: {float(early_candidate['fib50']):.10g} | "
-                f"فیبو 0.66: {float(early_candidate['fib66']):.10g}\\n"
-                f"Funding: {funding_text} | حجم/مارکت‌کپ: {vol_mc_text}\\n"
-                "این فقط هشدار حرکت اولیه است، نه ورود. برای سیگنال نهایی تمام فیلترهای Funding، حجم/مارکت‌کپ، OI، نسبت لانگ/شورت و واکنش کندل بسته‌شده لازم‌اند."
+                f"فیبو 0.66: {float(early_candidate['fib66']):.10g}\n"
+                f"Funding: {funding_text} | حجم/مارکت‌کپ: {vol_mc_text}\n"
+                "⚠️ این فقط هشدار حرکت اولیه است، نه نقطه ورود. برای سیگنال نهایی تمام فیلترهای Funding، حجم/مارکت‌کپ، OI، نسبت لانگ/شورت و واکنش کندل بسته‌شده لازم‌اند."
             )
             send_message(early_message)
             early_sent[contract] = early_key
