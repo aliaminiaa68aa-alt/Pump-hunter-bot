@@ -106,6 +106,7 @@ def load_alert_state():
     # Backward-compatible with the earlier flat state format.
     if "alerts" not in data or "candidates" not in data:
         data = {"alerts": data if isinstance(data, dict) else {}, "candidates": {}}
+    data.setdefault("early_alerts", {})
     return data
 
 
@@ -133,7 +134,8 @@ def find_recent_impulse(candles):
         close_price = float(candle["c"])
         change_pct = (close_price / open_price - 1) * 100 if open_price else 0
         ratio = turnover / avg_turnover if avg_turnover > 0 else 0
-        if ratio >= 5 and change_pct >= 1 and close_price > open_price:
+        # Keep the impulse selective, but not so strict that valid early moves are missed.
+        if ratio >= 3 and change_pct >= 0.7 and close_price > open_price:
             found = {
                 "impulse_time": str(candle.get("t", idx)),
                 "impulse_low": float(candle["l"]),
@@ -158,6 +160,7 @@ def scan():
     state = load_alert_state()
     alerts_state = state["alerts"]
     candidates = state["candidates"]
+    early_alerts_state = state["early_alerts"]
 
     btc_ok, btc_change = btc_market_filter()
     if not btc_ok:
@@ -204,6 +207,19 @@ def scan():
 
             if not candidate:
                 continue
+
+            # Send one early heads-up per impulse, then keep scanning for full confirmation.
+            if early_alerts_state.get(contract) != candidate["impulse_time"]:
+                early_message = (
+                    f"👀 هشدار زودهنگام؛ هنوز تأیید نشده: {contract.replace('_', '/')} (Gate.io Perpetual)\\n"
+                    f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین ۲۰ کندل قبلی\\n"
+                    f"قیمت فعلیِ کندل بسته‌شده ۵دقیقه: {latest_close}\\n"
+                    f"کف حرکت اولیه: {float(candidate['impulse_low'])}\\n\\n"
+                    "هنوز سیگنال ورود نیست. ربات منتظر شکست ساختار ۵دقیقه، تأیید ۱۵دقیقه و روند ۱ساعته، سپس بررسی OI و Funding می‌ماند."
+                )
+                send_message(early_message)
+                early_alerts_state[contract] = candidate["impulse_time"]
+                print(f"Early warning sent: {contract}")
 
             try:
                 impulse_time = int(candidate["impulse_time"])
