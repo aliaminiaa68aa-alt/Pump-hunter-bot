@@ -483,7 +483,7 @@ def coinalyze_spike_metrics(contract, ticker, market_cap, market_volume, state):
               "change24": ticker.get("change_percentage"), "market_cap": market_cap,
               "market_volume": market_volume, "oi_usd": None, "oi_change24": None,
               "oi_change4h": None, "oi_volume24": None, "funding_avg": None,
-              "liquidations24": None, "long1h": None, "short1h": None,
+              "liquidations24": None, "long15m": None, "long1h": None, "short1h": None,
               "long1d": None, "short1d": None}
     if not COINALYZE_API_KEY:
         return result
@@ -513,7 +513,7 @@ def coinalyze_spike_metrics(contract, ticker, market_cap, market_volume, state):
             if symbol not in seen:
                 selected.append(row)
                 seen.add(symbol)
-            if len(selected) == 3:
+            if len(selected) == 2:
                 break
         if not selected:
             return result
@@ -563,7 +563,8 @@ def coinalyze_spike_metrics(contract, ticker, market_cap, market_volume, state):
         if liq_found:
             result["liquidations24"] = liq_sum
 
-        for label, interval, since in (("1h", "1hour", now - 2 * 3600),
+        for label, interval, since in (("15m", "15min", now - 3600),
+                                       ("1h", "1hour", now - 2 * 3600),
                                        ("1d", "daily", now - 2 * 86400)):
             try:
                 ratio_rows = coinalyze_request("/long-short-ratio-history", {
@@ -637,6 +638,7 @@ def spike_metric_text(metrics):
         f"⚪️ Vol 24h / Mkt Cap: {ratio(metrics.get('market_volume'), metrics.get('market_cap'))}\n"
         f"⚪️ FR Avg: {pct(None if metrics.get('funding_avg') is None else float(metrics['funding_avg']) * 100, 4)}\n"
         f"⚪️ Liqs 24h: {money(metrics.get('liquidations24'))}\n"
+        f"⚪️ Long 15m: {pct(metrics.get('long15m'))}\n"
         f"⚪️ Long 1h: {pct(metrics.get('long1h'))} | Short 1h: {pct(metrics.get('short1h'))}\n"
         f"⚪️ Long 1d: {pct(metrics.get('long1d'))} | Short 1d: {pct(metrics.get('short1d'))}"
     )
@@ -880,7 +882,13 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
     coinalyze_checks_this_scan = 0
     max_coinalyze_checks_per_scan = 6
-    for ticker in tickers:
+    def _turnover_rank(item):
+        try:
+            return float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    scan_tickers = sorted(tickers, key=_turnover_rank, reverse=True)
+    for ticker in scan_tickers:
         contract = ticker.get("contract", "")
         if not is_crypto_contract(contract):
             continue
@@ -1003,24 +1011,10 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 )
             counts["pump_detected"] += 1
 
-            # Apply the long/short crowding filter only after the coin has passed
-            # market-cap/volume/OI checks and an actual impulse exists.
-            ls = leg_spike_long_short_filter(contract)
-            if not ls.get("valid") or not ls.get("passed"):
-                if contract in early_pattern_details:
-                    early_filter_status[contract] = ("Long/short ratio rejected" if ls.get("valid") else "OKX ratio data unavailable")
-                if ls.get("valid"):
-                    counts["ratio_rejected"] += 1
-                    print(
-                        f"{contract}: LEG SPIKE ratio rejected; "
-                        f"15m={ls['ratio_15m']:.1f}%, 1h={ls['ratio_1h']:.1f}%, "
-                        f"1d={ls['ratio_1d']:.1f}%"
-                    )
-                else:
-                    counts["ratio_unavailable"] += 1
-                continue
-            counts["ratio_pass"] += 1
-            if contract in early_pattern_details: early_filter_status[contract] = "Data filters passed; waiting for closed-candle Fib reaction"
+            # Use Coinalyze long/short data at the actual closed-candle Fib reaction
+            # instead of blocking symbols solely because OKX does not list them.
+            if contract in early_pattern_details:
+                early_filter_status[contract] = "OI/funding passed; waiting for closed-candle Fib reaction"
 
             price = float(candles[-1]["c"])
             low = float(candidate["low"])
@@ -1043,28 +1037,30 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if risk <= 0:
                         continue
                     metrics = coinalyze_spike_metrics(contract, ticker, market_cap, total_market_volume, state)
-                    if metrics.get("change24") not in (None, "") and float(metrics["change24"]) <= 0:
-                        print(f"{contract}: LEG SPIKE rejected; 24h price change is not positive")
+                    if metrics.get("change24") in (None, "") or float(metrics["change24"]) <= 0:
+                        print(f"{contract}: LEG SPIKE rejected; 24h price change is missing or not positive")
                         continue
                     if metrics.get("oi_change4h") is None or metrics["oi_change4h"] <= 0:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze OI 4h change is missing or not positive")
                         continue
-                    if metrics.get("funding_avg") is not None and metrics["funding_avg"] >= 0:
-                        print(f"{contract}: LEG SPIKE rejected; Coinalyze average funding is non-negative")
+                    if metrics.get("funding_avg") is None or metrics["funding_avg"] >= 0:
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze average funding is missing or non-negative")
                         continue
-                    if metrics.get("long1h") is not None and metrics["long1h"] < 60:
-                        print(f"{contract}: LEG SPIKE rejected; Coinalyze 1h long share is below 60%")
+                    if metrics.get("long15m") is None or metrics["long15m"] <= 50:
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze 15m long share is missing or <=50%")
                         continue
-                    if metrics.get("long1d") is not None and metrics["long1d"] > 70:
-                        print(f"{contract}: LEG SPIKE rejected; Coinalyze daily long share exceeds 70%")
+                    if metrics.get("long1h") is None or metrics["long1h"] < 60:
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze 1h long share is missing or below 60%")
                         continue
-                    alert_oi = metrics.get("oi_usd") or oi_usd
+                    if metrics.get("long1d") is None or metrics["long1d"] > 70:
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze daily long share is missing or exceeds 70%")
+                        continue
+                    alert_oi = metrics.get("oi_usd")
                     alert_funding = metrics.get("funding_avg")
-                    if alert_funding is None:
-                        alert_funding = funding
-                    if alert_oi / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
+                    if alert_oi is None or alert_oi <= 0 or alert_oi / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
                         print(f"{contract}: LEG SPIKE rejected; OI/market cap below minimum")
                         continue
+                    counts["ratio_pass"] += 1
                     daily_long = metrics.get("long1d")
                     daily_warning = ("⚠️ هشدار شلوغی لانگ روزانه؛ ریسک ازدحام بالا"
                                      if daily_long is not None and daily_long > 60
