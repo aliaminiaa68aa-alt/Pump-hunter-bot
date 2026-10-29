@@ -98,10 +98,15 @@ def load_alert_state():
     import json
     from pathlib import Path
     path = Path(".bot_state/alerts.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     except Exception:
-        return {}
+        data = {}
+    # Backward-compatible with the earlier flat state format.
+    if "alerts" not in data or "candidates" not in data:
+        data = {"alerts": data if isinstance(data, dict) else {}, "candidates": {}}
+    return data
 
 
 def save_alert_state(state):
@@ -112,79 +117,33 @@ def save_alert_state(state):
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def find_recent_setup(candles):
-    """
-    Find a recent high-volume 5m impulse, a pullback that holds its low,
-    and a closed 5m candle that breaks above the short-term pullback highs.
-    Returns setup details only when the latest closed candle confirms the break.
-    """
+def find_recent_impulse(candles):
+    """Return a recent closed 5m high-volume impulse candle, if present."""
     if len(candles) < 24:
         return None
-
-    latest = candles[-1]
-    latest_open = float(latest["o"])
-    latest_close = float(latest["c"])
-    if latest_close <= latest_open:
-        return None
-
-    # Look for an impulse in the previous 2-7 closed candles, not the breakout candle.
     first_idx = max(20, len(candles) - 8)
     last_idx = len(candles) - 2
-    impulse_idx = None
-    impulse_ratio = 0.0
+    found = None
     for idx in range(first_idx, last_idx + 1):
         previous = candles[idx - 20:idx]
         avg_turnover = sum(float(item.get("sum", 0) or 0) for item in previous) / 20
+        turnover = float(candles[idx].get("sum", 0) or 0)
         candle = candles[idx]
-        turnover = float(candle.get("sum", 0) or 0)
         open_price = float(candle["o"])
         close_price = float(candle["c"])
         change_pct = (close_price / open_price - 1) * 100 if open_price else 0
         ratio = turnover / avg_turnover if avg_turnover > 0 else 0
         if ratio >= 5 and change_pct >= 1 and close_price > open_price:
-            impulse_idx = idx
-            impulse_ratio = ratio
-
-    if impulse_idx is None:
-        return None
-
-    impulse = candles[impulse_idx]
-    after_impulse = candles[impulse_idx + 1:-1]
-    if len(after_impulse) < 1:
-        return None
-
-    impulse_low = min(float(impulse["l"]), float(impulse["o"]), float(impulse["c"]))
-    pullback_low = min(float(item["l"]) for item in after_impulse)
-    # Reject the setup if any post-impulse candle closed below the impulse low.
-    if pullback_low <= impulse_low:
-        return None
-
-    # Break of structure: current closed candle closes above the prior 3 candles' highs.
-    recent_before_break = candles[-4:-1]
-    if len(recent_before_break) < 3:
-        return None
-    short_term_high = max(float(item["h"]) for item in recent_before_break)
-    if latest_close <= short_term_high:
-        return None
-
-    stop = min(float(item["l"]) for item in candles[max(impulse_idx, len(candles) - 6):-1])
-    if stop >= latest_close:
-        return None
-
-    return {
-        "impulse_time": str(impulse.get("t", impulse_idx)),
-        "impulse_change": (float(impulse["c"]) / float(impulse["o"]) - 1) * 100,
-        "impulse_ratio": impulse_ratio,
-        "entry": latest_close,
-        "stop": stop,
-        "break_high": short_term_high,
-        "risk": latest_close - stop,
-        "candle_time": str(latest.get("t", "")),
-    }
+            found = {
+                "impulse_time": str(candle.get("t", idx)),
+                "impulse_low": float(candle["l"]),
+                "impulse_change": change_pct,
+                "impulse_ratio": ratio,
+            }
+    return found
 
 
 def scan():
-    # Public Gate.io USDT perpetual market data; no exchange API key required.
     tickers = get_json("/futures/usdt/tickers")
     liquid = []
     print(f"Gate.io tickers received: {len(tickers)}")
@@ -196,19 +155,24 @@ def scan():
     coins = sorted(liquid, key=lambda pair: pair[1], reverse=True)[:100]
     print(f"Gate.io liquid contracts checked: {len(coins)}")
 
+    state = load_alert_state()
+    alerts_state = state["alerts"]
+    candidates = state["candidates"]
+
     btc_ok, btc_change = btc_market_filter()
     if not btc_ok:
-        print("Scan stopped before alerts because BTC 15m candle is sharply bearish.")
+        print("BTC filter: paused confirmed entry alerts due to a sharply bearish 15m candle.")
+        save_alert_state(state)
         return
 
-    state = load_alert_state()
     alerts = 0
     candle_checks = 0
-    impulses = 0
+    recent_impulses = 0
+    bos_checks = 0
     confirms15 = 0
     confirms1h = 0
     oi_checks = 0
-    structure_breaks = 0
+    now = int(time.time())
 
     for ticker, _turnover24h in coins:
         contract = ticker["contract"]
@@ -217,25 +181,82 @@ def scan():
             if len(candles) < 24:
                 continue
             candle_checks += 1
+            latest = candles[-1]
+            latest_time = int(latest.get("t", now))
+            latest_open = float(latest["o"])
+            latest_close = float(latest["c"])
 
-            setup = find_recent_setup(candles)
-            if not setup:
+            impulse = find_recent_impulse(candles)
+            candidate = candidates.get(contract)
+
+            # Track a fresh impulse across runs; preserve any BOS already observed
+            # when the same impulse is seen again.
+            if impulse:
+                recent_impulses += 1
+                if not candidate or candidate.get("impulse_time") != impulse["impulse_time"]:
+                    candidate = {
+                        **impulse,
+                        "bos_level": None,
+                        "bos_time": None,
+                        "pullback_low": impulse["impulse_low"],
+                    }
+                    candidates[contract] = candidate
+
+            if not candidate:
                 continue
-            impulses += 1
+
+            try:
+                impulse_time = int(candidate["impulse_time"])
+            except (TypeError, ValueError):
+                impulse_time = latest_time
+            # Expire unconfirmed setups after one hour.
+            if latest_time - impulse_time > 3600:
+                candidates.pop(contract, None)
+                continue
+
+            # Find the impulse candle in the recent candle window and validate its low.
+            impulse_idx = next((i for i, candle in enumerate(candles)
+                                if str(candle.get("t", i)) == str(candidate["impulse_time"])), None)
+            if impulse_idx is None:
+                continue
+            post_impulse = candles[impulse_idx + 1:]
+            if not post_impulse:
+                continue
+            lowest_after_impulse = min(float(item["l"]) for item in post_impulse)
+            if lowest_after_impulse <= float(candidate["impulse_low"]):
+                print(f"{contract}: setup invalidated; price broke the impulse low")
+                candidates.pop(contract, None)
+                continue
+            candidate["pullback_low"] = min(float(candidate.get("pullback_low", candidate["impulse_low"])),
+                                              lowest_after_impulse)
+
+            # Detect and remember a closed-candle break above the previous 3-candle high.
+            previous_three = candles[-4:-1]
+            if len(previous_three) == 3 and latest_close > latest_open:
+                short_term_high = max(float(item["h"]) for item in previous_three)
+                if latest_close > short_term_high:
+                    candidate["bos_level"] = short_term_high
+                    candidate["bos_time"] = str(latest.get("t", ""))
+                    print(f"{contract}: 5m break of structure detected at {short_term_high}")
+
+            # If BOS occurred earlier, wait for confirmation while price remains above its level.
+            bos_level = candidate.get("bos_level")
+            if bos_level is None or latest_close <= float(bos_level):
+                continue
+            bos_checks += 1
 
             confirmed15, change15 = confirms_15m(contract)
             if not confirmed15:
-                print(f"{contract}: setup watched, waiting for bullish 15m confirmation")
+                print(f"{contract}: BOS seen; waiting for closed 15m bullish confirmation")
                 continue
             confirms15 += 1
 
-            confirmed1h, change1h, ema20 = confirms_1h(contract)
+            confirmed1h, change1h, _ema20 = confirms_1h(contract)
             if not confirmed1h:
-                print(f"{contract}: 15m confirmed, but 1h trend filter not confirmed")
+                print(f"{contract}: 15m confirmed; waiting for price above rising 1h EMA20")
                 continue
             confirms1h += 1
 
-            now = int(time.time())
             oi_rows = get_json(
                 "/futures/usdt/contract_stats",
                 {"contract": contract, "from": now - 900, "to": now, "interval": "5m", "limit": 3},
@@ -254,16 +275,19 @@ def scan():
             if oi_change < 0.2:
                 print(f"{contract}: skipped; OI change {oi_change:.3f}% is below +0.2%")
                 continue
-            structure_breaks += 1
 
-            # One confirmed alert per impulse candle, persisted between scheduled runs.
-            if state.get(contract) == setup["impulse_time"]:
-                print(f"{contract}: confirmed setup already alerted for this impulse")
+            # One final alert per impulse candle.
+            if alerts_state.get(contract) == candidate["impulse_time"]:
+                print(f"{contract}: final alert already sent for this impulse")
+                candidates.pop(contract, None)
                 continue
 
-            entry = setup["entry"]
-            stop = setup["stop"]
-            risk = setup["risk"]
+            entry = latest_close
+            stop = float(candidate["pullback_low"])
+            risk = entry - stop
+            if risk <= 0:
+                print(f"{contract}: invalid entry/stop distance")
+                continue
             tp1 = entry + risk
             tp2 = entry + 2 * risk
             btc_text = f"{btc_change:+.2f}%" if btc_change is not None else "نامشخص"
@@ -277,33 +301,34 @@ def scan():
 
             message = (
                 f"✅ تأیید نهایی ستاپ صعودی: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
-                f"کندل ۵دقیقه: شکست سقف کوتاه‌مدت تأیید شد\n"
+                f"شکست ساختار ۵دقیقه‌ای ثبت شده و قیمت بالای سطح شکست است\n"
                 f"کندل ۱۵دقیقه: تأیید صعودی ({change15:+.2f}%)\n"
-                f"روند ۱ساعته: بالای EMA20 صعودی ({change1h_text})\n"
-                f"حرکت اولیه: {setup['impulse_change']:+.2f}%؛ حجم {setup['impulse_ratio']:.1f} برابر میانگین\n"
+                f"روند ۱ساعته: قیمت بالای EMA20 صعودی ({change1h_text})\n"
+                f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین\n"
                 f"تغییر OI: {oi_change:+.2f}% | Funding: {funding_text}\n"
                 f"BTC در ۱۵دقیقه: {btc_text}\n\n"
-                f"ورود پیشنهادی (بسته‌شدن کندل تأیید): {entry}\n"
-                f"حد ضرر پیشنهادی: {stop}\n"
+                f"ورود پیشنهادی: {entry}\n"
+                f"حد ضرر پیشنهادی زیر کف پول‌بک: {stop}\n"
                 f"هدف ۱ (ریسک‌به‌بازده ۱:۱): {tp1}\n"
                 f"هدف ۲ (ریسک‌به‌بازده ۱:۲): {tp2}\n"
-                "⚠️ سطوح محاسباتی و تقریبی‌اند، تضمین سود نیستند؛ قبل از ورود اسپرد، نقدشوندگی و فاصله حد ضرر را بررسی کن."
+                "⚠️ این هشدار تأیید الگوریتمی است، نه تضمین سود؛ قبل از ورود نقدشوندگی، اسپرد و ریسک را بررسی کن."
             )
             send_message(message)
-            state[contract] = setup["impulse_time"]
-            save_alert_state(state)
+            alerts_state[contract] = candidate["impulse_time"]
+            candidates.pop(contract, None)
             alerts += 1
-            print(f"Confirmed alert sent: {contract}")
+            print(f"Confirmed entry alert sent: {contract}")
             time.sleep(1)
         except Exception as error:
             print(f"{contract}: {type(error).__name__}: {error}")
 
+    save_alert_state(state)
     print(
-        f"Diagnostics: candle_checks={candle_checks}, recent_impulses={impulses}, "
-        f"confirmations_15m={confirms15}, confirmations_1h={confirms1h}, "
-        f"oi_checks={oi_checks}, structure_breaks={structure_breaks}"
+        f"Diagnostics: candle_checks={candle_checks}, recent_impulses={recent_impulses}, "
+        f"bos_confirmations={bos_checks}, confirmations_15m={confirms15}, "
+        f"confirmations_1h={confirms1h}, oi_checks={oi_checks}"
     )
-    print(f"Scan finished. Confirmed alerts sent: {alerts}")
+    print(f"Scan finished. Confirmed entry alerts sent: {alerts}")
 
 
 if __name__ == "__main__":
