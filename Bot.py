@@ -145,8 +145,32 @@ def find_recent_impulse(candles):
     return found
 
 
+def check_derivatives_data(tickers):
+    """Log a lightweight health check for the public funding and OI fields."""
+    btc_ticker = next((item for item in tickers if item.get("contract") == "BTC_USDT"), {})
+    funding_available = btc_ticker.get("funding_rate") not in (None, "")
+    try:
+        stats = get_json(
+            "/futures/usdt/contract_stats",
+            {
+                "contract": "BTC_USDT",
+                "from": int(time.time()) - 900,
+                "interval": "5m",
+                "limit": 3,
+            },
+        )
+        oi_rows = [row for row in stats if row.get("open_interest") not in (None, "")]
+        print(
+            "Data-source check: BTC funding_rate_available="
+            f"{funding_available}, OI_records={len(oi_rows)}"
+        )
+    except Exception as error:
+        print(f"Data-source check failed for BTC OI: {type(error).__name__}: {error}")
+
+
 def scan():
     tickers = get_json("/futures/usdt/tickers")
+    check_derivatives_data(tickers)
     liquid = []
     print(f"Gate.io tickers received: {len(tickers)}")
     for item in tickers:
