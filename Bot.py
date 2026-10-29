@@ -275,7 +275,7 @@ def scan():
 
             oi_rows = get_json(
                 "/futures/usdt/contract_stats",
-                {"contract": contract, "from": now - 900, "to": now, "interval": "5m", "limit": 3},
+                {"contract": contract, "from": now - 900, "interval": "5m", "limit": 3},
             )
             oi_rows = sorted(oi_rows, key=lambda row: int(row.get("time", 0)))
             oi_rows = [row for row in oi_rows if row.get("open_interest") not in (None, "")]
