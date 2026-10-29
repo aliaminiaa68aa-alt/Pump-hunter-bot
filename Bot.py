@@ -1110,6 +1110,12 @@ def scan():
 
 if __name__ == "__main__":
     print("Coinalyze API key configured: " + ("yes" if COINALYZE_API_KEY else "no"))
+    if COINALYZE_API_KEY:
+        try:
+            _coinalyze_markets = coinalyze_request("/future-markets")
+            print(f"Coinalyze API connectivity: OK; markets={len(_coinalyze_markets)}")
+        except Exception as _coinalyze_error:
+            print(f"Coinalyze API connectivity: FAILED ({type(_coinalyze_error).__name__}: {_coinalyze_error})")
     if not TOKEN or not CHAT_ID:
         raise SystemExit("BOT_TOKEN یا CHAT_ID در GitHub Secrets تنظیم نشده است.")
     scan()
