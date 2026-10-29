@@ -325,12 +325,14 @@ def coinalyze_derivatives_check(contract, state):
                                        exchange_name(row).upper()))
         selected = []
         seen = set()
+        # Two independent exchanges are enough for the cross-check and keep
+        # weighted symbol usage inside Coinalyze's 40-calls/minute quota.
         for row in eligible:
             symbol = str(row["symbol"])
             if symbol not in seen:
                 selected.append(row)
                 seen.add(symbol)
-            if len(selected) >= 3:
+            if len(selected) >= 2:
                 break
         if len(selected) < 2:
             return {"configured": True, "valid": False, "reason": "Coinalyze کمتر از دو بازار پرپچوال USDT برای این ارز دارد"}
@@ -876,6 +878,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
         print("LEG SPIKE early-pattern samples: " + ("; ".join(early_pattern_samples) or "none"))
         return
 
+    coinalyze_checks_this_scan = 0
+    max_coinalyze_checks_per_scan = 6
     for ticker in tickers:
         contract = ticker.get("contract", "")
         if not is_crypto_contract(contract):
@@ -921,6 +925,12 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
             # Coinalyze is the primary OI/funding source when configured. Do not
             # reject a candidate using Gate.io OI before checking the requested aggregate.
+            # Bound weighted API usage per scan; prioritize earlier (more liquid) ticker rows.
+            if COINALYZE_API_KEY and coinalyze_checks_this_scan >= max_coinalyze_checks_per_scan:
+                if contract in early_pattern_details:
+                    early_filter_status[contract] = "Coinalyze scan quota reached; skipped this cycle"
+                continue
+            coinalyze_checks_this_scan += 1
             coinalyze_check = coinalyze_derivatives_check(contract, state)
             if coinalyze_check.get("configured"):
                 if not coinalyze_check.get("valid"):
