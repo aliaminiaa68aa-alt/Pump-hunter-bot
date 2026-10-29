@@ -560,7 +560,7 @@ def detect_fib_pump(candles):
     return best
 
 
-def scan_fib_pullbacks(tickers, state):
+def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     """Scan LEG SPIKE with staged diagnostics and avoid ratio API calls before a real pump exists."""
     caps, ambiguous = get_market_caps(state)
     market_volumes = state.get("market_cap_cache", {}).get("volumes", {})
@@ -643,6 +643,16 @@ def scan_fib_pullbacks(tickers, state):
         except Exception as error:
             counts["early_candle_errors"] += 1
             print(f"{contract}: LEG SPIKE early scan failed: {type(error).__name__}: {error}")
+
+    if not confirmed_entries:
+        print("LEG SPIKE: confirmed-entry checks paused by BTC filter; independent early scan completed.")
+        print(
+            "LEG SPIKE diagnostics: " +
+            ", ".join(f"{key}={value}" for key, value in counts.items()) +
+            f", active={len(candidates)}, caps_cached={len(caps)}, ambiguous_symbols={len(ambiguous)}"
+        )
+        print("LEG SPIKE early-pattern samples: " + ("; ".join(early_pattern_samples) or "none"))
+        return
 
     for ticker in tickers:
         contract = ticker.get("contract", "")
@@ -879,13 +889,15 @@ def scan():
     early_alerts_state = state["early_alerts"]
 
     btc_ok, btc_change = btc_market_filter()
+
+    # Run LEG SPIKE's independent early-warning scan even when BTC pauses confirmed entries.
+    # The BTC filter still blocks final entries for both strategies.
+    # LEG SPIKE scans the full Gate.io USDT perpetual universe; regular strategy stays top-100 liquid only.
+    scan_fib_pullbacks(tickers, state, confirmed_entries=btc_ok)
     if not btc_ok:
-        print("BTC filter: paused confirmed entry alerts due to a sharply bearish 15m candle.")
+        print("BTC filter: paused confirmed entry alerts; independent early warnings were still scanned.")
         save_alert_state(state)
         return
-
-    # LEG SPIKE scans the full Gate.io USDT perpetual universe; the regular strategy stays top-100 liquid only.
-    scan_fib_pullbacks(tickers, state)
 
     alerts = 0
     candle_checks = 0
