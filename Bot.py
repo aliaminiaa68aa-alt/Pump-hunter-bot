@@ -77,8 +77,8 @@ def btc_market_filter():
     print(f"BTC 15m closed-candle change: {change:+.2f}%")
     # A routine -0.5% candle must not veto an independently confirmed altcoin setup.
     # Only a severe closed 15m BTC sell-off pauses final-entry alerts.
-    if change <= -1.2:
-        print("BTC risk filter: paused final entries only; BTC 15m sell-off is severe (<= -1.2%)")
+    if change <= -3.0:
+        print("BTC risk filter: paused final entries only; BTC 15m sell-off is severe (<= -3.0%)")
         return False, change
     print("BTC risk filter: no severe 15m sell-off; altcoin setup checks may continue")
     return True, change
