@@ -1369,7 +1369,10 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             levels = (("0.66", float(candidate["fib66"])), ("0.50", float(candidate["fib50"])))
             for level_name, level in levels:
                 alert_key = f'{candidate["end_time"]}:{level_name}'
-                if sent.get(contract) == alert_key:
+                # Only one final entry alert per impulse, even if price later
+                # reacts at the other Fib level on a subsequent scan.
+                previous_fib_alert = str(sent.get(contract, ""))
+                if previous_fib_alert.startswith(f'{candidate["end_time"]}:'):
                     continue
                 # Check the latest three CLOSED candles after the impulse. A valid
                 # Fib rejection can occur while OI/ratio checks are being rate-limited;
