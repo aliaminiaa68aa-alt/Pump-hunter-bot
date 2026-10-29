@@ -231,41 +231,70 @@ def public_derivatives_check(contract):
         return {"valid": False, "reason": "داده عمومی OI/Funding از Bybit دریافت نشد"}
 
 
-BINANCE_FAPI_BASE = "https://fapi.binance.com"
+OKX_BASE = "https://www.okx.com"
 
 
-def binance_long_ratio(contract, period):
-    """Return Binance USDⓈ-M global account long share (0..100%)."""
+def okx_ratio_to_long_pct(value):
+    ratio = float(value)
+    if ratio < 0:
+        raise RuntimeError("Negative OKX long/short ratio")
+    return ratio / (1.0 + ratio) * 100.0
+
+
+def okx_contract_long_ratio(contract, period):
+    """Read per-contract OKX long/short account ratio and convert to long share."""
     base_asset = contract[:-5] if contract.endswith("_USDT") else contract
-    symbol = base_asset + "USDT"
+    inst_id = f"{base_asset}-USDT-SWAP"
     response = SESSION.get(
-        BINANCE_FAPI_BASE + "/futures/data/globalLongShortAccountRatio",
-        params={"symbol": symbol, "period": period, "limit": 1},
+        OKX_BASE + "/api/v5/rubik/stat/contracts/long-short-account-ratio-contract",
+        params={"instId": inst_id, "period": period, "limit": 1},
         timeout=12,
     )
     response.raise_for_status()
-    rows = response.json()
-    if not isinstance(rows, list) or not rows:
-        raise RuntimeError(f"No Binance long/short data for {symbol}/{period}")
+    payload = response.json()
+    if payload.get("code") != "0":
+        raise RuntimeError(f"OKX API error: {payload.get('msg', payload)}")
+    rows = payload.get("data", [])
+    if not rows:
+        raise RuntimeError(f"No OKX long/short data for {inst_id}/{period}")
     row = rows[-1]
-    long_share = float(row.get("longAccount", 0))
-    short_share = float(row.get("shortAccount", 0))
-    total = long_share + short_share
-    if total <= 0 or not (0 <= long_share <= 1.0 and 0 <= short_share <= 1.0):
-        raise RuntimeError(f"Invalid Binance account-ratio data for {symbol}/{period}")
-    return long_share / total * 100
+    raw_ratio = row.get("longShortRatio")
+    if raw_ratio in (None, ""):
+        raise RuntimeError(f"Missing ratio for {inst_id}/{period}")
+    return okx_ratio_to_long_pct(raw_ratio)
+
+
+def okx_currency_daily_long_ratio(contract):
+    """Daily account ratio by currency, as OKX's contract endpoint lacks daily granularity."""
+    base_asset = contract[:-5] if contract.endswith("_USDT") else contract
+    response = SESSION.get(
+        OKX_BASE + "/api/v5/rubik/stat/contracts/long-short-account-ratio",
+        params={"ccy": base_asset, "period": "1D", "limit": 1},
+        timeout=12,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("code") != "0":
+        raise RuntimeError(f"OKX API error: {payload.get('msg', payload)}")
+    rows = payload.get("data", [])
+    if not rows:
+        raise RuntimeError(f"No OKX daily long/short data for {base_asset}")
+    raw_ratio = rows[-1].get("longShortRatio")
+    if raw_ratio in (None, ""):
+        raise RuntimeError(f"Missing daily ratio for {base_asset}")
+    return okx_ratio_to_long_pct(raw_ratio)
 
 
 def leg_spike_long_short_filter(contract):
     """
-    LEG SPIKE crowding filter based on Binance public global account ratio:
+    LEG SPIKE crowding filter using public OKX account-ratio data:
     15m long share >50%, 1h >50%, daily <=70%.
-    Fail closed if the source or symbol is unavailable.
+    Fail closed if required data is unavailable.
     """
     try:
-        ratio_15m = binance_long_ratio(contract, "15m")
-        ratio_1h = binance_long_ratio(contract, "1h")
-        ratio_1d = binance_long_ratio(contract, "1d")
+        ratio_15m = okx_contract_long_ratio(contract, "15m")
+        ratio_1h = okx_contract_long_ratio(contract, "1H")
+        ratio_1d = okx_currency_daily_long_ratio(contract)
         passed = ratio_15m > 50.0 and ratio_1h > 50.0 and ratio_1d <= 70.0
         return {
             "valid": True, "passed": passed,
@@ -273,8 +302,8 @@ def leg_spike_long_short_filter(contract):
             "symbol": (contract[:-5] if contract.endswith("_USDT") else contract) + "USDT",
         }
     except Exception as error:
-        print(f"{contract}: Binance long/short ratio unavailable: {type(error).__name__}: {error}")
-        return {"valid": False, "passed": False, "reason": "داده نسبت لانگ/شورت Binance در دسترس نیست"}
+        print(f"{contract}: OKX long/short ratio unavailable: {type(error).__name__}: {error}")
+        return {"valid": False, "passed": False, "reason": "داده نسبت لانگ/شورت OKX در دسترس نیست"}
 
 
 # Fibonacci pullback strategy configuration.
