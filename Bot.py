@@ -920,7 +920,18 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
         key=lambda item: float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0),
         reverse=True,
     )[:300]
-    caps, ambiguous = get_market_caps(state, [item.get("contract", "").split("_")[0] for item in cmc_priority])
+    # Always request market data for persisted LEG SPIKE candidates too, even if
+    # they have temporarily fallen outside the top-300 turnover list. Otherwise
+    # tracked setups can never reach Stage 2/3 simply because their symbol was
+    # omitted from the current market-cap lookup universe.
+    cap_symbols = [item.get("contract", "").split("_")[0] for item in cmc_priority]
+    live_contracts = {item.get("contract", "") for item in tickers}
+    tracked_symbols = [
+        contract[:-5] for contract in candidates
+        if contract in live_contracts and is_crypto_contract(contract)
+    ]
+    cap_symbols = list(dict.fromkeys(cap_symbols + tracked_symbols))
+    caps, ambiguous = get_market_caps(state, cap_symbols)
     market_volumes = state.get("market_cap_cache", {}).get("volumes", {})
     candidates = state["fib_candidates"]
     sent = state["fib_alerts"]
