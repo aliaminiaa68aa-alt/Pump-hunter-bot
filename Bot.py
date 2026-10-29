@@ -751,8 +751,8 @@ def get_market_caps(state):
         return cache.get("caps", {}), cache.get("ambiguous", [])
 
 
-def detect_fib_pump(candles):
-    """Find a 2- or 3-candle bullish impulse with large bodies among recent closed 5m candles."""
+def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=FIB_MIN_TOTAL_PUMP_PCT):
+    """Find a recent 2- or 3-candle bullish impulse; early alerts may use softer thresholds."""
     if len(candles) < 10:
         return None
     # Prefer the strongest recent sequence, but only start a setup if it is still recent.
@@ -770,7 +770,7 @@ def detect_fib_pump(candles):
                 op = float(candle["o"])
                 cl = float(candle["c"])
                 body_pct = (cl / op - 1) * 100 if op else 0
-                if cl <= op or body_pct < FIB_MIN_BODY_PCT:
+                if cl <= op or body_pct < min_body_pct:
                     valid = False
                     break
                 bodies.append(body_pct)
@@ -779,7 +779,7 @@ def detect_fib_pump(candles):
             low = min(float(x["l"]) for x in seq)
             high = max(float(x["h"]) for x in seq)
             total_pct = (high / low - 1) * 100 if low else 0
-            if total_pct < FIB_MIN_TOTAL_PUMP_PCT or high <= low:
+            if total_pct < min_total_pump_pct or high <= low:
                 continue
             # Candidate must have its latest impulse candle among the last 3 closed candles.
             if end < len(candles) - 3:
@@ -818,7 +818,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
     # Early heads-up scan is deliberately independent of funding, market-cap,
     # volume/MC, OI and long/short filters. Those remain mandatory for confirmed entries.
-    # Limit candle requests to the 100 most liquid USDT contracts each run.
+    # Scan more liquid contracts for early alerts; final-entry filters remain strict.
     liquid_for_early = []
     for item in tickers:
         symbol = item.get("contract", "")
@@ -831,13 +831,13 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
         liquid_for_early.append((turnover, item))
     liquid_for_early.sort(key=lambda pair: pair[0], reverse=True)
 
-    for _turnover, item in liquid_for_early[:100]:
+    for _turnover, item in liquid_for_early[:150]:
         contract = item.get("contract", "")
         try:
             candles = closed_candles(contract, "5m", 20)
             early_candle_cache[contract] = candles
             counts["early_scan_checked"] += 1
-            early_candidate = detect_fib_pump(candles)
+            early_candidate = detect_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0)
             if not early_candidate:
                 continue
             counts["early_patterns_seen"] += 1
@@ -1126,6 +1126,30 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             if contract in early_pattern_details:
                 early_filter_status[contract] = "OI/funding passed; waiting for closed-candle Fib reaction"
 
+            # Stage 2: one stronger watch alert after volume/MC, OI/MC and funding pass.
+            # Stage 3 remains the final entry alert after Fib reaction and all confirmations.
+            setup_sent = state.setdefault("setup_alerts", {})
+            setup_key = str(candidate["end_time"])
+            if setup_sent.get(contract) != setup_key:
+                raw_change = ticker.get("change_percentage")
+                try:
+                    change24_text = f"{float(raw_change):+.2f}%"
+                except (TypeError, ValueError):
+                    change24_text = "نامشخص"
+                watch_message = (
+                    "🟠━━━━━━━━━━━━━━━━━━🟠\n"
+                    "🔎 مرحله ۲ از ۳ | ستاپ قوی‌تر شد\n"
+                    f"🪙 ارز: {contract.replace('_', '/')}\n"
+                    f"📈 حرکت ۵دقیقه‌ای: {float(candidate['pump_pct']):.2f}% در {int(candidate['body_count'])} کندل\n"
+                    f"💵 تغییر ۲۴ساعته: {change24_text} | 💧 حجم/مارکت‌کپ: {volume_mc:.2f}x\n"
+                    f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} | Funding: {funding * 100:+.4f}%\n"
+                    f"🎯 محدوده پول‌بک فیبو: {float(candidate['fib66']):.10g} تا {float(candidate['fib50']):.10g}\n"
+                    "⏳ هنوز نقطه ورود نیست؛ منتظر واکنش کندل بسته‌شده در فیبو و تأیید لانگ/شورت می‌مانیم.\n"
+                    "🟠━━━━━━━━━━━━━━━━━━🟠"
+                )
+                send_message(watch_message)
+                setup_sent[contract] = setup_key
+                print(f"{contract}: stage-2 setup alert sent")
             price = float(candles[-1]["c"])
             low = float(candidate["low"])
             high = float(candidate["high"])
