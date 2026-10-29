@@ -1393,14 +1393,12 @@ def scan():
 
     btc_ok, btc_change = btc_market_filter()
 
-    # Run LEG SPIKE's independent early-warning scan even when BTC pauses confirmed entries.
-    # The BTC filter still blocks final entries for both strategies.
-    # LEG SPIKE scans the full Gate.io USDT perpetual universe; regular strategy stays top-100 liquid only.
+    # Both strategies scan independently even when BTC pauses confirmed entries.
+    # LEG SPIKE scans the full Gate.io USDT perpetual universe; HYPE/BOS stays top-100 liquid only.
+    # The BTC filter gates only final-entry confirmation, not either strategy's early/BOS alerts.
     scan_fib_pullbacks(tickers, state, confirmed_entries=btc_ok)
     if not btc_ok:
-        print("BTC filter: paused confirmed entry alerts; independent early warnings were still scanned.")
-        save_alert_state(state)
-        return
+        print("BTC filter: final-entry alerts paused; both strategies' early/BOS alerts remain enabled.")
 
     alerts = 0
     candle_checks = 0
@@ -1521,6 +1519,11 @@ def scan():
             # If BOS occurred earlier, wait for confirmation while price remains above its level.
             bos_level = candidate.get("bos_level")
             if bos_level is None or latest_close <= float(bos_level):
+                continue
+            # BTC market filter must not suppress this strategy's early warning or BOS alert.
+            # It only blocks progression into 15m/1h/derivatives checks and final-entry alerts.
+            if not btc_ok:
+                print(f"{contract}: BOS recorded; final-entry confirmation paused by BTC filter")
                 continue
             bos_checks += 1
 
