@@ -183,6 +183,22 @@ def scan():
             price_change = (close_price / open_price - 1) * 100
             btc_text = f"{btc_change:+.2f}%" if btc_change is not None else "نامشخص"
             change_1h_text = f"{change_1h:+.2f}%" if change_1h is not None else "نامشخص"
+
+            # Gate.io ticker funding_rate is a decimal fraction; convert to percent.
+            # Negative funding is informative for possible short squeezes, not a required filter.
+            raw_funding = ticker.get("funding_rate")
+            try:
+                funding_pct = float(raw_funding) * 100 if raw_funding not in (None, "") else None
+            except (TypeError, ValueError):
+                funding_pct = None
+            if funding_pct is None:
+                funding_text = "نامشخص"
+            elif funding_pct < 0:
+                funding_text = f"{funding_pct:+.4f}% (منفی؛ امتیاز مثبت برای احتمال شورت‌اسکوئیز)"
+            elif funding_pct > 0:
+                funding_text = f"{funding_pct:+.4f}% (مثبت؛ به‌تنهایی نشانه نزولی نیست)"
+            else:
+                funding_text = "0.0000% (نزدیک صفر)"
             message = (
                 f"🚨 احتمال شروع حرکت: {contract.replace('_', '/')} (Gate.io USDT Perpetual)\n"
                 f"تغییر کندل بسته‌شده ۵ دقیقه: +{price_change:.2f}%\n"
@@ -190,6 +206,7 @@ def scan():
                 f"تغییر کندل بسته‌شده ۱ ساعته: {change_1h_text} (قیمت بالای EMA20 صعودی)\n"
                 f"ارزش معاملات نسبت به میانگین ۲۰ کندل ۵دقیقه: {turnover / avg_turnover:.1f} برابر\n"
                 f"تغییر OI در داده‌های اخیر: {oi_change:+.2f}%\n"
+                f"Funding Rate: {funding_text}\n"
                 f"تغییر کندل ۱۵دقیقه BTC: {btc_text}\n"
                 f"قیمت بسته‌شدن کندل ۵دقیقه: {close_price}\n"
                 "⚠️ هشدار برای بررسی بیشتر است؛ سیگنال قطعی خرید نیست."
