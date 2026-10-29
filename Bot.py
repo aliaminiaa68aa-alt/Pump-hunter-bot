@@ -273,6 +273,21 @@ def coinalyze_derivatives_check(contract, state):
         else:
             markets = cache.get("markets", [])
 
+        exchange_cache = state.get("coinalyze_exchange_cache", {})
+        if not exchange_cache.get("fetched_at") or now - int(exchange_cache["fetched_at"]) >= 21600:
+            exchange_rows = coinalyze_request("/exchanges")
+            exchange_names = {
+                str(item.get("code", "")).upper(): str(item.get("name", item.get("code", "unknown")))
+                for item in exchange_rows if item.get("code")
+            }
+            state["coinalyze_exchange_cache"] = {"fetched_at": now, "names": exchange_names}
+        else:
+            exchange_names = exchange_cache.get("names", {})
+
+        def exchange_name(row):
+            raw = str(row.get("exchange", "unknown"))
+            return exchange_names.get(raw.upper(), raw)
+
         base = contract[:-5].upper() if contract.endswith("_USDT") else contract.upper()
         eligible = [
             row for row in markets
@@ -283,8 +298,8 @@ def coinalyze_derivatives_check(contract, state):
             and row.get("symbol")
         ]
         priority = {"BINANCE": 0, "BYBIT": 1, "OKX": 2, "GATEIO": 3, "GATE.IO": 3}
-        eligible.sort(key=lambda row: (priority.get(str(row.get("exchange", "")).upper(), 10),
-                                       str(row.get("exchange", ""))))
+        eligible.sort(key=lambda row: (priority.get(exchange_name(row).upper().replace(" ", ""), 10),
+                                       exchange_name(row).upper()))
         selected = []
         seen = set()
         for row in eligible:
@@ -311,7 +326,7 @@ def coinalyze_derivatives_check(contract, state):
         oi_exchanges = []
         funding_values = []
         funding_exchanges = []
-        exchange_by_symbol = {str(row["symbol"]): str(row.get("exchange", "unknown")) for row in selected}
+        exchange_by_symbol = {str(row["symbol"]): exchange_name(row) for row in selected}
         for symbol in seen:
             oi_row = oi_by_symbol.get(symbol, {})
             history = oi_row.get("history", [])
