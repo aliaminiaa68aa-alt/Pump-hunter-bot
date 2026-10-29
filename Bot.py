@@ -944,7 +944,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 counts["early_duplicate_suppressed"] += 1
                 print(f"{contract}: LEG SPIKE early alert suppressed; same candle already alerted")
                 continue
-            # Avoid duplicate early messages across LEG SPIKE and the regular strategy.
+            # LEG SPIKE has its own cooldown map; it never reads or writes regular-strategy cooldowns.
             recent_early = state.setdefault("fib_early_any", {})
             try:
                 last_early_time = int(recent_early.get(contract, 0))
@@ -953,7 +953,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             if int(time.time()) - last_early_time < 3600:
                 early_sent[contract] = early_key
                 counts["early_recent_suppressed"] += 1
-                print(f"{contract}: LEG SPIKE early alert suppressed; another strategy alerted within 1h")
+                print(f"{contract}: LEG SPIKE early alert suppressed by its own 1h cooldown")
                 continue
             raw_funding = item.get("funding_rate")
             try:
@@ -1458,9 +1458,10 @@ def scan():
                     last_early_time = 0
                 if int(time.time()) - last_early_time < 3600:
                     early_alerts_state[contract] = candidate["impulse_time"]
-                    print(f"{contract}: regular early alert suppressed; another strategy alerted within 1h")
+                    print(f"{contract}: HYPE/BOS early alert suppressed by its own 1h cooldown")
                 else:
                     early_message = (
+                    "🟦 HYPE/BOS | استراتژی اصلی\n"
                     f"👀 هشدار زودهنگام؛ هنوز تأیید نشده: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                     f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین ۲۰ کندل قبلی\n"
                     f"قیمت فعلیِ کندل بسته‌شده ۵دقیقه: {latest_close}\n"
@@ -1507,6 +1508,7 @@ def scan():
                     setup_alerts = state.setdefault("regular_setup_alerts", {})
                     if setup_alerts.get(contract) != candidate["impulse_time"]:
                         setup_message = (
+                            "🟦 HYPE/BOS | استراتژی اصلی\n"
                             f"🟡 شکست ساختار ۵دقیقه‌ای: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                             f"سطح شکست: {short_term_high}\n"
                             f"قیمت کندل بسته‌شده: {latest_close}\n\n"
@@ -1635,6 +1637,7 @@ def scan():
             funding_text = f"{funding_pct:+.4f}%" if funding_pct is not None else "نامشخص"
 
             message = (
+                "🟦 HYPE/BOS | استراتژی اصلی\n"
                 f"✅ تأیید نهایی ستاپ صعودی: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                 f"شکست ساختار ۵دقیقه‌ای ثبت شده و قیمت بالای سطح شکست است\n"
                 f"کندل ۱۵دقیقه: تأیید صعودی ({change15:+.2f}%)\n"
