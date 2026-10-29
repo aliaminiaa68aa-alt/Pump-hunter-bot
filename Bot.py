@@ -414,44 +414,44 @@ def detect_fib_pump(candles):
 
 
 def scan_fib_pullbacks(tickers, state):
-    """Send separate Fib 0.5/0.66 pullback alerts only when derivatives/market-cap filters pass."""
+    """Scan LEG SPIKE with staged diagnostics and avoid ratio API calls before a real pump exists."""
     caps, ambiguous = get_market_caps(state)
     candidates = state["fib_candidates"]
     sent = state["fib_alerts"]
-    checked = 0
+    counts = {
+        "tickers": 0, "negative_funding": 0, "cap_available": 0,
+        "volume_pass": 0, "oi_pass": 0, "pump_detected": 0,
+        "ratio_pass": 0, "fib_reactions": 0,
+    }
     for ticker in tickers:
         contract = ticker.get("contract", "")
         if not contract.endswith("_USDT"):
             continue
+        counts["tickers"] += 1
         try:
             volume24 = float(ticker.get("volume_24h_quote") or ticker.get("volume_24h_usd") or 0)
-            funding = float(ticker.get("funding_rate"))
-            symbol = contract[:-5].upper()
+            raw_funding = ticker.get("funding_rate")
+            if raw_funding in (None, ""):
+                continue
+            funding = float(raw_funding)
             if funding >= 0:
                 continue
+            counts["negative_funding"] += 1
 
-            # LEG SPIKE: account long share must be >50% on 15m and 1h,
-            # and <=70% on daily. This is a separate filter from OI itself.
-            ls = leg_spike_long_short_filter(contract)
-            if not ls.get("valid") or not ls.get("passed"):
-                if ls.get("valid"):
-                    print(
-                        f"{contract}: LEG SPIKE long/short filter rejected; "
-                        f"15m={ls['ratio_15m']:.1f}%, 1h={ls['ratio_1h']:.1f}%, "
-                        f"1d={ls['ratio_1d']:.1f}%"
-                    )
-                continue
+            symbol = contract[:-5].upper()
             market_cap = caps.get(symbol)
             if not market_cap or symbol in ambiguous:
                 continue
-            if volume24 / market_cap < FIB_MIN_VOLUME_TO_MARKET_CAP:
+            counts["cap_available"] += 1
+            volume_mc = volume24 / market_cap
+            if volume_mc < FIB_MIN_VOLUME_TO_MARKET_CAP:
                 continue
+            counts["volume_pass"] += 1
 
-            # Gate.io contract_stats reports open_interest_usd in quote-currency terms.
             stats = get_json(
                 "/futures/usdt/contract_stats",
-                {"contract": contract, "from": int(time.time()) - 300,
-                 "interval": "5m", "limit": 2},
+                {"contract": contract, "from": int(time.time()) - 600,
+                 "interval": "5m", "limit": 3},
             )
             stats = sorted(stats, key=lambda row: int(row.get("time", 0)))
             oi_usd = None
@@ -462,11 +462,11 @@ def scan_fib_pullbacks(tickers, state):
                     break
             if oi_usd is None or oi_usd / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
                 continue
+            counts["oi_pass"] += 1
 
             candles = closed_candles(contract, "5m", 20)
             if len(candles) < 10:
                 continue
-            checked += 1
             candidate = candidates.get(contract)
             if candidate:
                 try:
@@ -486,46 +486,71 @@ def scan_fib_pullbacks(tickers, state):
                     "oi_usd": oi_usd, "funding": funding,
                 })
                 candidates[contract] = candidate
+                print(
+                    f"{contract}: LEG SPIKE pump found: {candidate['pump_pct']:.2f}% "
+                    f"in {candidate['body_count']} candles; waiting for Fib retracement"
+                )
+            counts["pump_detected"] += 1
+
+            # Apply the long/short crowding filter only after the coin has passed
+            # market-cap/volume/OI checks and an actual impulse exists.
+            ls = leg_spike_long_short_filter(contract)
+            if not ls.get("valid") or not ls.get("passed"):
+                if ls.get("valid"):
+                    print(
+                        f"{contract}: LEG SPIKE ratio rejected; "
+                        f"15m={ls['ratio_15m']:.1f}%, 1h={ls['ratio_1h']:.1f}%, "
+                        f"1d={ls['ratio_1d']:.1f}%"
+                    )
+                continue
+            counts["ratio_pass"] += 1
 
             price = float(candles[-1]["c"])
             low = float(candidate["low"])
             high = float(candidate["high"])
-            # Invalidate if the impulse floor is breached or the target high has already broken.
             if price <= low:
                 candidates.pop(contract, None)
+                print(f"{contract}: LEG SPIKE invalidated; impulse low breached")
                 continue
             levels = (("0.50", float(candidate["fib50"])), ("0.66", float(candidate["fib66"])))
             for level_name, level in levels:
                 alert_key = f'{candidate["end_time"]}:{level_name}'
                 if sent.get(contract) == alert_key:
                     continue
-                # Trigger only on a genuine retracement from above the level to/through it.
                 previous_close = float(candles[-2]["c"])
+                # Require a downward retracement through the level on a closed candle.
                 if previous_close > level and price <= level and price > low:
+                    counts["fib_reactions"] += 1
                     risk = level - low
                     reward = high - level
                     if risk <= 0:
                         continue
                     message = (
-                        f"🎯 ستاپ فیبوناچی پامپ: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
-                        f"اصلاح به فیبو {level_name}؛ ورود پیشنهادی: {level:.10g}\n"
+                        f"🎯 🚀 LEG SPIKE — Fibonacci + OI Filter\n"
+                        f"{contract.replace('_', '/')} (Gate.io Perpetual)\n"
+                        f"واکنش به فیبو {level_name}؛ ورود پیشنهادی: {level:.10g}\n"
+                        f"ورود ۱ (فیبو 0.50): {float(candidate['fib50']):.10g}\n"
+                        f"ورود ۲ (فیبو 0.66): {float(candidate['fib66']):.10g}\n"
                         f"سقف پامپ/هدف: {high:.10g} | کف پامپ/حد ضرر: {low:.10g}\n"
-                        f"حرکت پامپ: {float(candidate['pump_pct']):.2f}% با {int(candidate['body_count'])} کندل بدنه‌بزرگ ۵دقیقه‌ای\n"
+                        f"حرکت پامپ: {float(candidate['pump_pct']):.2f}% با {int(candidate['body_count'])} کندل قوی ۵دقیقه‌ای\n"
                         f"Funding: {funding * 100:+.4f}% (منفی)\n"
-                        f"حجم ۲۴ساعته/مارکت‌کپ: {volume24 / market_cap:.2f}x (حداقل {FIB_MIN_VOLUME_TO_MARKET_CAP:.1f}x)\n"
+                        f"حجم ۲۴ساعته/مارکت‌کپ: {volume_mc:.2f}x (حداقل {FIB_MIN_VOLUME_TO_MARKET_CAP:.1f}x)\n"
                         f"OI/مارکت‌کپ: {oi_usd / market_cap:.2%} (حداکثر {FIB_MAX_OI_TO_MARKET_CAP:.0%})\n"
+                        f"نسبت لانگ: ۱۵دقیقه {ls['ratio_15m']:.1f}% | ۱ساعت {ls['ratio_1h']:.1f}% | روزانه {ls['ratio_1d']:.1f}%\n"
                         f"نسبت سود به ریسک تا سقف: {reward / risk:.2f}:1\n"
-                        "⚠️ هشدار الگوریتمی است؛ ورود تضمینی نیست. در ورود فیبو 0.66 نسبت سود به ریسک ممکن است ضعیف باشد."
+                        "⚠️ هشدار الگوریتمی است؛ ورود تضمینی نیست. ورود 0.66 ممکن است نسبت سود به ریسک ضعیف‌تری داشته باشد."
                     )
                     send_message(message)
                     sent[contract] = alert_key
-                    print(f"Fib pullback alert sent: {contract} fib={level_name}")
-                    # One alert per coin per run to avoid duplicate messages.
+                    print(f"LEG SPIKE alert sent: {contract} fib={level_name}")
                     break
         except Exception as error:
-            print(f"{contract}: Fib strategy skipped: {type(error).__name__}: {error}")
-    print(f"Fib strategy diagnostics: candidates_checked={checked}, active={len(candidates)}")
-
+            print(f"{contract}: LEG SPIKE skipped: {type(error).__name__}: {error}")
+    print(
+        "LEG SPIKE diagnostics: " +
+        ", ".join(f"{key}={value}" for key, value in counts.items()) +
+        f", active={len(candidates)}, caps_cached={len(caps)}, ambiguous_symbols={len(ambiguous)}"
+    )
 
 def scan():
     tickers = get_json("/futures/usdt/tickers")
