@@ -75,9 +75,9 @@ def btc_market_filter():
     close_price = float(candle["c"])
     change = (close_price / open_price - 1) * 100 if open_price else 0.0
     print(f"BTC 15m closed-candle change: {change:+.2f}%")
-    # A routine -0.5% candle must not veto an independently confirmed altcoin setup.
-    # Only a severe closed 15m BTC sell-off pauses final-entry alerts.
-    if change <= -3.0:
+    # A routine BTC pullback must not veto an independently confirmed altcoin setup.
+    # A closed 15m BTC candle at -2.0% or lower pauses final-entry alerts.
+    if change <= -2.0:
         print("BTC risk filter: paused final entries only; BTC 15m sell-off is severe (<= -3.0%)")
         return False, change
     print("BTC risk filter: no severe 15m sell-off; altcoin setup checks may continue")
