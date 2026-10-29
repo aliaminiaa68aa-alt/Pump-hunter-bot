@@ -231,6 +231,47 @@ def public_derivatives_check(contract):
         return {"valid": False, "reason": "داده عمومی OI/Funding از Bybit دریافت نشد"}
 
 
+def bybit_long_ratio(contract, period):
+    """Return latest Bybit account long percentage for a linear perpetual period."""
+    base_asset = contract[:-5] if contract.endswith("_USDT") else contract
+    symbol = base_asset + "USDT"
+    result = bybit_get_json(
+        "/v5/market/account-ratio",
+        {"category": "linear", "symbol": symbol, "period": period, "limit": 1},
+    )
+    rows = result.get("list", [])
+    if not rows:
+        raise RuntimeError(f"No Bybit account-ratio data for {symbol}/{period}")
+    row = rows[0]
+    buy = float(row.get("buyRatio", 0))
+    sell = float(row.get("sellRatio", 0))
+    total = buy + sell
+    if total <= 0:
+        raise RuntimeError(f"Invalid Bybit account-ratio data for {symbol}/{period}")
+    return buy / total * 100
+
+
+def leg_spike_long_short_filter(contract):
+    """
+    LEG SPIKE crowding filter based on Bybit's public account long/short ratio:
+    15m long share > 50%, 1h > 50%, daily <= 70%.
+    Fail closed if the public source is unavailable.
+    """
+    try:
+        ratio_15m = bybit_long_ratio(contract, "15min")
+        ratio_1h = bybit_long_ratio(contract, "1h")
+        ratio_1d = bybit_long_ratio(contract, "1d")
+        passed = ratio_15m > 50.0 and ratio_1h > 50.0 and ratio_1d <= 70.0
+        return {
+            "valid": True, "passed": passed,
+            "ratio_15m": ratio_15m, "ratio_1h": ratio_1h, "ratio_1d": ratio_1d,
+            "symbol": (contract[:-5] if contract.endswith("_USDT") else contract) + "USDT",
+        }
+    except Exception as error:
+        print(f"{contract}: Bybit long/short ratio unavailable: {type(error).__name__}: {error}")
+        return {"valid": False, "passed": False, "reason": "داده نسبت لانگ/شورت Bybit در دسترس نیست"}
+
+
 # Fibonacci pullback strategy configuration.
 # "Several times market cap" is set to >=2x by default and can be tuned here.
 FIB_MIN_VOLUME_TO_MARKET_CAP = 2.0
@@ -346,6 +387,18 @@ def scan_fib_pullbacks(tickers, state):
             funding = float(ticker.get("funding_rate"))
             symbol = contract[:-5].upper()
             if funding >= 0:
+                continue
+
+            # LEG SPIKE: account long share must be >50% on 15m and 1h,
+            # and <=70% on daily. This is a separate filter from OI itself.
+            ls = leg_spike_long_short_filter(contract)
+            if not ls.get("valid") or not ls.get("passed"):
+                if ls.get("valid"):
+                    print(
+                        f"{contract}: LEG SPIKE long/short filter rejected; "
+                        f"15m={ls['ratio_15m']:.1f}%, 1h={ls['ratio_1h']:.1f}%, "
+                        f"1d={ls['ratio_1d']:.1f}%"
+                    )
                 continue
             market_cap = caps.get(symbol)
             if not market_cap or symbol in ambiguous:
