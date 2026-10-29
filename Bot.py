@@ -265,15 +265,26 @@ COINMARKETCAP_API_KEY = os.getenv("COINMARKETCAP_API_KEY", "").strip()
 
 
 def coinalyze_request(path, params=None):
-    """Authenticated Coinalyze request. API key is stored only in GitHub Actions Secrets."""
+    """Authenticated Coinalyze request with a bounded retry for temporary rate limits."""
     if not COINALYZE_API_KEY:
         raise RuntimeError("COINALYZE_API_KEY secret is not configured")
-    response = SESSION.get(
-        COINALYZE_BASE + path,
-        params=params,
-        headers={"api_key": COINALYZE_API_KEY},
-        timeout=15,
-    )
+    response = None
+    for attempt in range(2):
+        response = SESSION.get(
+            COINALYZE_BASE + path,
+            params=params,
+            headers={"api_key": COINALYZE_API_KEY},
+            timeout=15,
+        )
+        if response.status_code != 429 or attempt == 1:
+            break
+        retry_after = response.headers.get("Retry-After", "")
+        try:
+            delay = min(max(float(retry_after), 1.0), 3.0)
+        except (TypeError, ValueError):
+            delay = 1.5
+        print(f"Coinalyze rate limit on {path}; retrying once after {delay:.1f}s")
+        time.sleep(delay)
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, list):
@@ -1006,7 +1017,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     coinalyze_checks_this_scan = 0
     # Prioritize active early-pattern symbols for derivative validation, and allow
     # a few more checks: the previous quota skipped several candidates each scan.
-    max_coinalyze_checks_per_scan = 10
+    max_coinalyze_checks_per_scan = 8
     def _turnover_rank(item):
         try:
             return float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0)
