@@ -1303,11 +1303,23 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 alert_key = f'{candidate["end_time"]}:{level_name}'
                 if sent.get(contract) == alert_key:
                     continue
-                current_low = float(candles[-1]["l"])
-                # Confirm rejection on the latest closed candle: it touched/breached
-                # this Fib level intrabar and closed back above it. The prior candle
-                # does not have to close above the level (valid recoveries can start below).
-                if current_low <= level and price > level and price > low:
+                # Check the latest three CLOSED candles after the impulse. A valid
+                # Fib rejection can occur while OI/ratio checks are being rate-limited;
+                # checking only candles[-1] could permanently miss that confirmation.
+                reaction_candle = None
+                for closed_candle in reversed(candles[-3:]):
+                    try:
+                        if int(closed_candle["t"]) <= int(candidate["end_time"]):
+                            continue
+                        candle_low = float(closed_candle["l"])
+                        candle_close = float(closed_candle["c"])
+                        if candle_low <= level and candle_close > level and candle_close > low:
+                            reaction_candle = closed_candle
+                            break
+                    except (TypeError, ValueError, KeyError):
+                        continue
+                if reaction_candle is not None:
+                    reaction_close = float(reaction_candle["c"])
                     counts["fib_reactions"] += 1
                     risk = level - low
                     reward = high - level
@@ -1349,7 +1361,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         "🟢━━━━━━━━━━━━━━━━━━🟢\n"
                         f"🎯 🚀 LEG SPIKE — CoinAlayze + Fibonacci\n"
                         f"🪙 {contract.replace('_', '/')} (Gate.io Perpetual)\n"
-                        f"واکنش به فیبو {level_name}؛ ورود پیشنهادی: {level:.10g}\n"
+                        f"واکنش کندل بسته‌شده به فیبو {level_name}؛ ورود پیشنهادی: {level:.10g}\n"
                         f"ورود ۱ (فیبو 0.50): {float(candidate['fib50']):.10g}\n"
                         f"ورود ۲ (فیبو 0.66): {float(candidate['fib66']):.10g}\n"
                         f"سقف پامپ/هدف: {high:.10g} | کف پامپ/حد ضرر: {low:.10g}\n"
