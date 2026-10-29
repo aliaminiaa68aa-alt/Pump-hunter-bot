@@ -997,6 +997,39 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     f"pump={float(early_candidate['pump_pct']):.2f}%"
                 )
 
+            # User-requested top alert runs at Stage 1, before OI/MC and Fib gates.
+            # It fires once per detected impulse when a later CLOSED candle reaches/breaks its high.
+            top_alerts = state.setdefault("fib_top_alerts", {})
+            top_key = str(early_candidate["end_time"])
+            if top_alerts.get(contract) != top_key:
+                impulse_high = float(early_candidate["high"])
+                top_break_candle = None
+                for candle_idx in range(1, len(candles)):
+                    prev_candle, closed_candle = candles[candle_idx - 1], candles[candle_idx]
+                    try:
+                        if int(closed_candle["t"]) <= int(early_candidate["end_time"]):
+                            continue
+                        if float(prev_candle["c"]) < impulse_high and float(closed_candle["h"]) >= impulse_high:
+                            top_break_candle = closed_candle
+                    except (TypeError, ValueError, KeyError):
+                        continue
+                if top_break_candle is not None:
+                    top_price = float(top_break_candle["h"])
+                    top_message = (
+                        "🚀 LEG SPIKE | هشدار رسیدن به سقف پامپ\\n"
+                        "🟢━━━━━━━━━━━━━━━━━━🟢\\n"
+                        "🔔 قیمت به سقف حرکت شناسایی‌شده رسید/آن را شکست\\n"
+                        f"🪙 ارز: {contract.replace('_', '/')}\\n"
+                        f"🎯 سقف حرکت: {impulse_high:.10g}\\n"
+                        f"📍 بیشترین قیمت کندل تأیید: {top_price:.10g}\\n"
+                        f"📈 اندازه حرکت: {float(early_candidate['pump_pct']):.2f}% در {int(early_candidate['body_count'])} کندل ۵دقیقه‌ای\\n"
+                        "⚠️ این هشدار فقط رسیدن/شکست سقف را اعلام می‌کند؛ نقطه ورود، حدضرر و تارگت را خودت تعیین کن.\\n"
+                        "🟢━━━━━━━━━━━━━━━━━━🟢"
+                    )
+                    send_message(top_message)
+                    top_alerts[contract] = top_key
+                    print(f"{contract}: Stage-1 top-break alert sent at {top_price:.10g}")
+
             if len(early_pattern_samples) < 8:
                 early_pattern_samples.append(
                     f"{contract}:{early_candidate['pump_pct']:.2f}%/{early_candidate['body_count']}c"
