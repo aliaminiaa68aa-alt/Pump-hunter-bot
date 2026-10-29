@@ -1017,7 +1017,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     coinalyze_checks_this_scan = 0
     # Prioritize active early-pattern symbols for derivative validation, and allow
     # a few more checks: the previous quota skipped several candidates each scan.
-    max_coinalyze_checks_per_scan = 8
+    max_coinalyze_checks_per_scan = 5
     def _turnover_rank(item):
         try:
             return float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0)
