@@ -2,6 +2,9 @@ name: Telegram Delivery Test
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/telegram-test.yml'
 
 permissions:
   contents: read
