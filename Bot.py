@@ -71,6 +71,7 @@ def scan():
             if avg_turnover <= 0 or turnover < avg_turnover * 2 or close_price <= open_price:
                 continue
             volume_spikes += 1
+            print(f"{contract}: volume spike {turnover / avg_turnover:.2f}x, candle change {(close_price / open_price - 1) * 100:.2f}%")
 
             now = int(time.time())
             oi_rows = get_json(
@@ -94,7 +95,9 @@ def scan():
             if old_oi <= 0:
                 continue
             oi_change = (new_oi / old_oi - 1) * 100
+            print(f"{contract}: OI change {oi_change:.3f}%")
             if oi_change < 0.5:
+                print(f"{contract}: skipped because OI change is below 0.5%")
                 continue
 
             price_change = (close_price / open_price - 1) * 100
@@ -120,7 +123,4 @@ def scan():
 if __name__ == "__main__":
     if not TOKEN or not CHAT_ID:
         raise SystemExit("BOT_TOKEN یا CHAT_ID در GitHub Secrets تنظیم نشده است.")
-    if os.getenv("TEST_TELEGRAM") == "1":
-        send_message("✅ تست اتصال ربات شکار پامپ: اتصال تلگرام موفق است. این پیام فقط برای آزمایش ارسال شده.")
-        print("Telegram test message sent.")
     scan()
