@@ -919,25 +919,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             counts["volume_pass"] += 1
             if contract in early_pattern_details: early_filter_status[contract] = "Volume/MC passed; checking OI"
 
-            stats = get_json(
-                "/futures/usdt/contract_stats",
-                {"contract": contract, "from": int(time.time()) - 600,
-                 "interval": "5m", "limit": 3},
-            )
-            stats = sorted(stats, key=lambda row: int(row.get("time", 0)))
-            oi_usd = None
-            for row in reversed(stats):
-                value = row.get("open_interest_usd")
-                if value not in (None, ""):
-                    oi_usd = float(value)
-                    break
-            if oi_usd is None or oi_usd / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
-                if contract in early_pattern_details:
-                    early_filter_status[contract] = "Gate.io OI missing" if oi_usd is None else f"Gate.io OI/MC rejected ({oi_usd/market_cap:.1%})"
-                continue
-
-            # If configured, use Coinalyze's multi-exchange derivatives data as an additional
-            # mandatory LEG SPIKE gate, rather than silently relying on Gate.io alone.
+            # Coinalyze is the primary OI/funding source when configured. Do not
+            # reject a candidate using Gate.io OI before checking the requested aggregate.
             coinalyze_check = coinalyze_derivatives_check(contract, state)
             if coinalyze_check.get("configured"):
                 if not coinalyze_check.get("valid"):
@@ -948,7 +931,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 aggregate_funding = float(coinalyze_check["funding_rate"])
                 if aggregate_oi <= 0 or aggregate_oi / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
                     if contract in early_pattern_details:
-                        early_filter_status[contract] = "Coinalyze aggregate OI/MC missing or over 50%"
+                        early_filter_status[contract] = f"Coinalyze OI/MC rejected ({aggregate_oi/market_cap:.1%})"
                     continue
                 if aggregate_funding >= 0:
                     if contract in early_pattern_details:
@@ -958,6 +941,24 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 funding = aggregate_funding
                 if contract in early_pattern_details:
                     early_filter_status[contract] = "Coinalyze aggregate OI/funding passed"
+            else:
+                # Safe fallback only when no Coinalyze API key is configured.
+                stats = get_json(
+                    "/futures/usdt/contract_stats",
+                    {"contract": contract, "from": int(time.time()) - 600,
+                     "interval": "5m", "limit": 3},
+                )
+                stats = sorted(stats, key=lambda row: int(row.get("time", 0)))
+                oi_usd = None
+                for row in reversed(stats):
+                    value = row.get("open_interest_usd")
+                    if value not in (None, ""):
+                        oi_usd = float(value)
+                        break
+                if oi_usd is None or oi_usd / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
+                    if contract in early_pattern_details:
+                        early_filter_status[contract] = "Gate.io OI missing" if oi_usd is None else f"Gate.io OI/MC rejected ({oi_usd/market_cap:.1%})"
+                    continue
             counts["oi_pass"] += 1
             if contract in early_pattern_details: early_filter_status[contract] = "OI/funding passed; checking pump"
 
