@@ -1032,11 +1032,20 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if risk <= 0:
                         continue
                     metrics = coinalyze_spike_metrics(contract, ticker, market_cap, total_market_volume, state)
+                    if metrics.get("change24") not in (None, "") and float(metrics["change24"]) <= 0:
+                        print(f"{contract}: LEG SPIKE rejected; 24h price change is not positive")
+                        continue
                     if metrics.get("oi_change4h") is not None and metrics["oi_change4h"] <= 0:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze OI 4h change is not positive")
                         continue
                     if metrics.get("funding_avg") is not None and metrics["funding_avg"] >= 0:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze average funding is non-negative")
+                        continue
+                    if metrics.get("long1h") is not None and metrics["long1h"] < 60:
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze 1h long share is below 60%")
+                        continue
+                    if metrics.get("long1d") is not None and metrics["long1d"] > 70:
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze daily long share exceeds 70%")
                         continue
                     alert_oi = metrics.get("oi_usd") or oi_usd
                     alert_funding = metrics.get("funding_avg")
