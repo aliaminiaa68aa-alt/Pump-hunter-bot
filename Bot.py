@@ -421,10 +421,74 @@ def scan_fib_pullbacks(tickers, state):
     sent = state["fib_alerts"]
     counts = {
         "tickers": 0, "negative_funding": 0, "cap_available": 0,
-        "volume_pass": 0, "oi_pass": 0, "pump_detected": 0,
-        "ratio_pass": 0, "fib_reactions": 0, "missing_cap": 0,
+        "early_scan_checked": 0, "early_patterns_seen": 0, "early_warnings_sent": 0,
+        "early_candle_errors": 0, "volume_pass": 0, "oi_pass": 0,
+        "pump_detected": 0, "ratio_pass": 0, "fib_reactions": 0, "missing_cap": 0,
     }
     volume_samples = []
+    early_candle_cache = {}
+    early_pattern_samples = []
+
+    # Early heads-up scan is deliberately independent of funding, market-cap,
+    # volume/MC, OI and long/short filters. Those remain mandatory for confirmed entries.
+    # Limit candle requests to the 100 most liquid USDT contracts each run.
+    liquid_for_early = []
+    for item in tickers:
+        symbol = item.get("contract", "")
+        if not symbol.endswith("_USDT"):
+            continue
+        try:
+            turnover = float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0)
+        except (TypeError, ValueError):
+            continue
+        liquid_for_early.append((turnover, item))
+    liquid_for_early.sort(key=lambda pair: pair[0], reverse=True)
+
+    for _turnover, item in liquid_for_early[:100]:
+        contract = item.get("contract", "")
+        try:
+            candles = closed_candles(contract, "5m", 20)
+            early_candle_cache[contract] = candles
+            counts["early_scan_checked"] += 1
+            early_candidate = detect_fib_pump(candles)
+            if not early_candidate:
+                continue
+            counts["early_patterns_seen"] += 1
+            if len(early_pattern_samples) < 8:
+                early_pattern_samples.append(
+                    f"{contract}:{early_candidate['pump_pct']:.2f}%/{early_candidate['body_count']}c"
+                )
+            early_key = str(early_candidate["end_time"])
+            early_sent = state["fib_early_alerts"]
+            if early_sent.get(contract) == early_key:
+                continue
+            raw_funding = item.get("funding_rate")
+            try:
+                funding_text = f"{float(raw_funding) * 100:+.4f}%" if raw_funding not in (None, "") else "ناموجود"
+            except (TypeError, ValueError):
+                funding_text = "نامعتبر"
+            symbol = contract[:-5].upper()
+            cap = caps.get(symbol)
+            volume24 = _turnover
+            vol_mc_text = f"{volume24 / float(cap):.3f}x" if cap and symbol not in ambiguous else "ناموجود"
+            early_message = (
+                f"👀 هشدار اولیه LEG SPIKE؛ هنوز تأیید نشده: {contract.replace('_', '/')}\\n"
+                f"حرکت شناسایی‌شده: {float(early_candidate['pump_pct']):.2f}% "
+                f"در {int(early_candidate['body_count'])} کندل صعودی ۵دقیقه‌ای\\n"
+                f"سقف: {float(early_candidate['high']):.10g} | کف: {float(early_candidate['low']):.10g}\\n"
+                f"فیبو 0.50: {float(early_candidate['fib50']):.10g} | "
+                f"فیبو 0.66: {float(early_candidate['fib66']):.10g}\\n"
+                f"Funding: {funding_text} | حجم/مارکت‌کپ: {vol_mc_text}\\n"
+                "این فقط هشدار حرکت اولیه است، نه ورود. برای سیگنال نهایی تمام فیلترهای Funding، حجم/مارکت‌کپ، OI، نسبت لانگ/شورت و واکنش کندل بسته‌شده لازم‌اند."
+            )
+            send_message(early_message)
+            early_sent[contract] = early_key
+            counts["early_warnings_sent"] += 1
+            print(f"LEG SPIKE early warning sent: {contract}; pump={early_candidate['pump_pct']:.2f}%")
+        except Exception as error:
+            counts["early_candle_errors"] += 1
+            print(f"{contract}: LEG SPIKE early scan failed: {type(error).__name__}: {error}")
+
     for ticker in tickers:
         contract = ticker.get("contract", "")
         if not contract.endswith("_USDT"):
@@ -451,29 +515,6 @@ def scan_fib_pullbacks(tickers, state):
             volume_mc = volume24 / market_cap
             volume_samples.append((volume_mc, contract, volume24, market_cap, funding))
 
-            # Early LEG SPIKE heads-up is independent of the final volume gate.
-            # This is informational only; all existing entry filters remain unchanged.
-            early_candles = closed_candles(contract, "5m", 20)
-            early_candidate = detect_fib_pump(early_candles)
-            if early_candidate:
-                early_key = str(early_candidate["end_time"])
-                early_sent = state["fib_early_alerts"]
-                if early_sent.get(contract) != early_key:
-                    early_message = (
-                        f"👀 هشدار اولیه LEG SPIKE؛ هنوز تأیید نشده: {contract.replace('_', '/')}\\n"
-                        f"حرکت شناسایی‌شده: {float(early_candidate['pump_pct']):.2f}% "
-                        f"در {int(early_candidate['body_count'])} کندل صعودی ۵دقیقه‌ای\\n"
-                        f"سقف: {float(early_candidate['high']):.10g} | کف: {float(early_candidate['low']):.10g}\\n"
-                        f"فیبو 0.50: {float(early_candidate['fib50']):.10g} | "
-                        f"فیبو 0.66: {float(early_candidate['fib66']):.10g}\\n"
-                        f"Funding: {funding * 100:+.4f}% | حجم/مارکت‌کپ: {volume_mc:.3f}x "
-                        f"(شرط نهایی: حداقل {FIB_MIN_VOLUME_TO_MARKET_CAP:.1f}x)\\n"
-                        "این هشدار ورود نیست؛ تأیید OI، نسبت لانگ/شورت و واکنش بسته‌شده به فیبوناچی هنوز لازم است."
-                    )
-                    send_message(early_message)
-                    early_sent[contract] = early_key
-                    print(f"LEG SPIKE early warning sent: {contract}; volume/MC={volume_mc:.3f}x")
-
             if volume_mc < FIB_MIN_VOLUME_TO_MARKET_CAP:
                 continue
             counts["volume_pass"] += 1
@@ -494,7 +535,9 @@ def scan_fib_pullbacks(tickers, state):
                 continue
             counts["oi_pass"] += 1
 
-            candles = closed_candles(contract, "5m", 20)
+            candles = early_candle_cache.get(contract)
+            if candles is None:
+                candles = closed_candles(contract, "5m", 20)
             if len(candles) < 10:
                 continue
             candidate = candidates.get(contract)
@@ -586,6 +629,7 @@ def scan_fib_pullbacks(tickers, state):
         ", ".join(f"{key}={value}" for key, value in counts.items()) +
         f", active={len(candidates)}, caps_cached={len(caps)}, ambiguous_symbols={len(ambiguous)}"
     )
+    print("LEG SPIKE early-pattern samples: " + ("; ".join(early_pattern_samples) or "none"))
     print(f"LEG SPIKE highest volume/market-cap candidates: {top_volume}")
 
 def scan():
