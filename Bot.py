@@ -326,6 +326,7 @@ def coinalyze_derivatives_check(contract, state):
         oi_exchanges = []
         funding_values = []
         funding_exchanges = []
+        funding_raw_diagnostics = []
         exchange_by_symbol = {str(row["symbol"]): exchange_name(row) for row in selected}
         for symbol in seen:
             oi_row = oi_by_symbol.get(symbol, {})
@@ -340,8 +341,12 @@ def coinalyze_derivatives_check(contract, state):
                     oi_exchanges.append(exchange_by_symbol.get(symbol, symbol))
             funding_row = funding_by_symbol.get(symbol)
             if funding_row and funding_row.get("value") not in (None, ""):
-                funding_values.append(float(funding_row["value"]))
-                funding_exchanges.append(exchange_by_symbol.get(symbol, symbol))
+                raw_rate = float(funding_row["value"])
+                funding_values.append(raw_rate)
+                exchange = exchange_by_symbol.get(symbol, symbol)
+                funding_exchanges.append(exchange)
+                # Diagnostic only: record the exact API numeric scale per exchange.
+                funding_raw_diagnostics.append(f"{exchange}={raw_rate:+.8f}")
 
         if len(oi_exchanges) < 2 or len(funding_values) < 2 or old_total <= 0:
             return {"configured": True, "valid": False, "reason": "داده هم‌زمان OI/Funding از حداقل دو صرافی Coinalyze کامل نیست"}
@@ -355,7 +360,8 @@ def coinalyze_derivatives_check(contract, state):
             f"OI_history={len(oi_exchanges)}[{','.join(oi_exchanges)}] "
             f"funding={len(funding_values)}[{','.join(funding_exchanges)}] "
             f"aggregate_OI_change={oi_change:+.3f}% "
-            f"aggregate_OI_USD={new_total:.0f} average_funding={funding_avg*100:+.4f}%"
+            f"aggregate_OI_USD={new_total:.0f} average_funding={funding_avg*100:+.4f}% "
+            f"funding_raw_values=[{','.join(funding_raw_diagnostics)}]"
         )
         return {
             "configured": True, "valid": True,
