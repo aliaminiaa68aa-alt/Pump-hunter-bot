@@ -936,8 +936,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 0 if item.get("contract", "") in ranked_checks
                    and ranked_checks[item.get("contract", "")].get("valid")
                    and ranked_checks[item.get("contract", "")].get("oi_change4h") is not None else 1,
-                -(float(ranked_checks[item.get("contract", "")].get("oi_change4h") or -1e9)
-                  if item.get("contract", "") in ranked_checks else -1e9),
+                -(float(ranked_checks[item.get("contract", "")].get("oi_change4h"))
+                  if item.get("contract", "") in ranked_checks
+                  and ranked_checks[item.get("contract", "")].get("oi_change4h") is not None else -1e9),
                 -_turnover_rank(item),
             ),
         )
