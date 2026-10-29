@@ -792,6 +792,44 @@ def get_market_caps(state, requested_symbols=None):
         except Exception as error:
             print(f"CoinMarketCap fallback unavailable for {len(missing)} candidate symbols: {type(error).__name__}: {error}")
 
+    # Independent free fallback: CoinPaprika, used only for symbols still missing/ambiguous.
+    # It avoids relying on CoinMarketCap's keyless endpoint, which may rate-limit requests.
+    paprika_missing = [symbol for symbol in missing if symbol not in caps or symbol in ambiguous]
+    if paprika_missing:
+        try:
+            response = SESSION.get("https://api.coinpaprika.com/v1/tickers",
+                                   params={"quotes": "USD"}, timeout=25)
+            response.raise_for_status()
+            rows = response.json()
+            grouped = {}
+            if isinstance(rows, list):
+                for row in rows:
+                    symbol = str(row.get("symbol", "")).upper()
+                    if symbol not in paprika_missing:
+                        continue
+                    quote = (row.get("quotes") or {}).get("USD") or {}
+                    cap, volume = quote.get("market_cap"), quote.get("volume_24h")
+                    if cap not in (None, "") and float(cap) > 0:
+                        grouped.setdefault(symbol, []).append((float(cap), volume))
+            paprika_resolved = 0
+            paprika_ambiguous = 0
+            for symbol in paprika_missing:
+                matches = grouped.get(symbol, [])
+                if len(matches) == 1:
+                    caps[symbol] = matches[0][0]
+                    if matches[0][1] not in (None, "") and float(matches[0][1]) > 0:
+                        volumes[symbol] = float(matches[0][1])
+                    ambiguous.discard(symbol)
+                    paprika_resolved += 1
+                elif len(matches) > 1:
+                    caps.pop(symbol, None)
+                    volumes.pop(symbol, None)
+                    ambiguous.add(symbol)
+                    paprika_ambiguous += 1
+            print(f"CoinPaprika fallback: requested={len(paprika_missing)}, resolved={paprika_resolved}, ambiguous={paprika_ambiguous}")
+        except Exception as error:
+            print(f"CoinPaprika fallback unavailable for {len(paprika_missing)} candidate symbols: {type(error).__name__}: {error}")
+
     state["market_cap_cache"] = {
         "fetched_at": now if not fresh else cache.get("fetched_at", now),
         "caps": caps, "volumes": volumes, "ambiguous": sorted(ambiguous),
@@ -846,12 +884,12 @@ def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=F
 
 def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     """Scan LEG SPIKE with staged diagnostics and avoid ratio API calls before a real pump exists."""
-    # Prioritize the most liquid Gate.io symbols when CoinMarketCap fallback is needed.
+    # Include a wider liquid-symbol universe so fallback providers can cover missing caps.
     cmc_priority = sorted(
         (item for item in tickers if is_crypto_contract(item.get("contract", ""))),
         key=lambda item: float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0),
         reverse=True,
-    )[:100]
+    )[:300]
     caps, ambiguous = get_market_caps(state, [item.get("contract", "").split("_")[0] for item in cmc_priority])
     market_volumes = state.get("market_cap_cache", {}).get("volumes", {})
     candidates = state["fib_candidates"]
