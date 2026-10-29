@@ -6,7 +6,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BASE = "https://api.gateio.ws/api/v4"
 SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "PumpHunterBot/1.2"})
+SESSION.headers.update({"User-Agent": "PumpHunterBot/1.3"})
 
 
 def send_message(message):
@@ -69,6 +69,31 @@ def confirms_15m(contract):
     return confirmed, change
 
 
+def confirms_1h(contract):
+    """Use closed 1h candles: price above a rising EMA20 is the trend filter."""
+    candles = closed_candles(contract, "1h", 24)
+    if len(candles) < 21:
+        return False, None, None
+
+    closes = [float(candle["c"]) for candle in candles]
+    alpha = 2 / (20 + 1)
+    ema = closes[0]
+    ema_values = [ema]
+    for close in closes[1:]:
+        ema = close * alpha + ema * (1 - alpha)
+        ema_values.append(ema)
+
+    last_close = closes[-1]
+    ema_now = ema_values[-1]
+    ema_previous = ema_values[-2]
+    last_open = float(candles[-1]["o"])
+    change = (last_close / last_open - 1) * 100 if last_open else 0
+
+    # Keep the filter useful but avoid requiring an exceptionally strong hourly candle.
+    confirmed = last_close > ema_now and ema_now >= ema_previous
+    return confirmed, change, ema_now
+
+
 def scan():
     # Gate.io public USDT perpetual market data; no API key required.
     tickers = get_json("/futures/usdt/tickers")
@@ -93,6 +118,7 @@ def scan():
     candle_checks = 0
     volume_spikes = 0
     confirmations_15m = 0
+    confirmations_1h = 0
     oi_checks = 0
     for ticker, _turnover24h in coins:
         contract = ticker["contract"]
@@ -120,6 +146,12 @@ def scan():
                 print(f"{contract}: skipped; 15m candle did not confirm bullish momentum")
                 continue
             confirmations_15m += 1
+
+            confirmed_1h, change_1h, ema20_1h = confirms_1h(contract)
+            if not confirmed_1h:
+                print(f"{contract}: skipped; 1h close is not above a rising EMA20")
+                continue
+            confirmations_1h += 1
 
             now = int(time.time())
             oi_rows = get_json(
@@ -150,12 +182,14 @@ def scan():
 
             price_change = (close_price / open_price - 1) * 100
             btc_text = f"{btc_change:+.2f}%" if btc_change is not None else "نامشخص"
+            change_1h_text = f"{change_1h:+.2f}%" if change_1h is not None else "نامشخص"
             message = (
                 f"🚨 احتمال شروع حرکت: {contract.replace('_', '/')} (Gate.io USDT Perpetual)\n"
                 f"تغییر کندل بسته‌شده ۵ دقیقه: +{price_change:.2f}%\n"
-                f"تغییر کندل بسته‌شده ۱۵ دقیقه: +{change_15m:.2f}% (تأیید روند)\n"
+                f"تغییر کندل بسته‌شده ۱۵ دقیقه: +{change_15m:.2f}% (تأیید حرکت)\n"
+                f"تغییر کندل بسته‌شده ۱ ساعته: {change_1h_text} (قیمت بالای EMA20 صعودی)\n"
                 f"ارزش معاملات نسبت به میانگین ۲۰ کندل ۵دقیقه: {turnover / avg_turnover:.1f} برابر\n"
-                f"تغییر OI در داده‌های اخیر: +{oi_change:.2f}%\n"
+                f"تغییر OI در داده‌های اخیر: {oi_change:+.2f}%\n"
                 f"تغییر کندل ۱۵دقیقه BTC: {btc_text}\n"
                 f"قیمت بسته‌شدن کندل ۵دقیقه: {close_price}\n"
                 "⚠️ هشدار برای بررسی بیشتر است؛ سیگنال قطعی خرید نیست."
@@ -169,7 +203,8 @@ def scan():
 
     print(
         f"Diagnostics: candle_checks={candle_checks}, volume_spikes={volume_spikes}, "
-        f"confirmations_15m={confirmations_15m}, oi_checks={oi_checks}"
+        f"confirmations_15m={confirmations_15m}, confirmations_1h={confirmations_1h}, "
+        f"oi_checks={oi_checks}"
     )
     print(f"Scan finished. Alerts sent: {alerts}")
 
