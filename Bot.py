@@ -441,6 +441,7 @@ def scan_fib_pullbacks(tickers, state):
     volume_samples = []
     early_candle_cache = {}
     early_pattern_samples = []
+    early_pattern_details = {}
 
     # Early heads-up scan is deliberately independent of funding, market-cap,
     # volume/MC, OI and long/short filters. Those remain mandatory for confirmed entries.
@@ -467,6 +468,7 @@ def scan_fib_pullbacks(tickers, state):
             if not early_candidate:
                 continue
             counts["early_patterns_seen"] += 1
+            early_pattern_details[contract] = early_candidate
             if len(early_pattern_samples) < 8:
                 early_pattern_samples.append(
                     f"{contract}:{early_candidate['pump_pct']:.2f}%/{early_candidate['body_count']}c"
@@ -655,6 +657,7 @@ def scan_fib_pullbacks(tickers, state):
         f", active={len(candidates)}, caps_cached={len(caps)}, ambiguous_symbols={len(ambiguous)}"
     )
     print("LEG SPIKE early-pattern samples: " + ("; ".join(early_pattern_samples) or "none"))
+    print("LEG SPIKE early-pattern filter snapshot: " + ("; ".join(f"{k}: funding={next((float(t.get(chr(102)+chr(117)+chr(110)+chr(100)+chr(105)+chr(110)+chr(103)+chr(95)+chr(114)+chr(97)+chr(116)+chr(101)))*100 for t in tickers if t.get(chr(99)+chr(111)+chr(110)+chr(116)+chr(114)+chr(97)+chr(99)+chr(116)) == k and t.get(chr(102)+chr(117)+chr(110)+chr(100)+chr(105)+chr(110)+chr(103)+chr(95)+chr(114)+chr(97)+chr(116)+chr(101)) not in (None, chr(34)+chr(34))), None)}%, vol/MC={((market_volumes.get(k[:-5].upper(), 0) / caps.get(k[:-5].upper(), 1)) if caps.get(k[:-5].upper()) and market_volumes.get(k[:-5].upper()) else 0):.3f}x" for k in early_pattern_details) or "none"))
     print(f"LEG SPIKE highest volume/market-cap candidates: {top_volume}")
 
 def scan():
