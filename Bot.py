@@ -127,7 +127,7 @@ def find_recent_impulse(candles):
     if len(candles) < 24:
         return None
     first_idx = max(20, len(candles) - 8)
-    last_idx = len(candles) - 2
+    last_idx = len(candles) - 1
     found = None
     for idx in range(first_idx, last_idx + 1):
         previous = candles[idx - 20:idx]
