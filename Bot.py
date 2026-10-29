@@ -1176,8 +1176,10 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 if sent.get(contract) == alert_key:
                     continue
                 previous_close = float(candles[-2]["c"])
-                # Require a downward retracement through the level on a closed candle.
-                if previous_close > level and price <= level and price > low:
+                current_low = float(candles[-1]["l"])
+                # Require a confirmed Fib rejection: previous close above the level,
+                # current candle touches/breaches it intrabar, then closes back above.
+                if previous_close > level and current_low <= level and price > level and price > low:
                     counts["fib_reactions"] += 1
                     risk = level - low
                     reward = high - level
