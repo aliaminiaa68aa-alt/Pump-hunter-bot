@@ -211,10 +211,10 @@ def scan():
             # Send one early heads-up per impulse, then keep scanning for full confirmation.
             if early_alerts_state.get(contract) != candidate["impulse_time"]:
                 early_message = (
-                    f"👀 هشدار زودهنگام؛ هنوز تأیید نشده: {contract.replace('_', '/')} (Gate.io Perpetual)\\n"
-                    f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین ۲۰ کندل قبلی\\n"
-                    f"قیمت فعلیِ کندل بسته‌شده ۵دقیقه: {latest_close}\\n"
-                    f"کف حرکت اولیه: {float(candidate['impulse_low'])}\\n\\n"
+                    f"👀 هشدار زودهنگام؛ هنوز تأیید نشده: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
+                    f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین ۲۰ کندل قبلی\n"
+                    f"قیمت فعلیِ کندل بسته‌شده ۵دقیقه: {latest_close}\n"
+                    f"کف حرکت اولیه: {float(candidate['impulse_low'])}\n\n"
                     "هنوز سیگنال ورود نیست. ربات منتظر شکست ساختار ۵دقیقه، تأیید ۱۵دقیقه و روند ۱ساعته، سپس بررسی OI و Funding می‌ماند."
                 )
                 send_message(early_message)
