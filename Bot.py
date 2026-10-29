@@ -232,6 +232,117 @@ def public_derivatives_check(contract):
         return {"valid": False, "reason": "داده عمومی OI/Funding از Bybit دریافت نشد"}
 
 
+
+COINALYZE_BASE = "https://api.coinalyze.net/v1"
+COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY", "").strip()
+
+
+def coinalyze_request(path, params=None):
+    """Authenticated Coinalyze request. API key is stored only in GitHub Actions Secrets."""
+    if not COINALYZE_API_KEY:
+        raise RuntimeError("COINALYZE_API_KEY secret is not configured")
+    response = SESSION.get(
+        COINALYZE_BASE + path,
+        params=params,
+        headers={"api_key": COINALYZE_API_KEY},
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise RuntimeError(f"Unexpected Coinalyze response for {path}")
+    return payload
+
+
+def coinalyze_derivatives_check(contract, state):
+    """
+    Cross-check a potential regular-strategy entry with Coinalyze data from
+    multiple USDT-margined perpetual exchanges. If the API key is not configured,
+    preserve the existing Gate.io validation. If configured, fail closed on
+    missing/weak Coinalyze OI or funding confirmation.
+    """
+    if not COINALYZE_API_KEY:
+        return {"configured": False, "valid": False, "reason": "COINALYZE_API_KEY secret is not configured"}
+
+    try:
+        now = int(time.time())
+        cache = state.get("coinalyze_market_cache", {})
+        if not cache.get("fetched_at") or now - int(cache["fetched_at"]) >= 21600:
+            markets = coinalyze_request("/future-markets")
+            state["coinalyze_market_cache"] = {"fetched_at": now, "markets": markets}
+        else:
+            markets = cache.get("markets", [])
+
+        base = contract[:-5].upper() if contract.endswith("_USDT") else contract.upper()
+        eligible = [
+            row for row in markets
+            if str(row.get("base_asset", "")).upper() == base
+            and str(row.get("quote_asset", "")).upper() == "USDT"
+            and row.get("is_perpetual") is True
+            and str(row.get("margined", "")).upper() == "STABLE"
+            and row.get("symbol")
+        ]
+        priority = {"BINANCE": 0, "BYBIT": 1, "OKX": 2, "GATEIO": 3, "GATE.IO": 3}
+        eligible.sort(key=lambda row: (priority.get(str(row.get("exchange", "")).upper(), 10),
+                                       str(row.get("exchange", ""))))
+        selected = []
+        seen = set()
+        for row in eligible:
+            symbol = str(row["symbol"])
+            if symbol not in seen:
+                selected.append(row)
+                seen.add(symbol)
+            if len(selected) >= 3:
+                break
+        if len(selected) < 2:
+            return {"configured": True, "valid": False, "reason": "Coinalyze کمتر از دو بازار پرپچوال USDT برای این ارز دارد"}
+
+        symbols = ",".join(str(row["symbol"]) for row in selected)
+        oi_rows = coinalyze_request(
+            "/open-interest-history",
+            {"symbols": symbols, "interval": "5min", "from": now - 1800, "to": now, "convert_to_usd": "true"},
+        )
+        funding_rows = coinalyze_request("/funding-rate", {"symbols": symbols})
+
+        oi_by_symbol = {str(row.get("symbol", "")): row for row in oi_rows}
+        funding_by_symbol = {str(row.get("symbol", "")): row for row in funding_rows}
+        old_total = 0.0
+        new_total = 0.0
+        oi_exchanges = []
+        funding_values = []
+        funding_exchanges = []
+        exchange_by_symbol = {str(row["symbol"]): str(row.get("exchange", "unknown")) for row in selected}
+        for symbol in seen:
+            oi_row = oi_by_symbol.get(symbol, {})
+            history = oi_row.get("history", [])
+            history = sorted(history, key=lambda point: int(point.get("t", 0)))
+            if len(history) >= 2:
+                old_value = float(history[-2].get("c", 0) or 0)
+                new_value = float(history[-1].get("c", 0) or 0)
+                if old_value > 0 and new_value > 0:
+                    old_total += old_value
+                    new_total += new_value
+                    oi_exchanges.append(exchange_by_symbol.get(symbol, symbol))
+            funding_row = funding_by_symbol.get(symbol)
+            if funding_row and funding_row.get("value") not in (None, ""):
+                funding_values.append(float(funding_row["value"]))
+                funding_exchanges.append(exchange_by_symbol.get(symbol, symbol))
+
+        if len(oi_exchanges) < 2 or len(funding_values) < 2 or old_total <= 0:
+            return {"configured": True, "valid": False, "reason": "داده هم‌زمان OI/Funding از حداقل دو صرافی Coinalyze کامل نیست"}
+
+        oi_change = (new_total / old_total - 1.0) * 100.0
+        funding_avg = sum(funding_values) / len(funding_values)
+        return {
+            "configured": True, "valid": True,
+            "oi_change": oi_change, "funding_rate": funding_avg,
+            "oi_exchanges": oi_exchanges, "funding_exchanges": funding_exchanges,
+            "symbol": base + "USDT",
+        }
+    except Exception as error:
+        print(f"{contract}: Coinalyze cross-check failed: {type(error).__name__}: {error}")
+        return {"configured": True, "valid": False, "reason": "داده Coinalyze در دسترس نیست"}
+
 OKX_BASE = "https://www.okx.com"
 
 
@@ -874,14 +985,34 @@ def scan():
                 print(f"{contract}: skipped; funding is crowded at {funding_rate * 100:.4f}%")
                 continue
 
-            # Use Bybit as an additional public cross-check when reachable.
-            # Some hosted runners receive HTTP 403 from Bybit; that must not
-            # permanently disable the bot because Gate.io OI/funding are already validated.
-            public_derivatives_checks += 1
-            cross_check = public_derivatives_check(contract)
             derivatives_text = (
                 f"OI گیت: {oi_change:+.2f}% | Funding گیت: {funding_rate * 100:+.4f}%"
             )
+
+            # Coinalyze is an additional multi-exchange confirmation when its API key is configured.
+            coinalyze_check = coinalyze_derivatives_check(contract, state)
+            if coinalyze_check.get("configured"):
+                public_derivatives_checks += 1
+                if not coinalyze_check.get("valid"):
+                    print(f"{contract}: skipped; Coinalyze confirmation unavailable ({coinalyze_check.get('reason', 'unknown')})")
+                    continue
+                if float(coinalyze_check["oi_change"]) < 0.2:
+                    print(f"{contract}: skipped; Coinalyze aggregate OI change {float(coinalyze_check['oi_change']):+.3f}% below +0.2%")
+                    continue
+                if float(coinalyze_check["funding_rate"]) >= 0.0005:
+                    print(f"{contract}: skipped; Coinalyze average funding {float(coinalyze_check['funding_rate'])*100:+.4f}% is at/above +0.05%")
+                    continue
+                derivatives_text += (
+                    f"\nتأیید Coinalyze ({', '.join(coinalyze_check['oi_exchanges'])}): "
+                    f"OI تجمیعی {float(coinalyze_check['oi_change']):+.2f}% | "
+                    f"Funding میانگین {float(coinalyze_check['funding_rate'])*100:+.4f}%"
+                )
+            else:
+                print(f"{contract}: Coinalyze skipped; COINALYZE_API_KEY secret is not configured")
+
+            # Keep Bybit as a best-effort diagnostic cross-check; it must not override the Gate.io/Coinalyze gates.
+            public_derivatives_checks += 1
+            cross_check = public_derivatives_check(contract)
             if cross_check.get("valid"):
                 public_oi_change = float(cross_check["oi_change"])
                 public_funding = float(cross_check["funding_rate"])
