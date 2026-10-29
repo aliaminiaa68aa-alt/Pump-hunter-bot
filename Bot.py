@@ -333,6 +333,15 @@ def coinalyze_derivatives_check(contract, state):
 
         oi_change = (new_total / old_total - 1.0) * 100.0
         funding_avg = sum(funding_values) / len(funding_values)
+        # Safe operational diagnostics: report data coverage and exchange names,
+        # never the API key or request headers.
+        print(
+            f"{contract}: Coinalyze data OK; selected={len(selected)} "
+            f"OI_history={len(oi_exchanges)}[{','.join(oi_exchanges)}] "
+            f"funding={len(funding_values)}[{','.join(funding_exchanges)}] "
+            f"aggregate_OI_change={oi_change:+.3f}% "
+            f"aggregate_OI_USD={new_total:.0f} average_funding={funding_avg*100:+.4f}%"
+        )
         return {
             "configured": True, "valid": True,
             "oi_change": oi_change, "funding_rate": funding_avg,
