@@ -336,6 +336,7 @@ def coinalyze_derivatives_check(contract, state):
         return {
             "configured": True, "valid": True,
             "oi_change": oi_change, "funding_rate": funding_avg,
+            "oi_usd": new_total,
             "oi_exchanges": oi_exchanges, "funding_exchanges": funding_exchanges,
             "symbol": base + "USDT",
         }
@@ -676,10 +677,33 @@ def scan_fib_pullbacks(tickers, state):
                     break
             if oi_usd is None or oi_usd / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
                 if contract in early_pattern_details:
-                    early_filter_status[contract] = "OI missing" if oi_usd is None else f"OI/MC rejected ({oi_usd/market_cap:.1%})"
+                    early_filter_status[contract] = "Gate.io OI missing" if oi_usd is None else f"Gate.io OI/MC rejected ({oi_usd/market_cap:.1%})"
                 continue
+
+            # If configured, use Coinalyze's multi-exchange derivatives data as an additional
+            # mandatory LEG SPIKE gate, rather than silently relying on Gate.io alone.
+            coinalyze_check = coinalyze_derivatives_check(contract, state)
+            if coinalyze_check.get("configured"):
+                if not coinalyze_check.get("valid"):
+                    if contract in early_pattern_details:
+                        early_filter_status[contract] = "Coinalyze data unavailable"
+                    continue
+                aggregate_oi = float(coinalyze_check.get("oi_usd") or 0)
+                aggregate_funding = float(coinalyze_check["funding_rate"])
+                if aggregate_oi <= 0 or aggregate_oi / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
+                    if contract in early_pattern_details:
+                        early_filter_status[contract] = "Coinalyze aggregate OI/MC missing or over 50%"
+                    continue
+                if aggregate_funding >= 0:
+                    if contract in early_pattern_details:
+                        early_filter_status[contract] = f"Coinalyze funding not negative ({aggregate_funding*100:+.4f}%)"
+                    continue
+                oi_usd = aggregate_oi
+                funding = aggregate_funding
+                if contract in early_pattern_details:
+                    early_filter_status[contract] = "Coinalyze aggregate OI/funding passed"
             counts["oi_pass"] += 1
-            if contract in early_pattern_details: early_filter_status[contract] = "OI passed; checking pump"
+            if contract in early_pattern_details: early_filter_status[contract] = "OI/funding passed; checking pump"
 
             candles = early_candle_cache.get(contract)
             if candles is None:
