@@ -423,7 +423,7 @@ def scan():
                     print(f"{contract}: Bybit funding crowded at {public_funding * 100:.4f}%; keeping Gate.io-only validation")
                 else:
                     derivatives_text += (
-                        f"\\nتأیید مستقل Bybit ({cross_check['symbol']}): "
+                        f"\nتأیید مستقل Bybit ({cross_check['symbol']}): "
                         f"OI {public_oi_change:+.2f}% | Funding {public_funding * 100:+.4f}%"
                     )
             else:
@@ -431,7 +431,7 @@ def scan():
                     f"{contract}: Bybit cross-check unavailable; using validated Gate.io OI/funding "
                     f"({cross_check.get('reason', 'داده نامعتبر')})"
                 )
-                derivatives_text += "\\nBybit: در دسترس نبود؛ بررسی OI/Funding بر اساس Gate.io انجام شد"
+                derivatives_text += "\nBybit: در دسترس نبود؛ بررسی OI/Funding بر اساس Gate.io انجام شد"
 
             # One final alert per impulse candle.
             if alerts_state.get(contract) == candidate["impulse_time"]:
