@@ -230,6 +230,20 @@ def public_derivatives_check(contract):
 def scan():
     tickers = get_json("/futures/usdt/tickers")
     check_derivatives_data(tickers)
+    # Probe Bybit once per scan so logs show source availability even when no
+    # coin reaches the final confirmation stage.
+    try:
+        bybit_health = public_derivatives_check("BTC_USDT")
+        if bybit_health.get("valid"):
+            print(
+                "Bybit public-source check: OK; BTC OI change="
+                f"{float(bybit_health['oi_change']):+.3f}%, "
+                f"current funding={float(bybit_health['funding_rate']) * 100:+.4f}%"
+            )
+        else:
+            print(f"Bybit public-source check: unavailable ({bybit_health.get('reason', 'unknown')})")
+    except Exception as error:
+        print(f"Bybit public-source check failed: {type(error).__name__}: {error}")
     liquid = []
     print(f"Gate.io tickers received: {len(tickers)}")
     for item in tickers:
