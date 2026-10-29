@@ -207,14 +207,16 @@ def public_derivatives_check(contract):
             return {"valid": False, "reason": "مقدار OI عمومی Bybit نامعتبر است"}
         oi_change = (new_oi / old_oi - 1) * 100
 
-        funding_result = bybit_get_json(
-            "/v5/market/funding/history",
-            {"category": "linear", "symbol": symbol, "limit": 1},
+        # Ticker returns the current/next funding estimate, unlike funding history
+        # which may only show the last settled rate from several hours ago.
+        ticker_result = bybit_get_json(
+            "/v5/market/tickers",
+            {"category": "linear", "symbol": symbol},
         )
-        funding_rows = funding_result.get("list", [])
-        if not funding_rows or funding_rows[0].get("fundingRate") in (None, ""):
-            return {"valid": False, "reason": "Funding عمومی Bybit در دسترس نیست"}
-        funding_rate = float(funding_rows[0]["fundingRate"])
+        ticker_rows = ticker_result.get("list", [])
+        if not ticker_rows or ticker_rows[0].get("fundingRate") in (None, ""):
+            return {"valid": False, "reason": "Funding فعلی عمومی Bybit در دسترس نیست"}
+        funding_rate = float(ticker_rows[0]["fundingRate"])
         return {
             "valid": True,
             "oi_change": oi_change,
