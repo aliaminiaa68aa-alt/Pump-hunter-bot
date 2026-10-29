@@ -1109,6 +1109,7 @@ def scan():
 
 
 if __name__ == "__main__":
+    print("Coinalyze API key configured: " + ("yes" if COINALYZE_API_KEY else "no"))
     if not TOKEN or not CHAT_ID:
         raise SystemExit("BOT_TOKEN یا CHAT_ID در GitHub Secrets تنظیم نشده است.")
     scan()
