@@ -175,6 +175,7 @@ def scan():
     confirms15 = 0
     confirms1h = 0
     oi_checks = 0
+    funding_checks = 0
     now = int(time.time())
 
     for ticker, _turnover24h in coins:
@@ -292,6 +293,21 @@ def scan():
                 print(f"{contract}: skipped; OI change {oi_change:.3f}% is below +0.2%")
                 continue
 
+            # Funding must be available and not excessively positive; very high positive
+            # funding can indicate a crowded long trade. Gate.io returns this as a ratio.
+            raw_funding = ticker.get("funding_rate")
+            try:
+                funding_rate = float(raw_funding) if raw_funding not in (None, "") else None
+            except (TypeError, ValueError):
+                funding_rate = None
+            if funding_rate is None:
+                print(f"{contract}: skipped; funding rate unavailable")
+                continue
+            funding_checks += 1
+            if funding_rate >= 0.0005:  # 0.05% funding rate
+                print(f"{contract}: skipped; funding is crowded at {funding_rate * 100:.4f}%")
+                continue
+
             # One final alert per impulse candle.
             if alerts_state.get(contract) == candidate["impulse_time"]:
                 print(f"{contract}: final alert already sent for this impulse")
@@ -308,11 +324,7 @@ def scan():
             tp2 = entry + 2 * risk
             btc_text = f"{btc_change:+.2f}%" if btc_change is not None else "نامشخص"
             change1h_text = f"{change1h:+.2f}%" if change1h is not None else "نامشخص"
-            raw_funding = ticker.get("funding_rate")
-            try:
-                funding_pct = float(raw_funding) * 100 if raw_funding not in (None, "") else None
-            except (TypeError, ValueError):
-                funding_pct = None
+            funding_pct = funding_rate * 100
             funding_text = f"{funding_pct:+.4f}%" if funding_pct is not None else "نامشخص"
 
             message = (
@@ -342,7 +354,7 @@ def scan():
     print(
         f"Diagnostics: candle_checks={candle_checks}, recent_impulses={recent_impulses}, "
         f"bos_confirmations={bos_checks}, confirmations_15m={confirms15}, "
-        f"confirmations_1h={confirms1h}, oi_checks={oi_checks}"
+        f"confirmations_1h={confirms1h}, oi_checks={oi_checks}, funding_checks={funding_checks}"
     )
     print(f"Scan finished. Confirmed entry alerts sent: {alerts}")
 
