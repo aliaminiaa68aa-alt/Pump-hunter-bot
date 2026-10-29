@@ -43,6 +43,9 @@ def scan():
     print(f"Gate.io liquid contracts checked: {len(coins)}")
 
     alerts = 0
+    candle_checks = 0
+    volume_spikes = 0
+    oi_checks = 0
     for ticker, _turnover24h in coins:
         contract = ticker["contract"]
         try:
@@ -53,10 +56,11 @@ def scan():
             # Normalize response order using the candle timestamp.
             candles = sorted(raw, key=lambda candle: int(candle["t"]))
             if len(candles) < 22:
-                print(f"{contract}: not enough candle data")
+                print(f"{contract}: not enough candle data ({len(candles)})")
                 continue
 
             # Exclude the current, still-forming candle.
+            candle_checks += 1
             closed = candles[-2]
             previous = candles[-22:-2]
             avg_turnover = sum(float(c.get("sum", 0) or 0) for c in previous) / len(previous)
@@ -66,6 +70,7 @@ def scan():
 
             if avg_turnover <= 0 or turnover < avg_turnover * 2 or close_price <= open_price:
                 continue
+            volume_spikes += 1
 
             now = int(time.time())
             oi_rows = get_json(
@@ -83,6 +88,7 @@ def scan():
             if len(oi_rows) < 2:
                 print(f"{contract}: not enough OI history")
                 continue
+            oi_checks += 1
             old_oi = float(oi_rows[-2]["open_interest"])
             new_oi = float(oi_rows[-1]["open_interest"])
             if old_oi <= 0:
@@ -107,10 +113,14 @@ def scan():
         except Exception as error:
             print(f"{contract}: {type(error).__name__}: {error}")
 
+    print(f"Diagnostics: candle_checks={candle_checks}, volume_spikes={volume_spikes}, oi_checks={oi_checks}")
     print(f"Scan finished. Alerts sent: {alerts}")
 
 
 if __name__ == "__main__":
     if not TOKEN or not CHAT_ID:
         raise SystemExit("BOT_TOKEN یا CHAT_ID در GitHub Secrets تنظیم نشده است.")
+    if os.getenv("TEST_TELEGRAM") == "1":
+        send_message("✅ تست اتصال ربات شکار پامپ: اتصال تلگرام موفق است. این پیام فقط برای آزمایش ارسال شده.")
+        print("Telegram test message sent.")
     scan()
