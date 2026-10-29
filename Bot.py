@@ -109,6 +109,7 @@ def load_alert_state():
     data.setdefault("early_alerts", {})
     data.setdefault("fib_candidates", {})
     data.setdefault("fib_alerts", {})
+    data.setdefault("fib_early_alerts", {})
     data.setdefault("market_cap_cache", {})
     return data
 
@@ -449,6 +450,30 @@ def scan_fib_pullbacks(tickers, state):
             counts["cap_available"] += 1
             volume_mc = volume24 / market_cap
             volume_samples.append((volume_mc, contract, volume24, market_cap, funding))
+
+            # Early LEG SPIKE heads-up is independent of the final volume gate.
+            # This is informational only; all existing entry filters remain unchanged.
+            early_candles = closed_candles(contract, "5m", 20)
+            early_candidate = detect_fib_pump(early_candles)
+            if early_candidate:
+                early_key = str(early_candidate["end_time"])
+                early_sent = state["fib_early_alerts"]
+                if early_sent.get(contract) != early_key:
+                    early_message = (
+                        f"👀 هشدار اولیه LEG SPIKE؛ هنوز تأیید نشده: {contract.replace('_', '/')}\\n"
+                        f"حرکت شناسایی‌شده: {float(early_candidate['pump_pct']):.2f}% "
+                        f"در {int(early_candidate['body_count'])} کندل صعودی ۵دقیقه‌ای\\n"
+                        f"سقف: {float(early_candidate['high']):.10g} | کف: {float(early_candidate['low']):.10g}\\n"
+                        f"فیبو 0.50: {float(early_candidate['fib50']):.10g} | "
+                        f"فیبو 0.66: {float(early_candidate['fib66']):.10g}\\n"
+                        f"Funding: {funding * 100:+.4f}% | حجم/مارکت‌کپ: {volume_mc:.3f}x "
+                        f"(شرط نهایی: حداقل {FIB_MIN_VOLUME_TO_MARKET_CAP:.1f}x)\\n"
+                        "این هشدار ورود نیست؛ تأیید OI، نسبت لانگ/شورت و واکنش بسته‌شده به فیبوناچی هنوز لازم است."
+                    )
+                    send_message(early_message)
+                    early_sent[contract] = early_key
+                    print(f"LEG SPIKE early warning sent: {contract}; volume/MC={volume_mc:.3f}x")
+
             if volume_mc < FIB_MIN_VOLUME_TO_MARKET_CAP:
                 continue
             counts["volume_pass"] += 1
