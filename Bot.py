@@ -158,7 +158,7 @@ def save_alert_state(state):
 
 
 def find_recent_impulse(candles):
-    """Return a recent closed 5m high-volume impulse candle, if present."""
+    """Return a recent closed 15m high-volume impulse candle, if present."""
     if len(candles) < 24:
         return None
     first_idx = max(20, len(candles) - 8)
@@ -969,7 +969,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     for _turnover, item in liquid_for_early[:150]:
         contract = item.get("contract", "")
         try:
-            candles = closed_candles(contract, "5m", 20)
+            candles = closed_candles(contract, "15m", 20)
             early_candle_cache[contract] = candles
             counts["early_scan_checked"] += 1
             early_candidate = detect_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0)
@@ -1032,7 +1032,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                             f"🎯 سقف حرکت: {top_high:.10g}\n"
                             f"📍 بیشترین قیمت کندل تأیید: {confirmed_top:.10g}\n"
                             f"💰 آخرین قیمت بسته‌شده: {top_price:.10g}\n"
-                            f"📈 اندازه حرکت: {float(tracked_for_top['pump_pct']):.2f}% در {int(tracked_for_top['body_count'])} کندل ۵دقیقه‌ای\n"
+                            f"📈 اندازه حرکت: {float(tracked_for_top['pump_pct']):.2f}% در {int(tracked_for_top['body_count'])} کندل ۱۵دقیقه‌ای\n"
                             "⚠️ این هشدار فقط رسیدن/شکست سقف را اعلام می‌کند؛ نقطه ورود، حدضرر و تارگت را خودت تعیین کن.\n"
                             "🟢━━━━━━━━━━━━━━━━━━🟢"
                         )
@@ -1080,7 +1080,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 "🟡━━━━━━━━━━━━━━━━━━🟡\n"
                 f"👀 مرحله ۱ از ۳ | هشدار اولیه؛ هنوز تأیید نشده: {contract.replace('_', '/')}\n"
                 f"حرکت شناسایی‌شده: {float(early_candidate['pump_pct']):.2f}% "
-                f"در {int(early_candidate['body_count'])} کندل صعودی ۵دقیقه‌ای\n"
+                f"در {int(early_candidate['body_count'])} کندل صعودی ۱۵دقیقه‌ای\n"
                 f"سقف: {float(early_candidate['high']):.10g} | کف: {float(early_candidate['low']):.10g}\n"
                 f"فیبو 0.50: {float(early_candidate['fib50']):.10g} | "
                 f"فیبو 0.66: {float(early_candidate['fib66']):.10g}\n"
@@ -1306,7 +1306,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 stats = get_json(
                     "/futures/usdt/contract_stats",
                     {"contract": contract, "from": int(time.time()) - 600,
-                     "interval": "5m", "limit": 3},
+                     "interval": "15m", "limit": 3},
                 )
                 stats = sorted(stats, key=lambda row: int(row.get("time", 0)))
                 oi_usd = None
@@ -1324,7 +1324,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
             candles = early_candle_cache.get(contract)
             if candles is None:
-                candles = closed_candles(contract, "5m", 20)
+                candles = closed_candles(contract, "15m", 20)
             if len(candles) < 10:
                 continue
             candidate = candidates.get(contract)
@@ -1344,7 +1344,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     counts["pump_pattern_rejected"] += 1
                     print(
                         f"{contract}: LEG SPIKE passed volume/OI/funding but no recent "
-                        "2-3 candle impulse met body>=0.6% and total-move>=3.0%"
+                        "2-3 candle 15m impulse met body>=0.6% and total-move>=3.0%"
                     )
                     if contract in early_pattern_details: early_filter_status[contract] = "Volume/OI/funding passed; impulse below Stage-2 threshold or too old"
                     continue
@@ -1392,7 +1392,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     "🟠━━━━━━━━━━━━━━━━━━🟠\n"
                     "🔎 مرحله ۲ از ۳ | ستاپ قوی‌تر شد\n"
                     f"🪙 ارز: {contract.replace('_', '/')}\n"
-                    f"📈 حرکت ۵دقیقه‌ای: {float(candidate['pump_pct']):.2f}% در {int(candidate['body_count'])} کندل\n"
+                    f"📈 حرکت ۱۵دقیقه‌ای: {float(candidate['pump_pct']):.2f}% در {int(candidate['body_count'])} کندل\n"
                     f"💵 تغییر ۲۴ساعته: {change24_text} | 💧 حجم/مارکت‌کپ: {volume_mc:.2f}x\n"
                     f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} | OI چهار‌ساعته: {oi4_message}\n"
                     f"💸 Funding: {funding * 100:+.4f}%\n"
@@ -1574,7 +1574,7 @@ def scan():
     for ticker, _turnover24h in coins:
         contract = ticker["contract"]
         try:
-            candles = closed_candles(contract, "5m", 40)
+            candles = closed_candles(contract, "15m", 40)
             if len(candles) < 24:
                 continue
             candle_checks += 1
@@ -1622,7 +1622,7 @@ def scan():
                     "🟦 HYPE/BOS | استراتژی اصلی\n"
                     f"👀 هشدار زودهنگام؛ هنوز تأیید نشده: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                     f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین ۲۰ کندل قبلی\n"
-                    f"قیمت فعلیِ کندل بسته‌شده ۵دقیقه: {latest_close}\n"
+                    f"قیمت فعلیِ کندل بسته‌شده ۱۵دقیقه: {latest_close}\n"
                     f"کف حرکت اولیه: {float(candidate['impulse_low'])}\n\n"
                     "هنوز سیگنال ورود نیست. ربات منتظر شکست ساختار ۵دقیقه، تأیید ۱۵دقیقه و روند ۱ساعته، سپس بررسی OI و Funding می‌ماند."
                 )
@@ -1636,7 +1636,7 @@ def scan():
             except (TypeError, ValueError):
                 impulse_time = latest_time
             # Expire unconfirmed setups after one hour.
-            if latest_time - impulse_time > 3600:
+            if latest_time - impulse_time > 14400:
                 candidates.pop(contract, None)
                 continue
 
@@ -1667,14 +1667,14 @@ def scan():
                     if setup_alerts.get(contract) != candidate["impulse_time"]:
                         setup_message = (
                             "🟦 HYPE/BOS | استراتژی اصلی\n"
-                            f"🟡 شکست ساختار ۵دقیقه‌ای: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
+                            f"🟡 شکست ساختار ۱۵دقیقه‌ای: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                             f"سطح شکست: {short_term_high}\n"
                             f"قیمت کندل بسته‌شده: {latest_close}\n\n"
                             "این مرحله از هشدار اولیه قوی‌تر است، اما هنوز تأیید ورود نیست. ربات منتظر کندل ۱۵دقیقه‌ای، روند ۱ساعته و بررسی OI/Funding می‌ماند."
                         )
                         send_message(setup_message)
                         setup_alerts[contract] = candidate["impulse_time"]
-                    print(f"{contract}: 5m break of structure detected at {short_term_high}")
+                    print(f"{contract}: 15m break of structure detected at {short_term_high}")
 
             # If BOS occurred earlier, wait for confirmation while price remains above its level.
             bos_level = candidate.get("bos_level")
@@ -1701,7 +1701,7 @@ def scan():
 
             oi_rows = get_json(
                 "/futures/usdt/contract_stats",
-                {"contract": contract, "from": now - 900, "interval": "5m", "limit": 3},
+                {"contract": contract, "from": now - 900, "interval": "15m", "limit": 3},
             )
             oi_rows = sorted(oi_rows, key=lambda row: int(row.get("time", 0)))
             oi_rows = [row for row in oi_rows if row.get("open_interest") not in (None, "")]
@@ -1802,7 +1802,7 @@ def scan():
             message = (
                 "🟦 HYPE/BOS | استراتژی اصلی\n"
                 f"✅ تأیید نهایی ستاپ صعودی: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
-                f"شکست ساختار ۵دقیقه‌ای ثبت شده و قیمت بالای سطح شکست است\n"
+                f"شکست ساختار ۱۵دقیقه‌ای ثبت شده و قیمت بالای سطح شکست است\n"
                 f"کندل ۱۵دقیقه: تأیید صعودی ({change15:+.2f}%)\n"
                 f"روند ۱ساعته: قیمت بالای EMA20 صعودی ({change1h_text})\n"
                 f"حرکت اولیه: {float(candidate['impulse_change']):+.2f}%؛ حجم {float(candidate['impulse_ratio']):.1f} برابر میانگین\n"
