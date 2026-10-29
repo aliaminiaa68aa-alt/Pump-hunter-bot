@@ -261,7 +261,7 @@ def okx_contract_long_ratio(contract, period):
     if not rows:
         raise RuntimeError(f"No OKX long/short data for {inst_id}/{period}")
     row = rows[-1]
-    raw_ratio = row.get("longShortRatio")
+    raw_ratio = row[-1] if isinstance(row, list) and row else row.get("longShortRatio")
     if raw_ratio in (None, ""):
         raise RuntimeError(f"Missing ratio for {inst_id}/{period}")
     return okx_ratio_to_long_pct(raw_ratio)
@@ -285,7 +285,8 @@ def okx_currency_daily_long_ratio(contract):
         rows = payload.get("data", [])
     if not rows:
         raise RuntimeError(f"No OKX daily long/short data for {base_asset}")
-    raw_ratio = rows[-1].get("longShortRatio")
+    row = rows[-1]
+    raw_ratio = row[-1] if isinstance(row, list) and row else row.get("longShortRatio")
     if raw_ratio in (None, ""):
         raise RuntimeError(f"Missing daily ratio for {base_asset}")
     return okx_ratio_to_long_pct(raw_ratio)
