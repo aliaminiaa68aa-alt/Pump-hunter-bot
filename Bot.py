@@ -1358,10 +1358,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 send_message(watch_message)
                 setup_sent[contract] = setup_key
                 print(f"{contract}: stage-2 setup alert sent")
-            if not confirmed_entries:
-                print(f"{contract}: Stage-2 monitoring allowed; Stage-3 entry paused by BTC filter")
-                continue
-
+            # User-requested trigger: alert when price revisits/breaks the impulse top.
+            # This is a WATCH/SIGNAL alert, not an entry recommendation; the user chooses entry.
+            # It is independent of Fib and is allowed even when the BTC final-entry filter pauses.
             price = float(candles[-1]["c"])
             low = float(candidate["low"])
             high = float(candidate["high"])
@@ -1369,7 +1368,44 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 candidates.pop(contract, None)
                 print(f"{contract}: LEG SPIKE invalidated; impulse low breached")
                 continue
-            # Check the deeper 0.66 retracement first so a genuine deeper rejection
+
+            top_alerts = state.setdefault("fib_top_alerts", {})
+            top_key = str(candidate["end_time"])
+            if top_alerts.get(contract) != top_key:
+                top_break_candle = None
+                # Require a CLOSED candle after the detected impulse to touch/break its high,
+                # with the preceding closed candle still below that high.
+                for idx in range(1, len(candles)):
+                    prev_candle, closed_candle = candles[idx - 1], candles[idx]
+                    try:
+                        if int(closed_candle["t"]) <= int(candidate["end_time"]):
+                            continue
+                        if float(prev_candle["c"]) < high and float(closed_candle["h"]) >= high:
+                            top_break_candle = closed_candle
+                    except (TypeError, ValueError, KeyError):
+                        continue
+                if top_break_candle is not None:
+                    top_price = float(top_break_candle["h"])
+                    top_message = (
+                        "🚀 LEG SPIKE | هشدار رسیدن به سقف پامپ\\n"
+                        "🟢━━━━━━━━━━━━━━━━━━🟢\\n"
+                        "🔔 قیمت به سقف حرکت شناسایی‌شده رسید/آن را شکست\\n"
+                        f"🪙 ارز: {contract.replace('_', '/')}\\n"
+                        f"🎯 سقف حرکت: {high:.10g}\\n"
+                        f"📍 بیشترین قیمت کندل تأیید: {top_price:.10g}\\n"
+                        f"💰 آخرین قیمت بسته‌شده: {price:.10g}\\n"
+                        f"📈 اندازه حرکت شناسایی‌شده: {float(candidate['pump_pct']):.2f}% در {int(candidate['body_count'])} کندل ۵دقیقه‌ای\\n"
+                        "⚠️ این هشدار فقط رسیدن/شکست سقف را اعلام می‌کند؛ نقطه ورود، حدضرر و تارگت را خودت تعیین کن.\\n"
+                        "🟢━━━━━━━━━━━━━━━━━━🟢"
+                    )
+                    send_message(top_message)
+                    top_alerts[contract] = top_key
+                    print(f"{contract}: LEG SPIKE top-break alert sent at {top_price:.10g}")
+            # Do not wait for Fibonacci or emit an algorithmic Fib entry. The user will
+            # determine the actual entry manually after the top-break alert.
+            continue
+
+            # Legacy Fib reaction block intentionally disabled by the continue above.
             # is not mislabeled as a shallower 0.50 entry on the same candle.
             levels = (("0.66", float(candidate["fib66"])), ("0.50", float(candidate["fib50"])))
             for level_name, level in levels:
