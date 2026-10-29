@@ -873,7 +873,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 if cap and total_market_volume and symbol not in ambiguous else "ناموجود"
             )
             early_message = (
-                f"🟡━━━━━━━━━━━━━━━━━━🟡\n👀 مرحله ۱ از ۳ | هشدار اولیه؛ هنوز تأیید نشده: {contract.replace('_', '/')}\n"
+                "🚀 LEG SPIKE | شکار پامپ\n"
+                "🟡━━━━━━━━━━━━━━━━━━🟡\n"
+                f"👀 مرحله ۱ از ۳ | هشدار اولیه؛ هنوز تأیید نشده: {contract.replace('_', '/')}\n"
                 f"حرکت شناسایی‌شده: {float(early_candidate['pump_pct']):.2f}% "
                 f"در {int(early_candidate['body_count'])} کندل صعودی ۵دقیقه‌ای\n"
                 f"سقف: {float(early_candidate['high']):.10g} | کف: {float(early_candidate['low']):.10g}\n"
@@ -1143,6 +1145,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 except (TypeError, ValueError):
                     change24_text = "نامشخص"
                 watch_message = (
+                    "🚀 LEG SPIKE | شکار پامپ\n"
                     "🟠━━━━━━━━━━━━━━━━━━🟠\n"
                     "🔎 مرحله ۲ از ۳ | ستاپ قوی‌تر شد\n"
                     f"🪙 ارز: {contract.replace('_', '/')}\n"
@@ -1207,6 +1210,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                                      if daily_long is not None and daily_long > 60
                                      else "لانگ روزانه زیر آستانه هشدار")
                     message = (
+                        "🚀 LEG SPIKE | شکار پامپ\n"
                         "🟢━━━━━━━━━━━━━━━━━━🟢\n"
                         "✅ مرحله ۳ از ۳ | نقطه ورود تأیید شد\n"
                         "🟢━━━━━━━━━━━━━━━━━━🟢\n"
