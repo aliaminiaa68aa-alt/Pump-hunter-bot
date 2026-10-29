@@ -41,6 +41,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
+          COINMARKETCAP_API_KEY: ${{ secrets.COINMARKETCAP_API_KEY }}
         run: timeout 240s python Bot.py
       - name: Save bot state
         if: always()
