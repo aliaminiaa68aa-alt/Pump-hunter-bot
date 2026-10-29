@@ -1148,14 +1148,20 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             raw_volume = ticker.get("volume_24h_quote") or ticker.get("volume_24h_usd") or 0
             volume24 = float(raw_volume)
             raw_funding = ticker.get("funding_rate")
+            # When Coinalyze is configured, validate funding from the aggregated
+            # derivatives venues below; do not discard a candidate just because
+            # the ticker venue's funding is zero, missing, or disagrees.
             if raw_funding in (None, ""):
-                if contract in early_pattern_details: early_filter_status[contract] = "Funding missing"
-                continue
-            funding = float(raw_funding)
-            if funding >= 0:
-                if contract in early_pattern_details: early_filter_status[contract] = f"Funding non-negative ({funding*100:+.4f}%)"
-                continue
-            if contract in early_pattern_details: early_filter_status[contract] = "Funding passed; checking market cap"
+                if not COINALYZE_API_KEY:
+                    if contract in early_pattern_details: early_filter_status[contract] = "Funding missing"
+                    continue
+                funding = 0.0
+            else:
+                funding = float(raw_funding)
+                if funding >= 0 and not COINALYZE_API_KEY:
+                    if contract in early_pattern_details: early_filter_status[contract] = f"Funding non-negative ({funding*100:+.4f}%)"
+                    continue
+            if contract in early_pattern_details: early_filter_status[contract] = "Checking aggregate funding and market cap"
             counts["negative_funding"] += 1
 
             symbol = contract[:-5].upper()
