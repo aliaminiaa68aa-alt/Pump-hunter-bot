@@ -1,0 +1,40 @@
+name: Telegram Delivery Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  telegram-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Send one test message to Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          token = os.environ.get("BOT_TOKEN")
+          chat_id = os.environ.get("CHAT_ID")
+          if not token or not chat_id:
+              raise SystemExit("Missing BOT_TOKEN or CHAT_ID GitHub secret")
+          response = requests.post(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data={
+                  "chat_id": chat_id,
+                  "text": "✅ تست ربات Pump Hunter: اتصال تلگرام برقرار است. این فقط پیام آزمایشی است.",
+              },
+              timeout=15,
+          )
+          response.raise_for_status()
+          result = response.json()
+          if not result.get("ok"):
+              raise SystemExit(f"Telegram API rejected the message: {result}")
+          print("Telegram test message sent successfully.")
+          PY
