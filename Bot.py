@@ -31,9 +31,12 @@ def scan():
     # Gate.io public USDT perpetual market data; no API key required.
     tickers = get_json("/futures/usdt/tickers")
     liquid = []
+    print(f"Gate.io tickers received: {len(tickers)}")
+    if tickers:
+        print(f"Ticker fields sample: {sorted(tickers[0].keys())}")
     for item in tickers:
         contract = item.get("contract", "")
-        turnover = float(item.get("volume_24h_usd", 0) or 0)
+        turnover = float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or item.get("volume_24h") or 0)
         if contract.endswith("_USDT") and turnover >= 5_000_000:
             liquid.append((item, turnover))
     coins = sorted(liquid, key=lambda pair: pair[1], reverse=True)[:30]
