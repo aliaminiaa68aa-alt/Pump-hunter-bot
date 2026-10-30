@@ -987,26 +987,18 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             is_new_early_candidate = early_candidate is not None
             if not early_candidate:
                 # If no fresh 15m impulse exists and there is no tracked 15m setup,
-                # check closed 1h candles for the same two-strong-body impulse.
-                # This is alert-only: do not insert a 1h setup into the 15m Fib/top
-                # monitoring state, which would mix candle timeframes.
+                # independently check both higher timeframes. Alert each timeframe
+                # that has a valid pattern; do not stop after the first match.
                 tracked_existing = candidates.get(contract)
                 if not tracked_existing:
-                    try:
-                        higher_candidate = None
-                        higher_interval = None
-                        # Escalate gradually: 1h first, then 4h only if 1h has no pattern.
-                        for interval, label in (("1h", "۱ساعته"), ("4h", "۴ساعته")):
-                            higher_candles = closed_candles(contract, interval, 20)
-                            found = detect_fib_pump(
+                    for higher_interval, higher_label in (("1h", "۱ساعته"), ("4h", "۴ساعته")):
+                        try:
+                            higher_candles = closed_candles(contract, higher_interval, 20)
+                            higher_candidate = detect_fib_pump(
                                 higher_candles, min_body_pct=0.6, min_total_pump_pct=3.0
                             )
-                            if found:
-                                higher_candidate = found
-                                higher_interval = interval
-                                higher_label = label
-                                break
-                        if higher_candidate:
+                            if not higher_candidate:
+                                continue
                             higher_key = str(higher_candidate["end_time"])
                             higher_sent = state.setdefault(f"fib_early_alerts_{higher_interval}", {})
                             higher_recent = state.setdefault(f"fib_early_any_{higher_interval}", {})
@@ -1014,42 +1006,42 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                                 last_higher_time = int(higher_recent.get(contract, 0))
                             except (TypeError, ValueError):
                                 last_higher_time = 0
-                            if (higher_sent.get(contract) != higher_key
-                                    and int(time.time()) - last_higher_time >= 3600):
-                                raw_funding_1h = item.get("funding_rate")
-                                try:
-                                    funding_text_1h = (
-                                        f"{float(raw_funding_1h) * 100:+.4f}%"
-                                        if raw_funding_1h not in (None, "") else "ناموجود"
-                                    )
-                                except (TypeError, ValueError):
-                                    funding_text_1h = "نامعتبر"
-                                higher_message = (
-                                    "🚀 LEG SPIKE | هشدار تایم‌فریم بالاتر\n"
-                                    "🟡━━━━━━━━━━━━━━━━━━🟡\n"
-                                    f"👀 الگوی ۱۵دقیقه‌ای پیدا نشد؛ الگوی مشابه در تایم {higher_label} شناسایی شد: {contract.replace('_', '/')}\n"
-                                    f"حرکت شناسایی‌شده: {float(higher_candidate['pump_pct']):.2f}% "
-                                    f"در {int(higher_candidate['body_count'])} کندل صعودی {higher_label}\n"
-                                    f"سقف: {float(higher_candidate['high']):.10g} | کف: {float(higher_candidate['low']):.10g}\n"
-                                    f"فیبو 0.50: {float(higher_candidate['fib50']):.10g} | "
-                                    f"فیبو 0.66: {float(higher_candidate['fib66']):.10g}\n"
-                                    f"Funding: {funding_text_1h}\n"
-                                    "⚠️ این هشدار فقط برای بررسی نمودار است؛ ورود تأییدشده نیست و این ستاپ وارد پایش ورود ۱۵دقیقه‌ای نمی‌شود."
+                            if (higher_sent.get(contract) == higher_key
+                                    or int(time.time()) - last_higher_time < 3600):
+                                print(f"{contract}: LEG SPIKE {higher_interval} alert suppressed; duplicate/cooldown")
+                                continue
+                            raw_funding_higher = item.get("funding_rate")
+                            try:
+                                funding_text_higher = (
+                                    f"{float(raw_funding_higher) * 100:+.4f}%"
+                                    if raw_funding_higher not in (None, "") else "ناموجود"
                                 )
-                                send_message(higher_message)
-                                higher_sent[contract] = higher_key
-                                higher_recent[contract] = int(time.time())
-                                print(
-                                    f"LEG SPIKE {higher_interval} fallback alert sent: {contract}; "
-                                    f"pump={float(higher_candidate['pump_pct']):.2f}%"
-                                )
-                            else:
-                                print(f"{contract}: LEG SPIKE {higher_interval} fallback alert suppressed; duplicate/cooldown")
-                    except Exception as higher_error:
-                        print(
-                            f"{contract}: LEG SPIKE higher-timeframe fallback scan failed: "
-                            f"{type(higher_error).__name__}: {higher_error}"
-                        )
+                            except (TypeError, ValueError):
+                                funding_text_higher = "نامعتبر"
+                            higher_message = (
+                                "🚀 LEG SPIKE | هشدار تایم‌فریم بالاتر\n"
+                                "🟡━━━━━━━━━━━━━━━━━━🟡\n"
+                                f"👀 الگوی ۱۵دقیقه‌ای پیدا نشد؛ الگوی معتبر در تایم {higher_label} شناسایی شد: {contract.replace('_', '/')}\n"
+                                f"حرکت شناسایی‌شده: {float(higher_candidate['pump_pct']):.2f}% "
+                                f"در {int(higher_candidate['body_count'])} کندل صعودی تایم {higher_label}\n"
+                                f"سقف: {float(higher_candidate['high']):.10g} | کف: {float(higher_candidate['low']):.10g}\n"
+                                f"فیبو 0.50: {float(higher_candidate['fib50']):.10g} | "
+                                f"فیبو 0.66: {float(higher_candidate['fib66']):.10g}\n"
+                                f"Funding: {funding_text_higher}\n"
+                                "⚠️ این هشدار فقط برای بررسی نمودار است؛ ورود تأییدشده نیست و این ستاپ وارد پایش ورود ۱۵دقیقه‌ای نمی‌شود."
+                            )
+                            send_message(higher_message)
+                            higher_sent[contract] = higher_key
+                            higher_recent[contract] = int(time.time())
+                            print(
+                                f"LEG SPIKE {higher_interval} fallback alert sent: {contract}; "
+                                f"pump={float(higher_candidate['pump_pct']):.2f}%"
+                            )
+                        except Exception as higher_error:
+                            print(
+                                f"{contract}: LEG SPIKE {higher_interval} fallback scan failed: "
+                                f"{type(higher_error).__name__}: {higher_error}"
+                            )
                 # Keep monitoring an already tracked 15m impulse even when this scan
                 # does not rediscover it. Do not replace that tracked setup with a 1h one.
                 early_candidate = tracked_existing
