@@ -1002,7 +1002,14 @@ def detect_fib_liquidity_reversal(candles, candidate):
         indexed = [(idx, candle) for idx, candle in enumerate(candles)
                    if int(candle.get("t", 0)) > end_time]
         if len(indexed) < 3:
+            print("LEG SPIKE reversal diagnostic: fewer than 3 closed 15m candles after impulse")
             return None
+
+        # Track the exact reason a candidate fails so we can tune the detector
+        # from evidence rather than weakening entry filters blindly.
+        checked_bullish = 0
+        checked_sweep = 0
+        checked_reclaim = 0
 
         # Approximate bullish order block: nearest bearish candle before the impulse.
         start_idx = next((idx for idx, candle in enumerate(candles)
@@ -1028,6 +1035,7 @@ def detect_fib_liquidity_reversal(candles, candidate):
             # that deeper sweep is tradable; do not discard it solely by wick.
             if close <= op:
                 continue
+            checked_bullish += 1
 
             # Recent lows before this candle are the sell-side liquidity pool.
             previous = indexed[max(0, pos - 5):pos]
@@ -1036,6 +1044,7 @@ def detect_fib_liquidity_reversal(candles, candidate):
             prior_liquidity_low = min(float(item["l"]) for _, item in previous)
             if not (low < prior_liquidity_low):
                 continue
+            checked_sweep += 1
 
             # Choose the Fib level price must reclaim based on how deep the sweep went.
             if low <= fib66:
@@ -1051,6 +1060,7 @@ def detect_fib_liquidity_reversal(candles, candidate):
             # back above the applicable Fib reclaim level.
             if close <= reclaim_level:
                 continue
+            checked_reclaim += 1
 
             ob_overlap = bool(ob and low <= ob["high"] and high >= ob["low"])
             return {
@@ -1065,7 +1075,14 @@ def detect_fib_liquidity_reversal(candles, candidate):
                 "order_block": ob,
                 "order_block_overlap": ob_overlap,
             }
-    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        print(
+            "LEG SPIKE reversal diagnostic: "
+            f"bullish_closed_candles={checked_bullish}, "
+            f"liquidity_sweeps={checked_sweep}, "
+            f"Fib_reclaims={checked_reclaim}; no valid 15m confirmation"
+        )
+    except (TypeError, ValueError, KeyError, ZeroDivisionError) as error:
+        print(f"LEG SPIKE reversal diagnostic: malformed candle/candidate data ({type(error).__name__})")
         return None
     return None
 
