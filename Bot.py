@@ -20,6 +20,7 @@ NON_CRYPTO_BASES = {
     "MSTX", "BITX", "ETHU", "YINN", "YANG", "KOLD", "BOIL", "TZA", "TNA",
     # Equity-linked contracts observed in Gate.io futures scans (not crypto assets).
     "SNXX", "INTW", "SNDK", "SKHY", "CXMT", "DRAM", "CRWV",
+    "MU", "MUU", "SKHYNIX", "SAMSUNG", "MICRON",
 }
 
 
