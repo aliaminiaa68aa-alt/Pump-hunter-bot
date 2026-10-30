@@ -1678,9 +1678,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     "⏳ این هشدار تأیید قدرت ستاپ است؛ منتظر هشدار رسیدن/شکست سقف باشید و نقطه ورود را خودتان تعیین کنید.\n"
                     "🟠━━━━━━━━━━━━━━━━━━🟠"
                 )
-                send_message(watch_message)
+                # Suppress Stage-2 Telegram messages: LEG SPIKE only alerts on a confirmed entry.
                 setup_sent[contract] = setup_key
-                print(f"{contract}: stage-2 setup alert sent")
+                print(f"{contract}: Stage-2 watch alert suppressed; awaiting confirmed 15m sweep/reclaim entry")
 
             # Final LEG SPIKE entry requires a real 15m bullish liquidity sweep/reclaim
             # at Fib 0.50/0.66 plus interaction with the nearest available bearish-candle OB.
@@ -1691,7 +1691,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             raw_alerted = fib_entry_state.get(contract, [])
             alerted_levels = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
             fib_top_state = state.setdefault("fib_top_alerts", {})
-            if fib_top_state.get(contract) == fib_end_time:
+            # A prior top-break is not required: evaluate the actual Fib pullback,
+            # liquidity sweep and closed-candle reclaim directly on the tracked 15m impulse.
+            if True:
                 reversal = detect_fib_liquidity_reversal(candles, candidate)
                 if reversal:
                     new_levels = [
