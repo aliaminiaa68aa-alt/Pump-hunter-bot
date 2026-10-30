@@ -49,6 +49,41 @@ def send_message(message):
         raise RuntimeError(f"Telegram API error: {result}")
 
 
+
+
+def register_combo_signal(state, symbol, strategy, direction="LONG"):
+    """Emit a special alert when liquidity, SPIKE and confirmed BOS align within 1h."""
+    required = {"LIQUIDITY", "SPIKE", "BOS"}
+    normalized = str(symbol).upper().replace("/", "_")
+    if not normalized.endswith("_USDT"):
+        return
+    now = int(time.time())
+    records = state.setdefault("combo_signals", {})
+    record = records.setdefault(normalized, {})
+    record[strategy] = {"time": now, "direction": direction}
+    for key, value in list(record.items()):
+        if not isinstance(value, dict) or now - int(value.get("time", 0) or 0) > 3600:
+            record.pop(key, None)
+    if not required.issubset(record.keys()):
+        return
+    if any(record[key].get("direction") != direction for key in required):
+        return
+    sent_state = state.setdefault("combo_alerts_sent", {})
+    if now - int(sent_state.get(normalized, 0) or 0) < 3600:
+        return
+    message = (
+        "🔥 هشدار ترکیبی ویژه | تأیید سه‌گانه\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🪙 ارز: {normalized.replace('_', '/')}\n"
+        "✅ ورود نقدینگی + تأیید SPIKE + ورود نهایی BOS\n"
+        "⏱ هر سه رویداد در بازهٔ حداکثر یک‌ساعته و هم‌جهت ثبت شده‌اند.\n"
+        "⚠️ این هم‌پوشانی تضمین سود نیست؛ قیمت، حدضرر، اسپرد و نقدشوندگی را بررسی کن."
+    )
+    send_message(message)
+    sent_state[normalized] = now
+    print(f"COMBO alert sent: {normalized}; strategies=LIQUIDITY,SPIKE,BOS")
+
+
 def get_json(path, params=None):
     response = SESSION.get(BASE + path, params=params, timeout=20)
     response.raise_for_status()
@@ -1053,6 +1088,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         "🟡━━━━━━━━━━━━━━━━━━🟡"
                     )
                     send_message(liquidity_message)
+                    register_combo_signal(state, contract, "LIQUIDITY")
                     liquidity_state[contract] = {"candle_time": candle_key, "sent_at": int(time.time())}
                     print(
                         f"{contract}: liquidity inflow alert sent; "
@@ -1192,6 +1228,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                             "🟢━━━━━━━━━━━━━━━━━━🟢"
                         )
                         send_message(top_message)
+                        register_combo_signal(state, contract, "SPIKE")
                         top_state[contract] = top_key_stage1
                         print(f"{contract}: Stage-1 top-break alert sent at {confirmed_top:.10g}")
             except (TypeError, ValueError, KeyError, IndexError) as error:
@@ -1868,6 +1905,7 @@ def scan_gateio_spot_liquidity(state, max_symbols=60):
                 "👀 هشدار اولیه است؛ به‌تنهایی تأیید پامپ یا توصیه ورود نیست."
             )
             send_message(message)
+            register_combo_signal(state, symbol, "LIQUIDITY")
             alert_state[symbol] = {"candle_time": signal["candle_time"], "sent_at": now}
             sent += 1
             print(f"Gate.io spot liquidity alert sent: {symbol}; turnover={signal['volume_ratio']:.2f}x")
@@ -2195,6 +2233,7 @@ def scan():
                 "⚠️ این هشدار تأیید الگوریتمی است، نه تضمین سود؛ قبل از ورود نقدشوندگی، اسپرد و ریسک را بررسی کن."
             )
             send_message(message)
+            register_combo_signal(state, contract, "BOS")
             alerts_state[contract] = candidate["impulse_time"]
             candidates.pop(contract, None)
             alerts += 1
