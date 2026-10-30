@@ -1491,10 +1491,13 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             fib_top_state = state.setdefault("fib_top_alerts", {})
             touched_level = None
             if fib_top_state.get(contract) == fib_end_time:
-                already_alerted = str(fib_entry_state.get(contract, ""))
-                if already_alerted != f"{fib_end_time}:0.50" and fib_low < live_price <= fib50_level:
+                raw_alerted = fib_entry_state.get(contract, [])
+                alerted_levels = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
+                key50 = f"{fib_end_time}:0.50"
+                key66 = f"{fib_end_time}:0.66"
+                if key50 not in alerted_levels and fib_low < live_price <= fib50_level:
                     touched_level = ("0.50", fib50_level)
-                elif already_alerted not in (f"{fib_end_time}:0.50", f"{fib_end_time}:0.66") and fib_low < live_price <= float(candidate["fib66"]):
+                elif key50 in alerted_levels and key66 not in alerted_levels and fib_low < live_price <= float(candidate["fib66"]):
                     touched_level = ("0.66", float(candidate["fib66"]))
             if touched_level:
                 level_name, entry_level = touched_level
@@ -1520,7 +1523,10 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         "🟣━━━━━━━━━━━━━━━━━━🟣"
                     )
                     send_message(fib_message)
-                    fib_entry_state[contract] = f"{fib_end_time}:{level_name}"
+                    raw_alerted = fib_entry_state.get(contract, [])
+                    alerted_levels = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
+                    alerted_levels.add(f"{fib_end_time}:{level_name}")
+                    fib_entry_state[contract] = sorted(alerted_levels)
                     if level_name == "0.50":
                         fib50_alert_state[contract] = fib_end_time
                     print(f"{contract}: filtered Fib {level_name} entry alert sent at {live_price:.10g}; target={fib_high:.10g}")
