@@ -993,14 +993,23 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 tracked_existing = candidates.get(contract)
                 if not tracked_existing:
                     try:
-                        candles_1h = closed_candles(contract, "1h", 20)
-                        higher_candidate = detect_fib_pump(
-                            candles_1h, min_body_pct=0.6, min_total_pump_pct=3.0
-                        )
+                        higher_candidate = None
+                        higher_interval = None
+                        # Escalate gradually: 1h first, then 4h only if 1h has no pattern.
+                        for interval, label in (("1h", "۱ساعته"), ("4h", "۴ساعته")):
+                            higher_candles = closed_candles(contract, interval, 20)
+                            found = detect_fib_pump(
+                                higher_candles, min_body_pct=0.6, min_total_pump_pct=3.0
+                            )
+                            if found:
+                                higher_candidate = found
+                                higher_interval = interval
+                                higher_label = label
+                                break
                         if higher_candidate:
                             higher_key = str(higher_candidate["end_time"])
-                            higher_sent = state.setdefault("fib_early_alerts_1h", {})
-                            higher_recent = state.setdefault("fib_early_any_1h", {})
+                            higher_sent = state.setdefault(f"fib_early_alerts_{higher_interval}", {})
+                            higher_recent = state.setdefault(f"fib_early_any_{higher_interval}", {})
                             try:
                                 last_higher_time = int(higher_recent.get(contract, 0))
                             except (TypeError, ValueError):
@@ -1018,9 +1027,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                                 higher_message = (
                                     "🚀 LEG SPIKE | هشدار تایم‌فریم بالاتر\n"
                                     "🟡━━━━━━━━━━━━━━━━━━🟡\n"
-                                    f"👀 الگوی ۱۵دقیقه‌ای پیدا نشد؛ الگوی مشابه در ۱ساعته شناسایی شد: {contract.replace('_', '/')}\n"
+                                    f"👀 الگوی ۱۵دقیقه‌ای پیدا نشد؛ الگوی مشابه در تایم {higher_label} شناسایی شد: {contract.replace('_', '/')}\n"
                                     f"حرکت شناسایی‌شده: {float(higher_candidate['pump_pct']):.2f}% "
-                                    f"در {int(higher_candidate['body_count'])} کندل صعودی ۱ساعته\n"
+                                    f"در {int(higher_candidate['body_count'])} کندل صعودی {higher_label}\n"
                                     f"سقف: {float(higher_candidate['high']):.10g} | کف: {float(higher_candidate['low']):.10g}\n"
                                     f"فیبو 0.50: {float(higher_candidate['fib50']):.10g} | "
                                     f"فیبو 0.66: {float(higher_candidate['fib66']):.10g}\n"
@@ -1031,14 +1040,14 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                                 higher_sent[contract] = higher_key
                                 higher_recent[contract] = int(time.time())
                                 print(
-                                    f"LEG SPIKE 1h fallback alert sent: {contract}; "
+                                    f"LEG SPIKE {higher_interval} fallback alert sent: {contract}; "
                                     f"pump={float(higher_candidate['pump_pct']):.2f}%"
                                 )
                             else:
-                                print(f"{contract}: LEG SPIKE 1h fallback alert suppressed; duplicate/cooldown")
+                                print(f"{contract}: LEG SPIKE {higher_interval} fallback alert suppressed; duplicate/cooldown")
                     except Exception as higher_error:
                         print(
-                            f"{contract}: LEG SPIKE 1h fallback scan failed: "
+                            f"{contract}: LEG SPIKE higher-timeframe fallback scan failed: "
                             f"{type(higher_error).__name__}: {higher_error}"
                         )
                 # Keep monitoring an already tracked 15m impulse even when this scan
