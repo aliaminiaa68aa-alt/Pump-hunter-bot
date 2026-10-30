@@ -883,7 +883,49 @@ def get_market_caps(state, requested_symbols=None):
                     volumes.pop(symbol, None)
                     ambiguous.add(symbol)
                     paprika_ambiguous += 1
-            print(f"CoinPaprika fallback: requested={len(paprika_missing)}, resolved={paprika_resolved}, ambiguous={paprika_ambiguous}")
+            # The bulk /tickers endpoint may omit low-cap coins. For the first few
+            # unresolved symbols, use CoinPaprika search and accept only an exact,
+            # unique symbol match; never guess between coins sharing a ticker.
+            paprika_search_resolved = 0
+            paprika_search_ambiguous = 0
+            unresolved = [symbol for symbol in paprika_missing if symbol not in caps or symbol in ambiguous]
+            for symbol in unresolved[:10]:
+                try:
+                    search_response = SESSION.get(
+                        "https://api.coinpaprika.com/v1/search",
+                        params={"q": symbol, "c": "currencies", "limit": 20},
+                        timeout=10,
+                    )
+                    search_response.raise_for_status()
+                    search_data = search_response.json()
+                    currencies = search_data.get("currencies", []) if isinstance(search_data, dict) else []
+                    exact = [row for row in currencies
+                             if str(row.get("symbol", "")).upper() == symbol
+                             and row.get("id")]
+                    if len(exact) == 1:
+                        ticker_response = SESSION.get(
+                            f"https://api.coinpaprika.com/v1/tickers/{exact[0]['id']}",
+                            params={"quotes": "USD"},
+                            timeout=10,
+                        )
+                        ticker_response.raise_for_status()
+                        ticker = ticker_response.json()
+                        quote = (ticker.get("quotes") or {}).get("USD") or {}
+                        cap, volume = quote.get("market_cap"), quote.get("volume_24h")
+                        if cap not in (None, "") and float(cap) > 0:
+                            caps[symbol] = float(cap)
+                            if volume not in (None, "") and float(volume) > 0:
+                                volumes[symbol] = float(volume)
+                            ambiguous.discard(symbol)
+                            paprika_search_resolved += 1
+                    elif len(exact) > 1:
+                        caps.pop(symbol, None)
+                        volumes.pop(symbol, None)
+                        ambiguous.add(symbol)
+                        paprika_search_ambiguous += 1
+                except Exception as search_error:
+                    print(f"CoinPaprika exact-symbol lookup failed for {symbol}: {type(search_error).__name__}")
+            print(f"CoinPaprika fallback: requested={len(paprika_missing)}, bulk_resolved={paprika_resolved}, search_resolved={paprika_search_resolved}, ambiguous={paprika_ambiguous + paprika_search_ambiguous}")
         except Exception as error:
             print(f"CoinPaprika fallback unavailable for {len(paprika_missing)} candidate symbols: {type(error).__name__}: {error}")
 
