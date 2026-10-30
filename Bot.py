@@ -1484,11 +1484,50 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             fib_high = float(candidate["high"])
             fib50_level = fib_high - (fib_high - fib_low) * 0.50
             live_price = float(ticker.get("last") or candles[-1]["c"])
+            # Do not alert on a raw Fib-0.50 touch: that can be a falling knife.
+            # Require a post-impulse pullback to Fib 0.50, then a CLOSED 15m bullish
+            # reclaim that breaks the previous closed candle's high (micro-BOS).
+            # This confirms a reaction before notifying, without requiring a full
+            # retest of the impulse top and therefore avoids an excessively late alert.
+            post_impulse = []
+            try:
+                post_impulse = [
+                    candle for candle in candles
+                    if int(candle.get("t", 0)) > int(fib_end_time)
+                ]
+            except (TypeError, ValueError):
+                post_impulse = []
+            pullback_seen = False
+            if post_impulse:
+                try:
+                    pullback_seen = any(
+                        float(candle["l"]) <= fib50_level
+                        for candle in post_impulse[-5:]
+                    )
+                except (TypeError, ValueError, KeyError):
+                    pullback_seen = False
+            reclaim_confirmed = False
+            if pullback_seen and len(post_impulse) >= 2:
+                try:
+                    previous_closed = post_impulse[-2]
+                    last_closed = post_impulse[-1]
+                    last_open = float(last_closed["o"])
+                    last_close = float(last_closed["c"])
+                    previous_high = float(previous_closed["h"])
+                    reclaim_confirmed = (
+                        last_close > last_open
+                        and last_close > fib50_level
+                        and last_close > previous_high
+                        and live_price > fib50_level
+                    )
+                except (TypeError, ValueError, KeyError):
+                    reclaim_confirmed = False
             if (fib_top_state.get(contract) == fib_end_time
                     and fib50_alert_state.get(contract) != fib_end_time
-                    and fib_low < live_price <= fib50_level):
-                # Reaching here means volume/MC >= 2x, OI/MC <= 50% and
-                # negative funding have passed. Check the agreed long-share limits.
+                    and pullback_seen and reclaim_confirmed):
+                # Reaching here means price pulled back to Fib 0.50 and then
+                # reclaimed it with a closed bullish 15m micro-BOS. Strict market,
+                # OI, funding and long-share filters are still mandatory.
                 ratio_check = leg_spike_long_short_filter(contract)
                 if not ratio_check.get("valid") or not ratio_check.get("passed"):
                     reason = ratio_check.get("reason", "long/short ratios outside required thresholds")
