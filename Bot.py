@@ -1033,9 +1033,10 @@ def detect_fib_liquidity_reversal(candles, candidate):
                 continue
 
             touched_levels = []
-            if low <= fib50 and high >= impulse_low:
+            # Only label a Fib level if this candle's range actually crosses it.
+            if low <= fib50 <= high:
                 touched_levels.append(("0.50", fib50))
-            if low <= fib66 and high >= impulse_low:
+            if low <= fib66 <= high:
                 touched_levels.append(("0.66", fib66))
             if not touched_levels:
                 continue
@@ -1725,7 +1726,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                                     f"📐 سطح فیبو لمس‌شده: {level_name} ({entry_level:.10g})\n"
                                     f"💧 کف نقدینگی جاروب‌شده: {reversal['sweep_low']:.10g} | کف قبلی: {reversal['prior_liquidity_low']:.10g}\n"
                                     f"🧱 اردربلاک نزولیِ قبل از موج: {ob_text}\n"
-                                    f"🛑 حد ضرر ساختاری: کف موج {fib_low:.10g}\n"
+                                    f"🛑 حد ضرر: ۱٪ زیر کف نقدینگیِ جاروب‌شده {reversal['sweep_low'] * 0.99:.10g}\n"
                                     f"🎯 تارگت: سقف موج {fib_high:.10g}\n"
                                     f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x | OI/MC: {oi_usd / market_cap:.1%}\n"
                                     f"💸 Funding: {funding * 100:+.4f}% | سهم لانگ ۱۵دقیقه: {ratio_check['ratio_15m']:.1f}%، یک‌ساعت: {ratio_check['ratio_1h']:.1f}%، روزانه: {ratio_check['ratio_1d']:.1f}%\n"
