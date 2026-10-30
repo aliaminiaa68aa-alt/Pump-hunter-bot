@@ -1110,7 +1110,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     market_volumes = state.get("market_cap_cache", {}).get("volumes", {})
     sent = state["fib_alerts"]
     counts = {
-        "tickers": 0, "negative_funding": 0, "cap_available": 0,
+        "tickers": 0, "funding_gate_pass": 0, "cap_available": 0,
         "early_scan_checked": 0, "early_patterns_seen": 0, "early_warnings_sent": 0,
         "early_duplicate_suppressed": 0, "early_recent_suppressed": 0, "early_candle_errors": 0, "volume_pass": 0, "oi_pass": 0,
         "pump_detected": 0, "pump_pattern_rejected": 0,
@@ -1555,7 +1555,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if contract in early_pattern_details: early_filter_status[contract] = f"Funding non-negative ({funding*100:+.4f}%)"
                     continue
             if contract in early_pattern_details: early_filter_status[contract] = "Checking aggregate funding and market cap"
-            counts["negative_funding"] += 1
+            counts["funding_gate_pass"] += 1
 
             symbol = contract[:-5].upper()
             market_cap = caps.get(symbol)
