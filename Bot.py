@@ -1050,6 +1050,37 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             except (TypeError, ValueError, KeyError, IndexError) as error:
                 print(f"{contract}: Stage-1 top monitor skipped: {error}")
 
+            # Stage-1 pullback alert: after the impulse top has been touched/broken,
+            # alert as soon as the live ticker price reaches Fib 0.50. This is an
+            # informational level-touch alert only; do not wait for candle confirmation
+            # and do not label it as an entry signal.
+            try:
+                fib_candidate = candidates.get(contract) or early_candidate
+                fib_end_time = str(fib_candidate["end_time"])
+                fib_top_state = state.setdefault("fib_top_alerts", {})
+                fib50_alert_state = state.setdefault("fib50_alerts", {})
+                if fib_top_state.get(contract) == fib_end_time and fib50_alert_state.get(contract) != fib_end_time:
+                    fib_low = float(fib_candidate["low"])
+                    fib_high = float(fib_candidate["high"])
+                    fib50_level = fib_high - (fib_high - fib_low) * 0.50
+                    live_price = float(item.get("last") or candles[-1]["c"])
+                    if fib_low < live_price <= fib50_level:
+                        fib50_message = (
+                            "🟣 LEG SPIKE | هشدار رسیدن قیمت به نیم فیبو\\n"
+                            "🟣━━━━━━━━━━━━━━━━━━🟣\\n"
+                            f"🪙 ارز: {contract.replace('_', '/')}\\n"
+                            f"📍 قیمت فعلی: {live_price:.10g}\\n"
+                            f"🎯 سطح فیبو 0.50: {fib50_level:.10g}\\n"
+                            f"🔺 کف اسپایک: {fib_low:.10g} | سقف اسپایک: {fib_high:.10g}\\n"
+                            "⚠️ قیمت به سطح نیم فیبو رسیده؛ این فقط هشدار سطح است، نه سیگنال قطعی خرید.\\n"
+                            "🟣━━━━━━━━━━━━━━━━━━🟣"
+                        )
+                        send_message(fib50_message)
+                        fib50_alert_state[contract] = fib_end_time
+                        print(f"{contract}: LEG SPIKE Fib 0.50 touch alert sent at {live_price:.10g}")
+            except (TypeError, ValueError, KeyError, IndexError) as error:
+                print(f"{contract}: Fib 0.50 touch monitor skipped: {error}")
+
             if is_new_early_candidate and len(early_pattern_samples) < 8:
                 early_pattern_samples.append(
                     f"{contract}:{early_candidate['pump_pct']:.2f}%/{early_candidate['body_count']}c"
