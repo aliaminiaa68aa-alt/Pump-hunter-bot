@@ -340,7 +340,7 @@ def coinalyze_request(path, params=None):
 def coinalyze_derivatives_check(contract, state):
     """
     Cross-check a potential entry with aggregate Coinalyze data.
-    Cache only successful results for at most five minutes across scheduled scans,
+    Cache only successful results for at most seven minutes across scheduled scans,
     reducing repeated API calls without letting failed/stale data authorize entries.
     """
     if not COINALYZE_API_KEY:
@@ -353,7 +353,7 @@ def coinalyze_derivatives_check(contract, state):
         cache_age = now - int(cached_result.get("fetched_at", 0))
     except (TypeError, ValueError):
         cache_age = 999999
-    if cached_result.get("result", {}).get("valid") is True and 0 <= cache_age < 300:
+    if cached_result.get("result", {}).get("valid") is True and 0 <= cache_age < 420:
         print(f"{contract}: using successful Coinalyze cache ({cache_age}s old)")
         return dict(cached_result["result"])
 
