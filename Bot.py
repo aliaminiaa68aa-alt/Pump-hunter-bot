@@ -1042,6 +1042,51 @@ def detect_liquidity_inflow(candles, min_volume_ratio=2.5, min_price_change_pct=
         return None
 
 
+
+def diagnose_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0):
+    """Explain why a recent closed-candle impulse did not qualify; diagnostics only."""
+    result = {"triples_checked": 0, "bullish_fvg": 0, "body_pass": 0, "move_pass": 0}
+    if len(candles) < 10:
+        result["reason"] = "insufficient_closed_candles"
+        return result
+    start_min = max(0, len(candles) - 7)
+    for end_idx in range(len(candles) - 1, max(start_min + 1, 1), -1):
+        first_idx = end_idx - 2
+        if first_idx < start_min:
+            continue
+        result["triples_checked"] += 1
+        try:
+            a, b, current = candles[first_idx], candles[first_idx + 1], candles[end_idx]
+            if float(current["l"]) <= float(a["h"]) or float(current["c"]) <= float(current["o"]):
+                continue
+            result["bullish_fvg"] += 1
+            for anchor_idx in (first_idx, first_idx + 1):
+                seq = candles[anchor_idx:end_idx + 1]
+                strong = sum(
+                    1 for item in seq
+                    if float(item["o"]) > 0 and float(item["c"]) > float(item["o"])
+                    and (float(item["c"]) / float(item["o"]) - 1) * 100 >= min_body_pct
+                )
+                if strong < 2:
+                    continue
+                result["body_pass"] += 1
+                low = min(float(item["l"]) for item in seq)
+                high = max(float(item["h"]) for item in seq)
+                move = (high / low - 1) * 100 if low > 0 else 0
+                if move >= min_total_pump_pct and high > low:
+                    result["move_pass"] += 1
+        except (TypeError, ValueError, KeyError, ZeroDivisionError):
+            continue
+    if result["bullish_fvg"] == 0:
+        result["reason"] = "no_bullish_fvg"
+    elif result["body_pass"] == 0:
+        result["reason"] = "fvg_found_but_fewer_than_two_strong_bodies"
+    elif result["move_pass"] == 0:
+        result["reason"] = "body_pass_but_total_move_below_threshold"
+    else:
+        result["reason"] = "detector_mismatch_or_data_issue"
+    return result
+
 def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=FIB_MIN_TOTAL_PUMP_PCT):
     """Find a recent bullish impulse with a closed bullish FVG and at least two strong bodies."""
     if len(candles) < 10:
@@ -1767,9 +1812,11 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 candidate = detect_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0)
                 if not candidate:
                     counts["pump_pattern_rejected"] += 1
+                    diagnostic = diagnose_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0)
                     print(
                         f"{contract}: LEG SPIKE passed volume/OI/funding but no recent "
-                        "2-3 candle 15m impulse met body>=0.6% and total-move>=3.0%"
+                        "2-3 candle 15m impulse met body>=0.6% and total-move>=3.0%; "
+                        f"pattern_diagnostic={diagnostic}"
                     )
                     if contract in early_pattern_details: early_filter_status[contract] = "Volume/OI/funding passed; impulse below Stage-2 threshold or too old"
                     continue
