@@ -1459,18 +1459,18 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     print(f"{contract}: Fib 0.50 touched but long/short filter rejected/unavailable: {reason}")
                 else:
                     fib_message = (
-                        "🟣 LEG SPIKE | هشدار فیبو ۰٫۵ با فیلترهای تأییدشده\\n"
-                        "🟣━━━━━━━━━━━━━━━━━━🟣\\n"
-                        f"🪙 ارز: {contract.replace('_', '/')}\\n"
-                        f"📍 قیمت فعلی: {live_price:.10g}\\n"
-                        f"🎯 سطح فیبو 0.50: {fib50_level:.10g}\\n"
-                        f"🔺 کف اسپایک: {fib_low:.10g} | سقف اسپایک: {fib_high:.10g}\\n"
-                        f"💧 حجم/مارکت‌کپ: {volume_mc:.2f}x (شرط: حداقل 2x)\\n"
-                        f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} (شرط: حداکثر 50%)\\n"
-                        f"💸 Funding: {funding * 100:+.4f}% (منفی)\\n"
+                        "🟣 LEG SPIKE | هشدار فیبو ۰٫۵ با فیلترهای تأییدشده\n"
+                        "🟣━━━━━━━━━━━━━━━━━━🟣\n"
+                        f"🪙 ارز: {contract.replace('_', '/')}\n"
+                        f"📍 قیمت فعلی: {live_price:.10g}\n"
+                        f"🎯 سطح فیبو 0.50: {fib50_level:.10g}\n"
+                        f"🔺 کف اسپایک: {fib_low:.10g} | سقف اسپایک: {fib_high:.10g}\n"
+                        f"💧 حجم/مارکت‌کپ: {volume_mc:.2f}x (شرط: حداقل 2x)\n"
+                        f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} (شرط: حداکثر 50%)\n"
+                        f"💸 Funding: {funding * 100:+.4f}% (منفی)\n"
                         f"📈 سهم لانگ: ۱۵دقیقه {ratio_check['ratio_15m']:.1f}% | "
-                        f"۱ساعت {ratio_check['ratio_1h']:.1f}% | روزانه {ratio_check['ratio_1d']:.1f}%\\n"
-                        "⚠️ فیلترهای تعیین‌شده پاس شده‌اند و قیمت به نیم فیبو رسیده؛ این هشدار سطح است و نقطه ورود را خودت انتخاب کن.\\n"
+                        f"۱ساعت {ratio_check['ratio_1h']:.1f}% | روزانه {ratio_check['ratio_1d']:.1f}%\n"
+                        "⚠️ فیلترهای تعیین‌شده پاس شده‌اند و قیمت به نیم فیبو رسیده؛ این هشدار سطح است و نقطه ورود را خودت انتخاب کن.\n"
                         "🟣━━━━━━━━━━━━━━━━━━🟣"
                     )
                     send_message(fib_message)
