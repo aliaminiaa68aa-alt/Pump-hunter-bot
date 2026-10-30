@@ -1686,6 +1686,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             # Final LEG SPIKE entry requires a real 15m bullish liquidity sweep/reclaim
             # at Fib 0.50/0.66 plus interaction with the nearest available bearish-candle OB.
             fib_end_time = str(candidate["end_time"])
+            fib_low = float(candidate["low"])
+            fib_high = float(candidate["high"])
             fib_entry_state = state.setdefault("fib_entry_alerts", {})
             raw_alerted = fib_entry_state.get(contract, [])
             alerted_levels = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
