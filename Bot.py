@@ -339,16 +339,25 @@ def coinalyze_request(path, params=None):
 
 def coinalyze_derivatives_check(contract, state):
     """
-    Cross-check a potential regular-strategy entry with Coinalyze data from
-    multiple USDT-margined perpetual exchanges. If the API key is not configured,
-    preserve the existing Gate.io validation. If configured, fail closed on
-    missing/weak Coinalyze OI or funding confirmation.
+    Cross-check a potential entry with aggregate Coinalyze data.
+    Cache only successful results for at most five minutes across scheduled scans,
+    reducing repeated API calls without letting failed/stale data authorize entries.
     """
     if not COINALYZE_API_KEY:
         return {"configured": False, "valid": False, "reason": "COINALYZE_API_KEY secret is not configured"}
 
+    now = int(time.time())
+    result_cache = state.setdefault("coinalyze_result_cache", {})
+    cached_result = result_cache.get(contract, {})
     try:
-        now = int(time.time())
+        cache_age = now - int(cached_result.get("fetched_at", 0))
+    except (TypeError, ValueError):
+        cache_age = 999999
+    if cached_result.get("result", {}).get("valid") is True and 0 <= cache_age < 300:
+        print(f"{contract}: using successful Coinalyze cache ({cache_age}s old)")
+        return dict(cached_result["result"])
+
+    try:
         cache = state.get("coinalyze_market_cache", {})
         if not cache.get("fetched_at") or now - int(cache["fetched_at"]) >= 21600:
             markets = coinalyze_request("/future-markets")
@@ -486,13 +495,22 @@ def coinalyze_derivatives_check(contract, state):
             f"aggregate_OI_USD={new_total:.0f} average_funding={funding_avg*100:+.4f}% "
             f"funding_raw_values=[{','.join(funding_raw_diagnostics)}]"
         )
-        return {
+        result = {
             "configured": True, "valid": True,
             "oi_change": oi_change, "oi_change4h": oi_change4h, "funding_rate": funding_avg,
             "oi_usd": new_total,
             "oi_exchanges": oi_exchanges, "funding_exchanges": funding_exchanges,
             "symbol": base + "USDT",
         }
+        result_cache[contract] = {"fetched_at": now, "result": result}
+        # Bound persisted state growth; only keep recent successful snapshots.
+        for cached_contract, cached in list(result_cache.items()):
+            try:
+                if now - int(cached.get("fetched_at", 0)) >= 1800:
+                    result_cache.pop(cached_contract, None)
+            except (TypeError, ValueError):
+                result_cache.pop(cached_contract, None)
+        return result
     except Exception as error:
         print(f"{contract}: Coinalyze cross-check failed: {type(error).__name__}: {error}")
         return {"configured": True, "valid": False, "reason": "داده Coinalyze در دسترس نیست"}
