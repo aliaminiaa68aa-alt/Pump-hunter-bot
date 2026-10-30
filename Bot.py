@@ -984,6 +984,86 @@ def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=F
     return None
 
 
+def detect_fib_liquidity_reversal(candles, candidate):
+    """
+    Confirm a 15m Fib pullback only after a bullish liquidity sweep/reclaim
+    around a demand/order-block area. This is a heuristic, not a guarantee.
+    """
+    try:
+        start_time = int(candidate["start_time"])
+        end_time = int(candidate["end_time"])
+        impulse_low = float(candidate["low"])
+        impulse_high = float(candidate["high"])
+        fib50 = float(candidate.get("fib50", impulse_high - (impulse_high - impulse_low) * 0.50))
+        fib66 = float(candidate.get("fib66", impulse_high - (impulse_high - impulse_low) * 0.66))
+        indexed = [(idx, candle) for idx, candle in enumerate(candles)
+                   if int(candle.get("t", 0)) > end_time]
+        if not indexed:
+            return None
+
+        # Approximate bullish order block: the nearest bearish candle before
+        # the impulse begins, using only candles available in this 15m window.
+        start_idx = next((idx for idx, candle in enumerate(candles)
+                          if int(candle.get("t", 0)) >= start_time), None)
+        ob = None
+        if start_idx is not None:
+            for idx in range(start_idx - 1, max(-1, start_idx - 9), -1):
+                candle = candles[idx]
+                op, close = float(candle["o"]), float(candle["c"])
+                if close < op:
+                    ob = {"low": float(candle["l"]), "high": float(candle["h"]),
+                          "time": int(candle.get("t", 0))}
+                    break
+
+        # Inspect only the latest three closed 15m candles after the impulse.
+        for pos in range(max(0, len(indexed) - 3), len(indexed)):
+            candle_idx, candle = indexed[pos]
+            op, close = float(candle["o"]), float(candle["c"])
+            low, high = float(candle["l"]), float(candle["h"])
+            if close <= op or close <= impulse_low or low <= impulse_low:
+                continue
+
+            previous = [item for idx, item in indexed[:pos] if int(item.get("t", 0)) < int(candle["t"])]
+            previous = previous[-5:]
+            if len(previous) < 2:
+                continue
+            prior_liquidity_low = min(float(item["l"]) for item in previous)
+            # A sweep must pierce a recent low and close back above that low.
+            if not (low < prior_liquidity_low and close > prior_liquidity_low):
+                continue
+
+            touched_levels = []
+            if low <= fib50 and high >= impulse_low:
+                touched_levels.append(("0.50", fib50))
+            if low <= fib66 and high >= impulse_low:
+                touched_levels.append(("0.66", fib66))
+            if not touched_levels:
+                continue
+
+            ob_overlap = False
+            if ob:
+                ob_overlap = low <= ob["high"] and high >= ob["low"]
+            # If a nearby bearish-candle OB is identifiable, require price to
+            # interact with it. If no OB is present in the available window,
+            # the sweep/reclaim plus Fib reaction remains the fallback.
+            if ob and not ob_overlap:
+                continue
+
+            return {
+                "candle": candle,
+                "candle_time": int(candle.get("t", 0)),
+                "entry_price": close,
+                "sweep_low": low,
+                "prior_liquidity_low": prior_liquidity_low,
+                "levels": touched_levels,
+                "order_block": ob,
+                "order_block_overlap": ob_overlap,
+            }
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return None
+    return None
+
+
 def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     """Scan LEG SPIKE with staged diagnostics and avoid ratio API calls before a real pump exists."""
     # Include a wider liquid-symbol universe so fallback providers can cover missing caps.
@@ -1103,62 +1183,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             early_candidate = detect_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0)
             is_new_early_candidate = early_candidate is not None
             if not early_candidate:
-                # If no fresh 15m impulse exists and there is no tracked 15m setup,
-                # independently check both higher timeframes. Alert each timeframe
-                # that has a valid pattern; do not stop after the first match.
+                # LEG SPIKE is intentionally 15m-only. Do not emit 1h/4h fallback alerts.
                 tracked_existing = candidates.get(contract)
-                if not tracked_existing:
-                    for higher_interval, higher_label in (("1h", "۱ساعته"), ("4h", "۴ساعته")):
-                        try:
-                            higher_candles = closed_candles(contract, higher_interval, 20)
-                            higher_candidate = detect_fib_pump(
-                                higher_candles, min_body_pct=0.6, min_total_pump_pct=3.0
-                            )
-                            if not higher_candidate:
-                                continue
-                            higher_key = str(higher_candidate["end_time"])
-                            higher_sent = state.setdefault(f"fib_early_alerts_{higher_interval}", {})
-                            higher_recent = state.setdefault(f"fib_early_any_{higher_interval}", {})
-                            try:
-                                last_higher_time = int(higher_recent.get(contract, 0))
-                            except (TypeError, ValueError):
-                                last_higher_time = 0
-                            if (higher_sent.get(contract) == higher_key
-                                    or int(time.time()) - last_higher_time < 3600):
-                                print(f"{contract}: LEG SPIKE {higher_interval} alert suppressed; duplicate/cooldown")
-                                continue
-                            raw_funding_higher = item.get("funding_rate")
-                            try:
-                                funding_text_higher = (
-                                    f"{float(raw_funding_higher) * 100:+.4f}%"
-                                    if raw_funding_higher not in (None, "") else "ناموجود"
-                                )
-                            except (TypeError, ValueError):
-                                funding_text_higher = "نامعتبر"
-                            higher_message = (
-                                "🚀 LEG SPIKE | هشدار تایم‌فریم بالاتر\n"
-                                "🟡━━━━━━━━━━━━━━━━━━🟡\n"
-                                f"👀 الگوی ۱۵دقیقه‌ای پیدا نشد؛ الگوی معتبر در تایم {higher_label} شناسایی شد: {contract.replace('_', '/')}\n"
-                                f"حرکت شناسایی‌شده: {float(higher_candidate['pump_pct']):.2f}% "
-                                f"در {int(higher_candidate['body_count'])} کندل صعودی تایم {higher_label}\n"
-                                f"سقف: {float(higher_candidate['high']):.10g} | کف: {float(higher_candidate['low']):.10g}\n"
-                                f"فیبو 0.50: {float(higher_candidate['fib50']):.10g} | "
-                                f"فیبو 0.66: {float(higher_candidate['fib66']):.10g}\n"
-                                f"Funding: {funding_text_higher}\n"
-                                "⚠️ این هشدار فقط برای بررسی نمودار است؛ ورود تأییدشده نیست و این ستاپ وارد پایش ورود ۱۵دقیقه‌ای نمی‌شود."
-                            )
-                            send_message(higher_message)
-                            higher_sent[contract] = higher_key
-                            higher_recent[contract] = int(time.time())
-                            print(
-                                f"LEG SPIKE {higher_interval} fallback alert sent: {contract}; "
-                                f"pump={float(higher_candidate['pump_pct']):.2f}%"
-                            )
-                        except Exception as higher_error:
-                            print(
-                                f"{contract}: LEG SPIKE {higher_interval} fallback scan failed: "
-                                f"{type(higher_error).__name__}: {higher_error}"
-                            )
                 # Keep monitoring an already tracked 15m impulse even when this scan
                 # does not rediscover it. Do not replace that tracked setup with a 1h one.
                 early_candidate = tracked_existing
@@ -1657,67 +1683,64 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 setup_sent[contract] = setup_key
                 print(f"{contract}: stage-2 setup alert sent")
 
-            # Send Fib 0.50 only after the requested market/OI/funding filters pass.
+            # Final LEG SPIKE entry requires a real 15m bullish liquidity sweep/reclaim
+            # at Fib 0.50/0.66 plus interaction with the nearest available bearish-candle OB.
             fib_end_time = str(candidate["end_time"])
-            fib50_alert_state = state.setdefault("fib50_alerts", {})
-            fib_top_state = state.setdefault("fib_top_alerts", {})
-            fib_low = float(candidate["low"])
-            fib_high = float(candidate["high"])
-            fib50_level = fib_high - (fib_high - fib_low) * 0.50
-            live_price = float(ticker.get("last") or candles[-1]["c"])
-            # Entry alerts follow the requested plan: after the impulse top is confirmed,
-            # alert at Fib 0.50 for entry 1, then Fib 0.66 for entry 2 if price reaches it.
-            # A fast drop can cross both levels between scans, so evaluate each level independently.
-            # All market/OI/funding/long-share filters remain mandatory.
             fib_entry_state = state.setdefault("fib_entry_alerts", {})
-            fib_top_state = state.setdefault("fib_top_alerts", {})
             raw_alerted = fib_entry_state.get(contract, [])
             alerted_levels = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
-            reached_levels = []
-            if fib_top_state.get(contract) == fib_end_time and fib_low < live_price:
-                key50 = f"{fib_end_time}:0.50"
-                key66 = f"{fib_end_time}:0.66"
-                if key50 not in alerted_levels and live_price <= fib50_level:
-                    reached_levels.append(("0.50", fib50_level))
-                if key66 not in alerted_levels and live_price <= float(candidate["fib66"]):
-                    reached_levels.append(("0.66", float(candidate["fib66"])))
-            if reached_levels:
-                ratio_check = leg_spike_long_short_filter(contract)
-                if not ratio_check.get("valid") or not ratio_check.get("passed"):
-                    if not ratio_check.get("valid"):
-                        reason = ratio_check.get("reason", "long/short ratio data unavailable")
-                    else:
-                        reason = (
-                            f"15m={ratio_check.get('ratio_15m', float('nan')):.1f}% (must >50%), "
-                            f"1h={ratio_check.get('ratio_1h', float('nan')):.1f}% (must >50%), "
-                            f"1d={ratio_check.get('ratio_1d', float('nan')):.1f}% (must <=70%)"
-                        )
-                    levels_text = ", ".join(level for level, _ in reached_levels)
-                    print(f"{contract}: Fib {levels_text} touched but long/short filter rejected/unavailable: {reason}")
+            fib_top_state = state.setdefault("fib_top_alerts", {})
+            if fib_top_state.get(contract) == fib_end_time:
+                reversal = detect_fib_liquidity_reversal(candles, candidate)
+                if reversal:
+                    new_levels = [
+                        (name, level) for name, level in reversal["levels"]
+                        if f"{fib_end_time}:{name}" not in alerted_levels
+                    ]
+                    if new_levels:
+                        ratio_check = leg_spike_long_short_filter(contract)
+                        if not ratio_check.get("valid") or not ratio_check.get("passed"):
+                            reason = ratio_check.get("reason", "long/short ratio filter unavailable")
+                            if ratio_check.get("valid"):
+                                reason = (
+                                    f"15m={ratio_check.get('ratio_15m', float('nan')):.1f}% (must >50%), "
+                                    f"1h={ratio_check.get('ratio_1h', float('nan')):.1f}% (must >50%), "
+                                    f"1d={ratio_check.get('ratio_1d', float('nan')):.1f}% (must <=70%)"
+                                )
+                            print(f"{contract}: Fib pullback swept liquidity/reclaimed, but L/S filter rejected: {reason}")
+                        else:
+                            ob = reversal.get("order_block")
+                            ob_text = (
+                                f"{ob['low']:.10g}–{ob['high']:.10g}"
+                                if ob else "در پنجرهٔ کندل‌های موجود شناسایی نشد"
+                            )
+                            for level_name, entry_level in new_levels:
+                                fib_message = (
+                                    f"🟢 LEG SPIKE | ورود تأییدشده با نقدینگی + فیبو {level_name}\n"
+                                    "🟢━━━━━━━━━━━━━━━━━━🟢\n"
+                                    f"🪙 ارز: {contract.replace('_', '/')} | تایم‌فریم: ۱۵ دقیقه\n"
+                                    f"📍 قیمت بسته‌شدن کندل تأیید: {reversal['entry_price']:.10g}\n"
+                                    f"📐 سطح فیبو لمس‌شده: {level_name} ({entry_level:.10g})\n"
+                                    f"💧 کف نقدینگی جاروب‌شده: {reversal['sweep_low']:.10g} | کف قبلی: {reversal['prior_liquidity_low']:.10g}\n"
+                                    f"🧱 اردربلاک نزولیِ قبل از موج: {ob_text}\n"
+                                    f"🛑 حد ضرر ساختاری: کف موج {fib_low:.10g}\n"
+                                    f"🎯 تارگت: سقف موج {fib_high:.10g}\n"
+                                    f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x | OI/MC: {oi_usd / market_cap:.1%}\n"
+                                    f"💸 Funding: {funding * 100:+.4f}% | سهم لانگ ۱۵دقیقه: {ratio_check['ratio_15m']:.1f}%، یک‌ساعت: {ratio_check['ratio_1h']:.1f}%، روزانه: {ratio_check['ratio_1d']:.1f}%\n"
+                                    "✅ شرط ورود: نفوذ زیر کف‌های اخیر و بسته‌شدن صعودی دوباره بالای نقدینگی؛ صرف رسیدن به فیبو سیگنال نیست.\n"
+                                    "⚠️ سیگنال الگوریتمی است و برگشت را تضمین نمی‌کند؛ ریسک معامله را محدود نگه دار.\n"
+                                    "🟢━━━━━━━━━━━━━━━━━━🟢"
+                                )
+                                send_message(fib_message)
+                                alerted_levels.add(f"{fib_end_time}:{level_name}")
+                                print(
+                                    f"{contract}: Fib {level_name} reversal entry sent; "
+                                    f"entry={reversal['entry_price']:.10g}, sweep={reversal['sweep_low']:.10g}, "
+                                    f"OB={'overlap' if reversal.get('order_block_overlap') else 'unavailable'}"
+                                )
+                            fib_entry_state[contract] = sorted(alerted_levels)
                 else:
-                    for level_name, entry_level in reached_levels:
-                        fib_message = (
-                            f"🟣 LEG SPIKE | هشدار ورود فیبو {level_name} با فیلترهای تأییدشده\n"
-                            "🟣━━━━━━━━━━━━━━━━━━🟣\n"
-                            f"🪙 ارز: {contract.replace('_', '/')}\n"
-                            f"📍 قیمت فعلی: {live_price:.10g}\n"
-                            f"🎯 ورود {'اول' if level_name == '0.50' else 'دوم'} | فیبو {level_name}: {entry_level:.10g}\n"
-                            f"🎯 تارگت اول: سقف حرکت {fib_high:.10g}\n"
-                            f"🔺 کف اسپایک: {fib_low:.10g} | سقف اسپایک: {fib_high:.10g}\n"
-                            f"💧 حجم/مارکت‌کپ: {volume_mc:.2f}x (شرط: حداقل 2x)\n"
-                            f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} (شرط: حداکثر 50%)\n"
-                            f"💸 Funding: {funding * 100:+.4f}% (منفی)\n"
-                            f"📈 سهم لانگ: ۱۵دقیقه {ratio_check['ratio_15m']:.1f}% | "
-                            f"۱ساعت {ratio_check['ratio_1h']:.1f}% | روزانه {ratio_check['ratio_1d']:.1f}%\n"
-                            "⚠️ هشدار سطح ورود است؛ رسیدن به سطح تضمین برگشت قیمت نیست.\n"
-                            "🟣━━━━━━━━━━━━━━━━━━🟣"
-                        )
-                        send_message(fib_message)
-                        alerted_levels.add(f"{fib_end_time}:{level_name}")
-                        if level_name == "0.50":
-                            fib50_alert_state[contract] = fib_end_time
-                        print(f"{contract}: filtered Fib {level_name} entry alert sent at {live_price:.10g}; target={fib_high:.10g}")
-                    fib_entry_state[contract] = sorted(alerted_levels)
+                    print(f"{contract}: Fib zone monitored; no confirmed 15m liquidity sweep/reclaim + OB reaction yet")
             # User chooses the exact entry and risk management manually.
             continue
 
