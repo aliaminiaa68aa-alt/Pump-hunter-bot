@@ -810,14 +810,10 @@ def get_market_caps(state, requested_symbols=None):
     missing = [symbol for symbol in requested if symbol not in caps or symbol in ambiguous]
     missing = [symbol for symbol in missing if symbol not in checked][:50]
     cmc_resolved, cmc_ambiguous = 0, set()
-    if missing:
+    if missing and COINMARKETCAP_API_KEY:
         try:
-            if COINMARKETCAP_API_KEY:
-                cmc_url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
-                cmc_headers = {"X-CMC_PRO_API_KEY": COINMARKETCAP_API_KEY, "Accept": "application/json"}
-            else:
-                cmc_url = "https://pro-api.coinmarketcap.com/public-api/v3/cryptocurrency/quotes/latest"
-                cmc_headers = {"Accept": "application/json"}
+            cmc_url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
+            cmc_headers = {"X-CMC_PRO_API_KEY": COINMARKETCAP_API_KEY, "Accept": "application/json"}
             response = SESSION.get(cmc_url, params={"symbol": ",".join(missing), "convert": "USD"}, headers=cmc_headers, timeout=20)
             response.raise_for_status()
             data = response.json().get("data", {})
@@ -847,10 +843,11 @@ def get_market_caps(state, requested_symbols=None):
                     volumes.pop(symbol, None)
                     ambiguous.add(symbol)
                     cmc_ambiguous.add(symbol)
-            print(f"CoinMarketCap fallback: requested={len(missing)}, resolved={cmc_resolved}, still_ambiguous={len(cmc_ambiguous)}, api_key_configured={bool(COINMARKETCAP_API_KEY)}")
+            print(f"CoinMarketCap fallback: requested={len(missing)}, resolved={cmc_resolved}, still_ambiguous={len(cmc_ambiguous)}, api_key_configured=True")
         except Exception as error:
             print(f"CoinMarketCap fallback unavailable for {len(missing)} candidate symbols: {type(error).__name__}: {error}")
-
+    elif missing:
+        print(f"CoinMarketCap fallback skipped: API key not configured; CoinPaprika will try {len(missing)} symbols")
     # Independent free fallback: CoinPaprika, used only for symbols still missing/ambiguous.
     # It avoids relying on CoinMarketCap's keyless endpoint, which may rate-limit requests.
     # Let CoinPaprika cover all requested high-priority symbols still missing after CoinGecko/CMC, not only the first 50 CMC query symbols.
