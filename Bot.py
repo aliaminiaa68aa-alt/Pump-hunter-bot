@@ -1022,7 +1022,11 @@ def detect_fib_liquidity_reversal(candles, candidate):
             _, candle = indexed[pos]
             op, close = float(candle["o"]), float(candle["c"])
             low, high = float(candle["l"]), float(candle["h"])
-            if close <= op or low <= impulse_low:
+            # A deeper wick may sweep below the impulse origin and still be a
+            # valid reclaim if the closed bullish candle recovers the Fib level.
+            # The 1% wick-based stop and minimum 1:2 R:R below decide whether
+            # that deeper sweep is tradable; do not discard it solely by wick.
+            if close <= op:
                 continue
 
             # Recent lows before this candle are the sell-side liquidity pool.
