@@ -1109,8 +1109,12 @@ def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=F
             if float(c["l"]) <= float(a["h"]) or float(c["c"]) <= float(c["o"]):
                 continue
             options = []
-            # Fib anchors use the actual impulse swing-low wick to swing-high wick.
-            for anchor_idx in (first_idx, first_idx + 1):
+            # The FVG must be recent, but the full impulse can begin a few
+            # candles before its first FVG candle. This captures stair-step
+            # pumps with two strong bodies without relaxing the body threshold.
+            # Fib anchors still use the actual impulse swing-low/high wicks.
+            anchor_start = max(start_min, first_idx - 3)
+            for anchor_idx in range(anchor_start, first_idx + 2):
                 seq = candles[anchor_idx:end_idx + 1]
                 strong = 0
                 for item in seq:
