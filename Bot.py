@@ -973,10 +973,18 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             early_candle_cache[contract] = candles
             counts["early_scan_checked"] += 1
             early_candidate = detect_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0)
+            is_new_early_candidate = early_candidate is not None
             if not early_candidate:
-                continue
-            counts["early_patterns_seen"] += 1
-            early_pattern_details[contract] = early_candidate
+                # Keep monitoring an already tracked impulse even when this scan
+                # does not rediscover a fresh impulse. Otherwise top-break alerts
+                # can be silently skipped between scans.
+                early_candidate = candidates.get(contract)
+                if not early_candidate:
+                    continue
+                print(f"{contract}: monitoring previously tracked LEG SPIKE impulse")
+            else:
+                counts["early_patterns_seen"] += 1
+                early_pattern_details[contract] = early_candidate
 
             # Persist the exact coin and impulse immediately after Stage 1.
             # This lets later scans monitor this same setup even if it temporarily
@@ -1042,7 +1050,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             except (TypeError, ValueError, KeyError, IndexError) as error:
                 print(f"{contract}: Stage-1 top monitor skipped: {error}")
 
-            if len(early_pattern_samples) < 8:
+            if is_new_early_candidate and len(early_pattern_samples) < 8:
                 early_pattern_samples.append(
                     f"{contract}:{early_candidate['pump_pct']:.2f}%/{early_candidate['body_count']}c"
                 )
@@ -1714,8 +1722,11 @@ def scan():
             if old_oi <= 0:
                 continue
             oi_change = (new_oi / old_oi - 1) * 100
-            if oi_change < 0.2:
-                print(f"{contract}: skipped; OI change {oi_change:.3f}% is below +0.2%")
+            # Short-window OI can move only a few hundredths of a percent.
+            # Use a modest positive-growth floor rather than demanding +0.2% in
+            # roughly 10 minutes; retain the separate 15m/1h price confirmations.
+            if oi_change < 0.03:
+                print(f"{contract}: skipped; OI change {oi_change:+.3f}% is below +0.03%")
                 continue
 
             # Funding must be available and not excessively positive; very high positive
