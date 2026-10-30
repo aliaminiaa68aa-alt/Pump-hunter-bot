@@ -924,7 +924,7 @@ def get_market_caps(state, requested_symbols=None):
                         ambiguous.add(symbol)
                         paprika_search_ambiguous += 1
                 except Exception as search_error:
-                    print(f"CoinPaprika exact-symbol lookup failed for {symbol}: {type(search_error).__name__}")
+                    print(f"CoinPaprika exact-symbol lookup failed for {symbol}: {type(search_error).__name__}; status={getattr(getattr(search_error, 'response', None), 'status_code', 'n/a')}; detail={str(search_error)[:180]}")
             print(f"CoinPaprika fallback: requested={len(paprika_missing)}, bulk_resolved={paprika_resolved}, search_resolved={paprika_search_resolved}, ambiguous={paprika_ambiguous + paprika_search_ambiguous}")
         except Exception as error:
             print(f"CoinPaprika fallback unavailable for {len(paprika_missing)} candidate symbols: {type(error).__name__}: {error}")
