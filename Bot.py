@@ -966,7 +966,18 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
         liquid_for_early.append((turnover, item))
     liquid_for_early.sort(key=lambda pair: pair[0], reverse=True)
 
-    for _turnover, item in liquid_for_early[:150]:
+    # Scan the top 150 liquid contracts for new early impulses, but always
+    # include every still-live persisted LEG SPIKE candidate even if it falls
+    # outside that ranking. This prevents Stage-2/top/Fib monitoring starvation.
+    early_scan_items = [item for _turnover, item in liquid_for_early[:150]]
+    early_scan_contracts = {item.get("contract", "") for item in early_scan_items}
+    for _turnover, item in liquid_for_early[150:]:
+        tracked_contract = item.get("contract", "")
+        if tracked_contract in candidates and tracked_contract not in early_scan_contracts:
+            early_scan_items.append(item)
+            early_scan_contracts.add(tracked_contract)
+
+    for item in early_scan_items:
         contract = item.get("contract", "")
         try:
             candles = closed_candles(contract, "15m", 20)
