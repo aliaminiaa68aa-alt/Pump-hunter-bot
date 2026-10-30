@@ -1796,6 +1796,88 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     print("LEG SPIKE early-pattern filter results: " + ("; ".join(f"{k}={v}" for k, v in early_filter_status.items()) or "none"))
     print(f"LEG SPIKE highest volume/market-cap candidates: {top_volume}")
 
+
+def scan_binance_spot_liquidity(state, max_symbols=60):
+    """Independently scan liquid Binance spot USDT pairs for a closed 15m turnover burst."""
+    try:
+        response = SESSION.get(
+            "https://api.binance.com/api/v3/ticker/24hr",
+            timeout=15,
+        )
+        response.raise_for_status()
+        tickers = response.json()
+        if not isinstance(tickers, list):
+            raise RuntimeError("Unexpected Binance spot ticker response")
+    except Exception as error:
+        print(f"Binance spot liquidity scan unavailable: {type(error).__name__}: {error}")
+        return
+
+    excluded_quotes = ("USDC", "FDUSD", "TUSD", "USDP", "BUSD", "DAI")
+    candidates = []
+    for ticker in tickers:
+        symbol = str(ticker.get("symbol", "")).upper()
+        if not symbol.endswith("USDT") or any(symbol.endswith(q + "USDT") for q in excluded_quotes):
+            continue
+        try:
+            quote_volume = float(ticker.get("quoteVolume", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if quote_volume >= 500_000:
+            candidates.append((symbol, quote_volume))
+
+    candidates.sort(key=lambda item: item[1], reverse=True)
+    candidates = candidates[:max_symbols]
+    alert_state = state.setdefault("spot_liquidity_alerts", {})
+    checked = sent = 0
+    now = int(time.time())
+
+    for symbol, quote_volume in candidates:
+        try:
+            response = SESSION.get(
+                "https://api.binance.com/api/v3/klines",
+                params={"symbol": symbol, "interval": "15m", "limit": 14},
+                timeout=10,
+            )
+            response.raise_for_status()
+            raw = response.json()
+            # Binance includes the currently-forming candle; only closed candles count.
+            raw = raw[:-1]
+            candles = [{
+                "t": str(row[0]), "o": row[1], "h": row[2], "l": row[3],
+                "c": row[4], "sum": row[7],
+            } for row in raw]
+            checked += 1
+            signal = detect_liquidity_inflow(candles)
+            if not signal:
+                continue
+
+            previous = alert_state.get(symbol, {})
+            if isinstance(previous, str):
+                previous = {"candle_time": previous, "sent_at": 0}
+            if (str(previous.get("candle_time", "")) == signal["candle_time"]
+                    or now - int(previous.get("sent_at", 0) or 0) < 3600):
+                continue
+
+            message = (
+                "💧 BINANCE SPOT | هشدار ورود نقدینگی اولیه\n"
+                f"🪙 {symbol[:-4]}/USDT\n"
+                f"📊 گردش معاملات کندل ۱۵دقیقه: {signal['volume_ratio']:.2f} برابر میانگین ۱۲ کندل قبلی\n"
+                f"📈 تغییر قیمت کندل بسته‌شده: {signal['price_change_pct']:+.2f}%\n"
+                f"💰 گردش معاملات ۲۴ساعته: {quote_volume:,.0f} USDT\n"
+                f"📍 قیمت بسته‌شدن: {signal['close']:.10g}\n\n"
+                "👀 هشدار اولیه است؛ به‌تنهایی تأیید پامپ یا توصیه ورود نیست."
+            )
+            send_message(message)
+            alert_state[symbol] = {"candle_time": signal["candle_time"], "sent_at": now}
+            sent += 1
+            print(f"Binance spot liquidity alert sent: {symbol}; turnover={signal['volume_ratio']:.2f}x")
+            time.sleep(0.2)
+        except Exception as error:
+            print(f"Binance spot {symbol} scan failed: {type(error).__name__}: {error}")
+
+    print(f"Binance spot liquidity scan: candidates={len(candidates)}, checked={checked}, alerts={sent}")
+
+
 def scan():
     tickers = get_json("/futures/usdt/tickers")
     check_derivatives_data(tickers)
@@ -1827,6 +1909,9 @@ def scan():
     alerts_state = state["alerts"]
     candidates = state["candidates"]
     early_alerts_state = state["early_alerts"]
+
+    # Spot liquidity alerts are independent from the Gate.io futures strategies.
+    scan_binance_spot_liquidity(state)
 
     btc_ok, btc_change = btc_market_filter()
 
