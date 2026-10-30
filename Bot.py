@@ -1484,74 +1484,47 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             fib_high = float(candidate["high"])
             fib50_level = fib_high - (fib_high - fib_low) * 0.50
             live_price = float(ticker.get("last") or candles[-1]["c"])
-            # Do not alert on a raw Fib-0.50 touch: that can be a falling knife.
-            # Require a post-impulse pullback to Fib 0.50, then a CLOSED 15m bullish
-            # reclaim that breaks the previous closed candle's high (micro-BOS).
-            # This confirms a reaction before notifying, without requiring a full
-            # retest of the impulse top and therefore avoids an excessively late alert.
-            post_impulse = []
-            try:
-                post_impulse = [
-                    candle for candle in candles
-                    if int(candle.get("t", 0)) > int(fib_end_time)
-                ]
-            except (TypeError, ValueError):
-                post_impulse = []
-            pullback_seen = False
-            if post_impulse:
-                try:
-                    pullback_seen = any(
-                        float(candle["l"]) <= fib50_level
-                        for candle in post_impulse[-5:]
-                    )
-                except (TypeError, ValueError, KeyError):
-                    pullback_seen = False
-            reclaim_confirmed = False
-            if pullback_seen and len(post_impulse) >= 2:
-                try:
-                    previous_closed = post_impulse[-2]
-                    last_closed = post_impulse[-1]
-                    last_open = float(last_closed["o"])
-                    last_close = float(last_closed["c"])
-                    previous_high = float(previous_closed["h"])
-                    reclaim_confirmed = (
-                        last_close > last_open
-                        and last_close > fib50_level
-                        and last_close > previous_high
-                        and live_price > fib50_level
-                    )
-                except (TypeError, ValueError, KeyError):
-                    reclaim_confirmed = False
-            if (fib_top_state.get(contract) == fib_end_time
-                    and fib50_alert_state.get(contract) != fib_end_time
-                    and pullback_seen and reclaim_confirmed):
-                # Reaching here means price pulled back to Fib 0.50 and then
-                # reclaimed it with a closed bullish 15m micro-BOS. Strict market,
-                # OI, funding and long-share filters are still mandatory.
+            # Entry alerts follow the requested plan: after the impulse top is confirmed,
+            # alert at Fib 0.50 for entry 1, and at Fib 0.66 for entry 2 if the pullback deepens.
+            # All market/OI/funding/long-share filters remain mandatory.
+            fib_entry_state = state.setdefault("fib_entry_alerts", {})
+            fib_top_state = state.setdefault("fib_top_alerts", {})
+            touched_level = None
+            if fib_top_state.get(contract) == fib_end_time:
+                already_alerted = str(fib_entry_state.get(contract, ""))
+                if already_alerted != f"{fib_end_time}:0.50" and fib_low < live_price <= fib50_level:
+                    touched_level = ("0.50", fib50_level)
+                elif already_alerted not in (f"{fib_end_time}:0.50", f"{fib_end_time}:0.66") and fib_low < live_price <= float(candidate["fib66"]):
+                    touched_level = ("0.66", float(candidate["fib66"]))
+            if touched_level:
+                level_name, entry_level = touched_level
                 ratio_check = leg_spike_long_short_filter(contract)
                 if not ratio_check.get("valid") or not ratio_check.get("passed"):
                     reason = ratio_check.get("reason", "long/short ratios outside required thresholds")
-                    print(f"{contract}: Fib 0.50 touched but long/short filter rejected/unavailable: {reason}")
+                    print(f"{contract}: Fib {level_name} touched but long/short filter rejected/unavailable: {reason}")
                 else:
                     fib_message = (
-                        "🟣 LEG SPIKE | هشدار فیبو ۰٫۵ با فیلترهای تأییدشده\n"
-                        "🟣━━━━━━━━━━━━━━━━━━🟣\n"
-                        f"🪙 ارز: {contract.replace('_', '/')}\n"
-                        f"📍 قیمت فعلی: {live_price:.10g}\n"
-                        f"🎯 سطح فیبو 0.50: {fib50_level:.10g}\n"
-                        f"🔺 کف اسپایک: {fib_low:.10g} | سقف اسپایک: {fib_high:.10g}\n"
-                        f"💧 حجم/مارکت‌کپ: {volume_mc:.2f}x (شرط: حداقل 2x)\n"
-                        f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} (شرط: حداکثر 50%)\n"
-                        f"💸 Funding: {funding * 100:+.4f}% (منفی)\n"
+                        f"🟣 LEG SPIKE | هشدار ورود فیبو {level_name} با فیلترهای تأییدشده\\n"
+                        "🟣━━━━━━━━━━━━━━━━━━🟣\\n"
+                        f"🪙 ارز: {contract.replace('_', '/')}\\n"
+                        f"📍 قیمت فعلی: {live_price:.10g}\\n"
+                        f"🎯 ورود {'اول' if level_name == '0.50' else 'دوم'} | فیبو {level_name}: {entry_level:.10g}\\n"
+                        f"🎯 تارگت اول: سقف حرکت {fib_high:.10g}\\n"
+                        f"🔺 کف اسپایک: {fib_low:.10g} | سقف اسپایک: {fib_high:.10g}\\n"
+                        f"💧 حجم/مارکت‌کپ: {volume_mc:.2f}x (شرط: حداقل 2x)\\n"
+                        f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} (شرط: حداکثر 50%)\\n"
+                        f"💸 Funding: {funding * 100:+.4f}% (منفی)\\n"
                         f"📈 سهم لانگ: ۱۵دقیقه {ratio_check['ratio_15m']:.1f}% | "
-                        f"۱ساعت {ratio_check['ratio_1h']:.1f}% | روزانه {ratio_check['ratio_1d']:.1f}%\n"
-                        "⚠️ فیلترهای تعیین‌شده پاس شده‌اند و قیمت به نیم فیبو رسیده؛ این هشدار سطح است و نقطه ورود را خودت انتخاب کن.\n"
+                        f"۱ساعت {ratio_check['ratio_1h']:.1f}% | روزانه {ratio_check['ratio_1d']:.1f}%\\n"
+                        "⚠️ هشدار سطح ورود است؛ رسیدن به سطح تضمین برگشت قیمت نیست.\\n"
                         "🟣━━━━━━━━━━━━━━━━━━🟣"
                     )
                     send_message(fib_message)
-                    fib50_alert_state[contract] = fib_end_time
-                    print(f"{contract}: filtered Fib 0.50 alert sent at {live_price:.10g}")
-            # User chooses the exact entry manually after this filtered level alert.
+                    fib_entry_state[contract] = f"{fib_end_time}:{level_name}"
+                    if level_name == "0.50":
+                        fib50_alert_state[contract] = fib_end_time
+                    print(f"{contract}: filtered Fib {level_name} entry alert sent at {live_price:.10g}; target={fib_high:.10g}")
+            # User chooses the exact entry and risk management manually.
             continue
 
             # Legacy Fib reaction block intentionally disabled by the continue above.
