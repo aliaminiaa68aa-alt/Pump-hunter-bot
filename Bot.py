@@ -1045,7 +1045,10 @@ def detect_liquidity_inflow(candles, min_volume_ratio=2.5, min_price_change_pct=
 
 def diagnose_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0):
     """Explain why a recent closed-candle impulse did not qualify; diagnostics only."""
-    result = {"triples_checked": 0, "bullish_fvg": 0, "body_pass": 0, "move_pass": 0}
+    result = {
+        "triples_checked": 0, "bullish_fvg": 0, "body_pass": 0, "move_pass": 0,
+        "max_strong_bodies": 0, "best_fvg_move_pct": 0.0, "best_fvg_body_count": 0,
+    }
     if len(candles) < 10:
         result["reason"] = "insufficient_closed_candles"
         return result
@@ -1067,12 +1070,16 @@ def diagnose_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0):
                     if float(item["o"]) > 0 and float(item["c"]) > float(item["o"])
                     and (float(item["c"]) / float(item["o"]) - 1) * 100 >= min_body_pct
                 )
+                low = min(float(item["l"]) for item in seq)
+                high = max(float(item["h"]) for item in seq)
+                move = (high / low - 1) * 100 if low > 0 else 0.0
+                result["max_strong_bodies"] = max(result["max_strong_bodies"], strong)
+                if strong > result["best_fvg_body_count"] or move > result["best_fvg_move_pct"]:
+                    result["best_fvg_body_count"] = max(result["best_fvg_body_count"], strong)
+                    result["best_fvg_move_pct"] = max(result["best_fvg_move_pct"], round(move, 3))
                 if strong < 2:
                     continue
                 result["body_pass"] += 1
-                low = min(float(item["l"]) for item in seq)
-                high = max(float(item["h"]) for item in seq)
-                move = (high / low - 1) * 100 if low > 0 else 0
                 if move >= min_total_pump_pct and high > low:
                     result["move_pass"] += 1
         except (TypeError, ValueError, KeyError, ZeroDivisionError):
