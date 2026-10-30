@@ -1682,18 +1682,16 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 setup_sent[contract] = setup_key
                 print(f"{contract}: Stage-2 watch alert suppressed; awaiting confirmed 15m sweep/reclaim entry")
 
-            # Final LEG SPIKE entry requires a real 15m bullish liquidity sweep/reclaim
-            # at Fib 0.50/0.66 plus interaction with the nearest available bearish-candle OB.
+            # Final LEG SPIKE entry requires a 15m bullish liquidity sweep/reclaim
+            # at Fib 0.50/0.66. The nearest bearish-candle OB is contextual information, not a hard gate.
             fib_end_time = str(candidate["end_time"])
             fib_low = float(candidate["low"])
             fib_high = float(candidate["high"])
             fib_entry_state = state.setdefault("fib_entry_alerts", {})
             raw_alerted = fib_entry_state.get(contract, [])
             alerted_levels = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
-            fib_top_state = state.setdefault("fib_top_alerts", {})
-            # A prior top-break is not required: evaluate the actual Fib pullback,
-            # liquidity sweep and closed-candle reclaim directly on the tracked 15m impulse.
-            # A prior top-break is not required: evaluate the tracked 15m impulse directly.
+            # A prior top-break is not required: evaluate the tracked 15m impulse,
+            # liquidity sweep and closed-candle Fib reclaim directly.
             reversal = detect_fib_liquidity_reversal(candles, candidate)
             if reversal:
                 new_levels = [
@@ -1767,7 +1765,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         )
                     fib_entry_state[contract] = sorted(alerted_levels)
             else:
-                print(f"{contract}: Fib zone monitored; no confirmed 15m liquidity sweep/reclaim + OB reaction yet")
+                print(f"{contract}: Fib zone monitored; no confirmed 15m liquidity sweep/reclaim yet")
             # User chooses the exact entry and risk management manually.
             continue
 
