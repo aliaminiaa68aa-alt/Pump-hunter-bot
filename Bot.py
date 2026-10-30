@@ -78,7 +78,7 @@ def btc_market_filter():
     # A routine BTC pullback must not veto an independently confirmed altcoin setup.
     # A closed 15m BTC candle at -2.0% or lower pauses final-entry alerts.
     if change <= -2.0:
-        print("BTC risk filter: paused final entries only; BTC 15m sell-off is severe (<= -3.0%)")
+        print("BTC risk filter: paused final entries only; BTC 15m sell-off is severe (<= -2.0%)")
         return False, change
     print("BTC risk filter: no severe 15m sell-off; altcoin setup checks may continue")
     return True, change
@@ -1813,6 +1813,12 @@ def scan():
             if risk <= 0:
                 print(f"{contract}: invalid entry/stop distance")
                 continue
+            risk_pct = risk / entry * 100 if entry > 0 else float("inf")
+            # Quality gate: skip entries whose pullback-based stop is too far away.
+            # This prevents a valid-looking setup from producing an impractically wide stop.
+            if risk_pct > 2.5:
+                print(f"{contract}: skipped; stop distance {risk_pct:.2f}% exceeds 2.50% quality limit")
+                continue
             tp1 = entry + risk
             tp2 = entry + 2 * risk
             btc_text = f"{btc_change:+.2f}%" if btc_change is not None else "نامشخص"
@@ -1830,7 +1836,7 @@ def scan():
                 f"{derivatives_text}\n"
                 f"BTC در ۱۵دقیقه: {btc_text}\n\n"
                 f"ورود پیشنهادی: {entry}\n"
-                f"حد ضرر پیشنهادی زیر کف پول‌بک: {stop}\n"
+                f"حد ضرر پیشنهادی زیر کف پول‌بک: {stop} (فاصله ریسک {risk_pct:.2f}%)\n"
                 f"هدف ۱ (ریسک‌به‌بازده ۱:۱): {tp1}\n"
                 f"هدف ۲ (ریسک‌به‌بازده ۱:۲): {tp2}\n"
                 "⚠️ این هشدار تأیید الگوریتمی است، نه تضمین سود؛ قبل از ورود نقدشوندگی، اسپرد و ریسک را بررسی کن."
