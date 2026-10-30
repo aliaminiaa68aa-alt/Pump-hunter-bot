@@ -986,8 +986,11 @@ def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=F
 
 def detect_fib_liquidity_reversal(candles, candidate):
     """
-    Confirm a 15m Fib pullback only after a bullish liquidity sweep/reclaim
-    around a demand/order-block area. This is a heuristic, not a guarantee.
+    Confirm a 15m Fib pullback after a sell-side liquidity sweep and reclaim.
+    The reclaim level adapts to the depth of the pullback:
+    - pullback in the 0.50-to-0.66 zone: reclaim 0.50
+    - sweep to/below 0.66: reclaim 0.66
+    A nearby order block is reported as context, not a hard gate.
     """
     try:
         start_time = int(candidate["start_time"])
@@ -998,11 +1001,10 @@ def detect_fib_liquidity_reversal(candles, candidate):
         fib66 = float(candidate.get("fib66", impulse_high - (impulse_high - impulse_low) * 0.66))
         indexed = [(idx, candle) for idx, candle in enumerate(candles)
                    if int(candle.get("t", 0)) > end_time]
-        if not indexed:
+        if len(indexed) < 3:
             return None
 
-        # Approximate bullish order block: the nearest bearish candle before
-        # the impulse begins, using only candles available in this 15m window.
+        # Approximate bullish order block: nearest bearish candle before the impulse.
         start_idx = next((idx for idx, candle in enumerate(candles)
                           if int(candle.get("t", 0)) >= start_time), None)
         ob = None
@@ -1015,55 +1017,53 @@ def detect_fib_liquidity_reversal(candles, candidate):
                           "time": int(candle.get("t", 0))}
                     break
 
-        # Inspect only the latest three closed 15m candles after the impulse.
-        for pos in range(max(0, len(indexed) - 3), len(indexed)):
-            candle_idx, candle = indexed[pos]
+        # Look at the latest three CLOSED 15m candles after the impulse.
+        for pos in range(max(2, len(indexed) - 3), len(indexed)):
+            _, candle = indexed[pos]
             op, close = float(candle["o"]), float(candle["c"])
             low, high = float(candle["l"]), float(candle["h"])
-            if close <= op or close <= impulse_low or low <= impulse_low:
+            if close <= op or low <= impulse_low:
                 continue
 
-            previous = [item for idx, item in indexed[:pos] if int(item.get("t", 0)) < int(candle["t"])]
-            previous = previous[-5:]
+            # Recent lows before this candle are the sell-side liquidity pool.
+            previous = indexed[max(0, pos - 5):pos]
             if len(previous) < 2:
                 continue
-            prior_liquidity_low = min(float(item["l"]) for item in previous)
-            # A sweep must pierce a recent low and close back above that low.
-            if not (low < prior_liquidity_low and close > prior_liquidity_low):
+            prior_liquidity_low = min(float(item["l"]) for _, item in previous)
+            if not (low < prior_liquidity_low):
                 continue
 
-            touched_levels = []
-            # Only label a Fib level if this candle's range actually crosses it.
-            if low <= fib50 <= high:
-                touched_levels.append(("0.50", fib50))
-            if low <= fib66 <= high:
-                touched_levels.append(("0.66", fib66))
-            if not touched_levels:
+            # Choose the Fib level price must reclaim based on how deep the sweep went.
+            if low <= fib66:
+                reclaim_level_name, reclaim_level = "0.66", fib66
+            elif low <= fib50:
+                reclaim_level_name, reclaim_level = "0.50", fib50
+            else:
+                # The wick may sweep a local low just above 0.50; still require
+                # the close to reclaim the 0.50 level, rather than buying the touch.
+                reclaim_level_name, reclaim_level = "0.50", fib50
+
+            # Entry only after the closed bullish candle sweeps liquidity and closes
+            # back above the applicable Fib reclaim level.
+            if close <= reclaim_level:
                 continue
 
-            ob_overlap = False
-            if ob:
-                ob_overlap = low <= ob["high"] and high >= ob["low"]
-            # If a nearby bearish-candle OB is identifiable, require price to
-            # interact with it. If no OB is present in the available window,
-            # the sweep/reclaim plus Fib reaction remains the fallback.
-            if ob and not ob_overlap:
-                continue
-
+            ob_overlap = bool(ob and low <= ob["high"] and high >= ob["low"])
             return {
                 "candle": candle,
                 "candle_time": int(candle.get("t", 0)),
                 "entry_price": close,
                 "sweep_low": low,
                 "prior_liquidity_low": prior_liquidity_low,
-                "levels": touched_levels,
+                "levels": [(reclaim_level_name, reclaim_level)],
+                "reclaim_level": reclaim_level,
+                "reclaim_level_name": reclaim_level_name,
                 "order_block": ob,
                 "order_block_overlap": ob_overlap,
             }
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
         return None
     return None
-
 
 def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     """Scan LEG SPIKE with staged diagnostics and avoid ratio API calls before a real pump exists."""
