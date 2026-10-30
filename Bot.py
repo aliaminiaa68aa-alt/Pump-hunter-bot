@@ -1509,7 +1509,14 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             if reached_levels:
                 ratio_check = leg_spike_long_short_filter(contract)
                 if not ratio_check.get("valid") or not ratio_check.get("passed"):
-                    reason = ratio_check.get("reason", "long/short ratios outside required thresholds")
+                    if not ratio_check.get("valid"):
+                        reason = ratio_check.get("reason", "long/short ratio data unavailable")
+                    else:
+                        reason = (
+                            f"15m={ratio_check.get('ratio_15m', float('nan')):.1f}% (must >50%), "
+                            f"1h={ratio_check.get('ratio_1h', float('nan')):.1f}% (must >50%), "
+                            f"1d={ratio_check.get('ratio_1d', float('nan')):.1f}% (must <=70%)"
+                        )
                     levels_text = ", ".join(level for level, _ in reached_levels)
                     print(f"{contract}: Fib {levels_text} touched but long/short filter rejected/unavailable: {reason}")
                 else:
