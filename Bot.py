@@ -1220,10 +1220,22 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
     early_prequalified = [item for item in prequalified if item.get("contract", "") in early_contracts]
     other_prequalified = [item for item in prequalified if item.get("contract", "") not in early_contracts]
+    # Fill the quota with tracked setups first, sorted by actual alert urgency.
+    # The previous round-robin across turnover/volume/change could let general tracked
+    # candidates occupy slots before a live Fib-touch candidate reached Coinalyze.
+    for candidate in sorted(
+        early_prequalified,
+        key=lambda item: (_tracked_stage_rank(item), -_turnover_rank(item)),
+    ):
+        candidate_contract = candidate.get("contract", "")
+        if candidate_contract not in selected_contracts:
+            selected_for_oi.append(candidate)
+            selected_contracts.add(candidate_contract)
+        if len(selected_for_oi) >= max_coinalyze_checks_per_scan:
+            break
+
+    # If there are spare slots, diversify general-market candidates across three rankings.
     ranked_pools = [
-        sorted(early_prequalified, key=lambda item: (_tracked_stage_rank(item), -_turnover_rank(item))),
-        sorted(early_prequalified, key=lambda item: (_tracked_stage_rank(item), -_volume_cap_rank(item))),
-        sorted(early_prequalified, key=lambda item: (_tracked_stage_rank(item), -_change24_rank(item))),
         sorted(other_prequalified, key=_turnover_rank, reverse=True),
         sorted(other_prequalified, key=_volume_cap_rank, reverse=True),
         sorted(other_prequalified, key=_change24_rank, reverse=True),
