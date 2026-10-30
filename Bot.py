@@ -1711,8 +1711,8 @@ def scan():
                 print(
                     f"{contract}: 15m confirmed; 1h trend rejected; "
                     f"last closed 1h change={change1h if change1h is not None else 'n/a'}%, "
-                    f"price={candles[-1]['c']}, EMA20={_ema20 if _ema20 is not None else 'n/a'} "
-                    "(requires price above rising 1h EMA20)"
+                    f"EMA20={_ema20 if _ema20 is not None else 'n/a'} "
+                    "(requires 1h close above rising EMA20)"
                 )
                 continue
             confirms1h += 1
