@@ -1693,81 +1693,81 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             fib_top_state = state.setdefault("fib_top_alerts", {})
             # A prior top-break is not required: evaluate the actual Fib pullback,
             # liquidity sweep and closed-candle reclaim directly on the tracked 15m impulse.
-            if True:
-                reversal = detect_fib_liquidity_reversal(candles, candidate)
-                if reversal:
-                    new_levels = [
-                        (name, level) for name, level in reversal["levels"]
-                        if f"{fib_end_time}:{name}" not in alerted_levels
-                    ]
-                    if new_levels:
-                        # The user's entry trigger is the confirmed 15m liquidity sweep + bullish reclaim.
-                        # Long/short ratios are informational only and must not block this entry.
-                        try:
-                            ratio_check = leg_spike_long_short_filter(contract)
-                        except Exception:
-                            ratio_check = {"valid": False}
-                        ratio_text = (
-                            f"سهم لانگ ۱۵دقیقه: {ratio_check.get('ratio_15m', float('nan')):.1f}%، "
-                            f"یک‌ساعت: {ratio_check.get('ratio_1h', float('nan')):.1f}%، "
-                            f"روزانه: {ratio_check.get('ratio_1d', float('nan')):.1f}%"
-                            if ratio_check.get("valid") else "نسبت لانگ/شورت: ناموجود (فیلتر ورود نیست)"
-                        )
-                        ob = reversal.get("order_block")
-                        ob_text = (
-                            f"{ob['low']:.10g}–{ob['high']:.10g}"
-                            if ob else "در پنجرهٔ کندل‌های موجود شناسایی نشد"
-                        )
-                        for level_name, entry_level in new_levels:
-                            entry_price = float(reversal["entry_price"])
-                            sweep_low = float(reversal["sweep_low"])
-                            stop_price = sweep_low * 0.99  # Always 1% below the actual swept wick low.
-                            target_price = fib_high
-                            risk_per_unit = entry_price - stop_price
-                            reward_per_unit = target_price - entry_price
-                            if risk_per_unit <= 0 or reward_per_unit <= 0:
-                                print(
-                                    f"{contract}: Fib {level_name} reversal rejected; "
-                                    f"invalid risk/reward anchors entry={entry_price:.10g}, "
-                                    f"stop={stop_price:.10g}, target={target_price:.10g}"
-                                )
-                                continue
-                            risk_reward = reward_per_unit / risk_per_unit
-                            # Favorable setups only: require at least 2R to the impulse high.
-                            if risk_reward < 2.0:
-                                print(
-                                    f"{contract}: Fib {level_name} reversal rejected; "
-                                    f"R:R={risk_reward:.2f} is below the 1:2 minimum"
-                                )
-                                continue
-                            risk_pct = risk_per_unit / entry_price * 100
-                            fib_message = (
-                                f"🟢 LEG SPIKE | ورود تأییدشده با جاروب نقدینگی + فیبو {level_name}\n"
-                                "🟢━━━━━━━━━━━━━━━━━━🟢\n"
-                                f"🪙 ارز: {contract.replace('_', '/')} | تایم‌فریم: ۱۵ دقیقه\n"
-                                f"📍 ورود پس از بسته‌شدن صعودی کندل: {entry_price:.10g}\n"
-                                f"📐 سطح بازیابی فیبو: {level_name} ({entry_level:.10g})\n"
-                                f"💧 کف جاروب نقدینگی: {sweep_low:.10g} | کف نقدینگی قبلی: {reversal['prior_liquidity_low']:.10g}\n"
-                                f"🧱 اردربلاک قبل از موج: {ob_text}\n"
-                                f"🛑 حد ضرر: {stop_price:.10g} (۱٪ زیر کف جاروب؛ ریسک {risk_pct:.2f}٪)\n"
-                                f"🎯 تارگت: سقف موج {target_price:.10g}\n"
-                                f"⚖️ ریسک به بازده تا سقف موج: ۱:{risk_reward:.2f} (حداقل مجاز ۱:۲)\n"
-                                f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x | OI/MC: {oi_usd / market_cap:.1%}\n"
-                                f"💸 Funding: {funding * 100:+.4f}% | {ratio_text}\n"
-                                "✅ ورود فقط پس از سوئیپ نقدینگی و بسته‌شدن کندل ۱۵دقیقه بالای سطح بازیابی فیبو صادر می‌شود.\n"
-                                "⚠️ سیگنال الگوریتمی است و برگشت را تضمین نمی‌کند؛ ریسک معامله را محدود نگه دار.\n"
-                                "🟢━━━━━━━━━━━━━━━━━━🟢"
-                            )
-                            send_message(fib_message)
-                            alerted_levels.add(f"{fib_end_time}:{level_name}")
+            # A prior top-break is not required: evaluate the tracked 15m impulse directly.
+            reversal = detect_fib_liquidity_reversal(candles, candidate)
+            if reversal:
+                new_levels = [
+                    (name, level) for name, level in reversal["levels"]
+                    if f"{fib_end_time}:{name}" not in alerted_levels
+                ]
+                if new_levels:
+                    # The user's entry trigger is the confirmed 15m liquidity sweep + bullish reclaim.
+                    # Long/short ratios are informational only and must not block this entry.
+                    try:
+                        ratio_check = leg_spike_long_short_filter(contract)
+                    except Exception:
+                        ratio_check = {"valid": False}
+                    ratio_text = (
+                        f"سهم لانگ ۱۵دقیقه: {ratio_check.get('ratio_15m', float('nan')):.1f}%، "
+                        f"یک‌ساعت: {ratio_check.get('ratio_1h', float('nan')):.1f}%، "
+                        f"روزانه: {ratio_check.get('ratio_1d', float('nan')):.1f}%"
+                        if ratio_check.get("valid") else "نسبت لانگ/شورت: ناموجود (فیلتر ورود نیست)"
+                    )
+                    ob = reversal.get("order_block")
+                    ob_text = (
+                        f"{ob['low']:.10g}–{ob['high']:.10g}"
+                        if ob else "در پنجرهٔ کندل‌های موجود شناسایی نشد"
+                    )
+                    for level_name, entry_level in new_levels:
+                        entry_price = float(reversal["entry_price"])
+                        sweep_low = float(reversal["sweep_low"])
+                        stop_price = sweep_low * 0.99  # Always 1% below the actual swept wick low.
+                        target_price = fib_high
+                        risk_per_unit = entry_price - stop_price
+                        reward_per_unit = target_price - entry_price
+                        if risk_per_unit <= 0 or reward_per_unit <= 0:
                             print(
-                                f"{contract}: Fib {level_name} reversal entry sent; "
-                                f"entry={entry_price:.10g}, stop={stop_price:.10g}, target={target_price:.10g}, "
-                                f"R:R=1:{risk_reward:.2f}, OB={'overlap' if reversal.get('order_block_overlap') else 'unavailable'}"
+                                f"{contract}: Fib {level_name} reversal rejected; "
+                                f"invalid risk/reward anchors entry={entry_price:.10g}, "
+                                f"stop={stop_price:.10g}, target={target_price:.10g}"
                             )
-                        fib_entry_state[contract] = sorted(alerted_levels)
-                else:
-                    print(f"{contract}: Fib zone monitored; no confirmed 15m liquidity sweep/reclaim + OB reaction yet")
+                            continue
+                        risk_reward = reward_per_unit / risk_per_unit
+                        # Favorable setups only: require at least 2R to the impulse high.
+                        if risk_reward < 2.0:
+                            print(
+                                f"{contract}: Fib {level_name} reversal rejected; "
+                                f"R:R={risk_reward:.2f} is below the 1:2 minimum"
+                            )
+                            continue
+                        risk_pct = risk_per_unit / entry_price * 100
+                        fib_message = (
+                            f"🟢 LEG SPIKE | ورود تأییدشده با جاروب نقدینگی + فیبو {level_name}\n"
+                            "🟢━━━━━━━━━━━━━━━━━━🟢\n"
+                            f"🪙 ارز: {contract.replace('_', '/')} | تایم‌فریم: ۱۵ دقیقه\n"
+                            f"📍 ورود پس از بسته‌شدن صعودی کندل: {entry_price:.10g}\n"
+                            f"📐 سطح بازیابی فیبو: {level_name} ({entry_level:.10g})\n"
+                            f"💧 کف جاروب نقدینگی: {sweep_low:.10g} | کف نقدینگی قبلی: {reversal['prior_liquidity_low']:.10g}\n"
+                            f"🧱 اردربلاک قبل از موج: {ob_text}\n"
+                            f"🛑 حد ضرر: {stop_price:.10g} (۱٪ زیر کف جاروب؛ ریسک {risk_pct:.2f}٪)\n"
+                            f"🎯 تارگت: سقف موج {target_price:.10g}\n"
+                            f"⚖️ ریسک به بازده تا سقف موج: ۱:{risk_reward:.2f} (حداقل مجاز ۱:۲)\n"
+                            f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x | OI/MC: {oi_usd / market_cap:.1%}\n"
+                            f"💸 Funding: {funding * 100:+.4f}% | {ratio_text}\n"
+                            "✅ ورود فقط پس از سوئیپ نقدینگی و بسته‌شدن کندل ۱۵دقیقه بالای سطح بازیابی فیبو صادر می‌شود.\n"
+                            "⚠️ سیگنال الگوریتمی است و برگشت را تضمین نمی‌کند؛ ریسک معامله را محدود نگه دار.\n"
+                            "🟢━━━━━━━━━━━━━━━━━━🟢"
+                        )
+                        send_message(fib_message)
+                        alerted_levels.add(f"{fib_end_time}:{level_name}")
+                        print(
+                            f"{contract}: Fib {level_name} reversal entry sent; "
+                            f"entry={entry_price:.10g}, stop={stop_price:.10g}, target={target_price:.10g}, "
+                            f"R:R=1:{risk_reward:.2f}, OB={'overlap' if reversal.get('order_block_overlap') else 'unavailable'}"
+                        )
+                    fib_entry_state[contract] = sorted(alerted_levels)
+            else:
+                print(f"{contract}: Fib zone monitored; no confirmed 15m liquidity sweep/reclaim + OB reaction yet")
             # User chooses the exact entry and risk management manually.
             continue
 
