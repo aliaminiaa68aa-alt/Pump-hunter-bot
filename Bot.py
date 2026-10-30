@@ -948,7 +948,7 @@ def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=F
             if float(c["l"]) <= float(a["h"]) or float(c["c"]) <= float(c["o"]):
                 continue
             options = []
-            # Fib starts at the OPEN/body-start, not the wick low.
+            # Fib anchors use the actual impulse swing-low wick to swing-high wick.
             for anchor_idx in (first_idx, first_idx + 1):
                 seq = candles[anchor_idx:end_idx + 1]
                 strong = 0
@@ -958,15 +958,15 @@ def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=F
                         strong += 1
                 if strong < 2:
                     continue
-                body_start = float(seq[0]["o"])
+                swing_low = min(float(item["l"]) for item in seq)
                 high = max(float(item["h"]) for item in seq)
-                pump_pct = (high / body_start - 1) * 100 if body_start > 0 else 0
-                if pump_pct < min_total_pump_pct or high <= body_start:
+                pump_pct = (high / swing_low - 1) * 100 if swing_low > 0 else 0
+                if pump_pct < min_total_pump_pct or high <= swing_low:
                     continue
                 options.append({
                     "start_time": str(seq[0].get("t", anchor_idx)),
                     "end_time": str(seq[-1].get("t", end_idx)),
-                    "low": body_start,
+                    "low": swing_low,
                     "high": high,
                     "pump_pct": pump_pct,
                     "body_count": strong,
