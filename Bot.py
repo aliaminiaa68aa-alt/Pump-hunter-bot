@@ -1913,6 +1913,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     print("LEG SPIKE early-pattern samples: " + ("; ".join(early_pattern_samples) or "none"))
     early_filter_snapshot = []
     ticker_by_contract = {item.get("contract", ""): item for item in tickers}
+    # Diagnostic-only volume sensitivity: never changes the live entry threshold.
+    early_volume_ratios = []
     for contract, impulse in early_pattern_details.items():
         item = ticker_by_contract.get(contract, {})
         raw_funding = item.get("funding_rate")
@@ -1920,9 +1922,22 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
         cap = caps.get(symbol)
         volume = market_volumes.get(symbol)
         funding_label = "missing" if raw_funding in (None, "") else f"{float(raw_funding) * 100:+.4f}%"
-        ratio_label = f"{float(volume) / float(cap):.3f}x" if cap and volume and symbol not in ambiguous else "missing/ambiguous"
-        early_filter_snapshot.append(f"{contract}: funding={funding_label}, vol/MC={ratio_label}")
+        ratio = (float(volume) / float(cap)) if cap and volume and symbol not in ambiguous else None
+        ratio_label = f"{ratio:.3f}x" if ratio is not None else "missing/ambiguous"
+        if ratio is not None:
+            early_volume_ratios.append(ratio)
+        reason = early_filter_status.get(contract, "not reached by final-filter pass")
+        early_filter_snapshot.append(f"{contract}: funding={funding_label}, vol/MC={ratio_label}, status={reason}")
     print("LEG SPIKE early-pattern filter snapshot: " + ("; ".join(early_filter_snapshot) or "none"))
+    print(
+        "LEG SPIKE diagnostic-only volume sensitivity: "
+        f"patterns={len(early_pattern_details)}, "
+        f"known_volume={len(early_volume_ratios)}, "
+        f"pass_1.0x={sum(r >= 1.0 for r in early_volume_ratios)}, "
+        f"pass_1.5x={sum(r >= 1.5 for r in early_volume_ratios)}, "
+        f"pass_2.0x={sum(r >= 2.0 for r in early_volume_ratios)}; "
+        "live threshold unchanged"
+    )
     print("LEG SPIKE early-pattern filter results: " + ("; ".join(f"{k}={v}" for k, v in early_filter_status.items()) or "none"))
     print(f"LEG SPIKE highest volume/market-cap candidates: {top_volume}")
 
