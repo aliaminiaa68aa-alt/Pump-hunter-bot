@@ -1049,7 +1049,7 @@ def diagnose_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0):
     if len(candles) < 10:
         result["reason"] = "insufficient_closed_candles"
         return result
-    start_min = max(0, len(candles) - 7)
+    start_min = max(0, len(candles) - 12)
     for end_idx in range(len(candles) - 1, max(start_min + 1, 1), -1):
         first_idx = end_idx - 2
         if first_idx < start_min:
@@ -1091,7 +1091,7 @@ def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=F
     """Find a recent bullish impulse with a closed bullish FVG and at least two strong bodies."""
     if len(candles) < 10:
         return None
-    start_min = max(0, len(candles) - 7)
+    start_min = max(0, len(candles) - 12)
     # A classic bullish FVG is confirmed when candle C's low is above candle A's high.
     for end_idx in range(len(candles) - 1, max(start_min + 1, 1), -1):
         first_idx = end_idx - 2
