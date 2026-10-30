@@ -861,6 +861,42 @@ def get_market_caps(state, requested_symbols=None):
     }
     return caps, sorted(ambiguous)
 
+def detect_liquidity_inflow(candles, min_volume_ratio=2.5, min_price_change_pct=0.5):
+    """Detect a closed 15m candle with an abnormal quote-turnover burst and bullish close."""
+    if len(candles) < 13:
+        return None
+    current = candles[-1]
+    previous = candles[-13:-1]
+    try:
+        previous_turnovers = [float(c.get("sum", 0) or 0) for c in previous]
+        current_turnover = float(current.get("sum", 0) or 0)
+        avg_turnover = sum(previous_turnovers) / len(previous_turnovers)
+        op, close = float(current["o"]), float(current["c"])
+        high, low = float(current["h"]), float(current["l"])
+        if avg_turnover <= 0 or current_turnover <= 0 or op <= 0 or high <= low:
+            return None
+        volume_ratio = current_turnover / avg_turnover
+        price_change_pct = (close / op - 1) * 100
+        close_position = (close - low) / (high - low)
+        if (volume_ratio < min_volume_ratio
+                or price_change_pct < min_price_change_pct
+                or close_position < 0.70
+                or close <= op):
+            return None
+        return {
+            "candle_time": str(current.get("t", "")),
+            "volume_ratio": volume_ratio,
+            "price_change_pct": price_change_pct,
+            "turnover": current_turnover,
+            "close": close,
+            "high": high,
+            "low": low,
+            "close_position": close_position,
+        }
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return None
+
+
 def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=FIB_MIN_TOTAL_PUMP_PCT):
     """Find a recent bullish impulse with a closed bullish FVG and at least two strong bodies."""
     if len(candles) < 10:
@@ -983,6 +1019,50 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             candles = closed_candles(contract, "15m", 20)
             early_candle_cache[contract] = candles
             counts["early_scan_checked"] += 1
+
+            # Separate early liquidity-inflow watch: this can alert before a full
+            # multi-candle/FVG pump pattern is confirmed. Uses only closed 15m candles.
+            liquidity_signal = detect_liquidity_inflow(candles)
+            if liquidity_signal:
+                try:
+                    ticker_turnover = float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0)
+                except (TypeError, ValueError):
+                    ticker_turnover = 0
+                liquidity_state = state.setdefault("fib_liquidity_alerts", {})
+                candle_key = str(liquidity_signal["candle_time"])
+                try:
+                    last_liquidity_alert = liquidity_state.get(contract, {})
+                    if isinstance(last_liquidity_alert, str):
+                        last_liquidity_alert = {"candle_time": last_liquidity_alert, "sent_at": 0}
+                    last_sent_at = int(last_liquidity_alert.get("sent_at", 0) or 0)
+                    last_candle_key = str(last_liquidity_alert.get("candle_time", ""))
+                except (TypeError, ValueError, AttributeError):
+                    last_sent_at, last_candle_key = 0, ""
+                # Require a minimum 24h venue turnover to reduce illiquid one-candle spikes.
+                if ticker_turnover >= 500000 and last_candle_key != candle_key and int(time.time()) - last_sent_at >= 3600:
+                    liquidity_message = (
+                        "💧 LEG SPIKE | هشدار ورود نقدینگی اولیه\n"
+                        "🟡━━━━━━━━━━━━━━━━━━🟡\n"
+                        f"🪙 ارز: {contract.replace('_', '/')} | تایم‌فریم: ۱۵ دقیقه\n"
+                        f"📊 گردش معاملات کندل: {liquidity_signal['volume_ratio']:.2f} برابر میانگین ۱۲ کندل قبلی\n"
+                        f"📈 تغییر قیمت کندل بسته‌شده: {liquidity_signal['price_change_pct']:+.2f}%\n"
+                        f"💰 قیمت بسته‌شدن: {liquidity_signal['close']:.10g}\n"
+                        f"💧 گردش معاملات ۲۴ساعته صرافی: {ticker_turnover:,.0f} USDT\n"
+                        "👀 این هشدار یعنی افزایش غیرعادی فعالیت معاملاتی دیده شده؛ هنوز تأیید پامپ یا سیگنال ورود نیست. شکست سقف و ادامه حجم را بررسی کن.\n"
+                        "🟡━━━━━━━━━━━━━━━━━━🟡"
+                    )
+                    send_message(liquidity_message)
+                    liquidity_state[contract] = {"candle_time": candle_key, "sent_at": int(time.time())}
+                    print(
+                        f"{contract}: liquidity inflow alert sent; "
+                        f"turnover={liquidity_signal['volume_ratio']:.2f}x, "
+                        f"price={liquidity_signal['price_change_pct']:+.2f}%"
+                    )
+                elif ticker_turnover < 500000:
+                    print(f"{contract}: liquidity burst ignored; 24h turnover below 500k USDT")
+                else:
+                    print(f"{contract}: liquidity alert suppressed; duplicate/cooldown")
+
             early_candidate = detect_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0)
             is_new_early_candidate = early_candidate is not None
             if not early_candidate:
