@@ -1093,7 +1093,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 f"فیبو 0.50: {float(early_candidate['fib50']):.10g} | "
                 f"فیبو 0.66: {float(early_candidate['fib66']):.10g}\n"
                 f"Funding: {funding_text} | حجم/مارکت‌کپ: {vol_mc_text}\n"
-                "⚠️ این فقط هشدار حرکت اولیه است، نه نقطه ورود. برای سیگنال نهایی تمام فیلترهای Funding، حجم/مارکت‌کپ، OI، نسبت لانگ/شورت و واکنش کندل بسته‌شده لازم‌اند."
+                "⚠️ این فقط هشدار حرکت اولیه است، نه نقطه ورود. هشدار بعدی رسیدن/شکست سقف را اعلام می‌کند؛ ورود را خودت با بررسی نمودار انتخاب کن. فیبوناچی به‌تنهایی سیگنال ورود نمی‌دهد."
             )
             send_message(early_message)
             early_sent[contract] = early_key
@@ -1346,7 +1346,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     candidates.pop(contract, None)
                     candidate = None
             if candidate is None:
-                # Stage 2 uses early-impulse thresholds; Stage 3 still requires closed-candle Fib reaction and confirmations.
+                # Reuse the tracked impulse for Stage 2 monitoring; this strategy does not issue an automatic Fib entry.
                 candidate = detect_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0)
                 if not candidate:
                     counts["pump_pattern_rejected"] += 1
@@ -1363,7 +1363,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 candidates[contract] = candidate
                 print(
                     f"{contract}: LEG SPIKE pump found: {candidate['pump_pct']:.2f}% "
-                    f"in {candidate['body_count']} candles; waiting for Fib retracement"
+                    f"in {candidate['body_count']} candles; monitoring the impulse high for a touch/break"
                 )
 
             # Refresh filter values every scan, including candidates first stored
@@ -1379,10 +1379,10 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             # Use Coinalyze long/short data at the actual closed-candle Fib reaction
             # instead of blocking symbols solely because OKX does not list them.
             if contract in early_pattern_details:
-                early_filter_status[contract] = "OI/funding passed; waiting for closed-candle Fib reaction"
+                early_filter_status[contract] = "OI/funding passed; monitoring top touch/break; manual entry only, no Fib entry signal"
 
             # Stage 2: one stronger watch alert after volume/MC, OI/MC and funding pass.
-            # Stage 3 remains the final entry alert after Fib reaction and all confirmations.
+            # This strategy intentionally stops at the top-touch/break alert; the user chooses entry manually.
             setup_sent = state.setdefault("fib_setup_alerts", {})
             setup_key = str(candidate["end_time"])
             oi4_message = (
