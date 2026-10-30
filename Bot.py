@@ -1485,51 +1485,51 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             fib50_level = fib_high - (fib_high - fib_low) * 0.50
             live_price = float(ticker.get("last") or candles[-1]["c"])
             # Entry alerts follow the requested plan: after the impulse top is confirmed,
-            # alert at Fib 0.50 for entry 1, and at Fib 0.66 for entry 2 if the pullback deepens.
+            # alert at Fib 0.50 for entry 1, then Fib 0.66 for entry 2 if price reaches it.
+            # A fast drop can cross both levels between scans, so evaluate each level independently.
             # All market/OI/funding/long-share filters remain mandatory.
             fib_entry_state = state.setdefault("fib_entry_alerts", {})
             fib_top_state = state.setdefault("fib_top_alerts", {})
-            touched_level = None
-            if fib_top_state.get(contract) == fib_end_time:
-                raw_alerted = fib_entry_state.get(contract, [])
-                alerted_levels = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
+            raw_alerted = fib_entry_state.get(contract, [])
+            alerted_levels = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
+            reached_levels = []
+            if fib_top_state.get(contract) == fib_end_time and fib_low < live_price:
                 key50 = f"{fib_end_time}:0.50"
                 key66 = f"{fib_end_time}:0.66"
-                if key50 not in alerted_levels and fib_low < live_price <= fib50_level:
-                    touched_level = ("0.50", fib50_level)
-                elif key50 in alerted_levels and key66 not in alerted_levels and fib_low < live_price <= float(candidate["fib66"]):
-                    touched_level = ("0.66", float(candidate["fib66"]))
-            if touched_level:
-                level_name, entry_level = touched_level
+                if key50 not in alerted_levels and live_price <= fib50_level:
+                    reached_levels.append(("0.50", fib50_level))
+                if key66 not in alerted_levels and live_price <= float(candidate["fib66"]):
+                    reached_levels.append(("0.66", float(candidate["fib66"])))
+            if reached_levels:
                 ratio_check = leg_spike_long_short_filter(contract)
                 if not ratio_check.get("valid") or not ratio_check.get("passed"):
                     reason = ratio_check.get("reason", "long/short ratios outside required thresholds")
-                    print(f"{contract}: Fib {level_name} touched but long/short filter rejected/unavailable: {reason}")
+                    levels_text = ", ".join(level for level, _ in reached_levels)
+                    print(f"{contract}: Fib {levels_text} touched but long/short filter rejected/unavailable: {reason}")
                 else:
-                    fib_message = (
-                        f"🟣 LEG SPIKE | هشدار ورود فیبو {level_name} با فیلترهای تأییدشده\\n"
-                        "🟣━━━━━━━━━━━━━━━━━━🟣\\n"
-                        f"🪙 ارز: {contract.replace('_', '/')}\\n"
-                        f"📍 قیمت فعلی: {live_price:.10g}\\n"
-                        f"🎯 ورود {'اول' if level_name == '0.50' else 'دوم'} | فیبو {level_name}: {entry_level:.10g}\\n"
-                        f"🎯 تارگت اول: سقف حرکت {fib_high:.10g}\\n"
-                        f"🔺 کف اسپایک: {fib_low:.10g} | سقف اسپایک: {fib_high:.10g}\\n"
-                        f"💧 حجم/مارکت‌کپ: {volume_mc:.2f}x (شرط: حداقل 2x)\\n"
-                        f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} (شرط: حداکثر 50%)\\n"
-                        f"💸 Funding: {funding * 100:+.4f}% (منفی)\\n"
-                        f"📈 سهم لانگ: ۱۵دقیقه {ratio_check['ratio_15m']:.1f}% | "
-                        f"۱ساعت {ratio_check['ratio_1h']:.1f}% | روزانه {ratio_check['ratio_1d']:.1f}%\\n"
-                        "⚠️ هشدار سطح ورود است؛ رسیدن به سطح تضمین برگشت قیمت نیست.\\n"
-                        "🟣━━━━━━━━━━━━━━━━━━🟣"
-                    )
-                    send_message(fib_message)
-                    raw_alerted = fib_entry_state.get(contract, [])
-                    alerted_levels = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
-                    alerted_levels.add(f"{fib_end_time}:{level_name}")
+                    for level_name, entry_level in reached_levels:
+                        fib_message = (
+                            f"🟣 LEG SPIKE | هشدار ورود فیبو {level_name} با فیلترهای تأییدشده\n"
+                            "🟣━━━━━━━━━━━━━━━━━━🟣\n"
+                            f"🪙 ارز: {contract.replace('_', '/')}\n"
+                            f"📍 قیمت فعلی: {live_price:.10g}\n"
+                            f"🎯 ورود {'اول' if level_name == '0.50' else 'دوم'} | فیبو {level_name}: {entry_level:.10g}\n"
+                            f"🎯 تارگت اول: سقف حرکت {fib_high:.10g}\n"
+                            f"🔺 کف اسپایک: {fib_low:.10g} | سقف اسپایک: {fib_high:.10g}\n"
+                            f"💧 حجم/مارکت‌کپ: {volume_mc:.2f}x (شرط: حداقل 2x)\n"
+                            f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} (شرط: حداکثر 50%)\n"
+                            f"💸 Funding: {funding * 100:+.4f}% (منفی)\n"
+                            f"📈 سهم لانگ: ۱۵دقیقه {ratio_check['ratio_15m']:.1f}% | "
+                            f"۱ساعت {ratio_check['ratio_1h']:.1f}% | روزانه {ratio_check['ratio_1d']:.1f}%\n"
+                            "⚠️ هشدار سطح ورود است؛ رسیدن به سطح تضمین برگشت قیمت نیست.\n"
+                            "🟣━━━━━━━━━━━━━━━━━━🟣"
+                        )
+                        send_message(fib_message)
+                        alerted_levels.add(f"{fib_end_time}:{level_name}")
+                        if level_name == "0.50":
+                            fib50_alert_state[contract] = fib_end_time
+                        print(f"{contract}: filtered Fib {level_name} entry alert sent at {live_price:.10g}; target={fib_high:.10g}")
                     fib_entry_state[contract] = sorted(alerted_levels)
-                    if level_name == "0.50":
-                        fib50_alert_state[contract] = fib_end_time
-                    print(f"{contract}: filtered Fib {level_name} entry alert sent at {live_price:.10g}; target={fib_high:.10g}")
             # User chooses the exact entry and risk management manually.
             continue
 
