@@ -1932,6 +1932,11 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         if ob else "در پنجرهٔ کندل‌های موجود شناسایی نشد"
                     )
                     for level_name, entry_level in new_levels:
+                        # The BTC -2% rule gates final entries in every strategy.
+                        # Continue diagnostics/monitoring, but do not emit a long while BTC is in a severe 15m sell-off.
+                        if not confirmed_entries:
+                            print(f"{contract}: LEG SPIKE final entry paused by BTC 15m risk filter")
+                            continue
                         entry_price = float(reversal["entry_price"])
                         sweep_low = float(reversal["sweep_low"])
                         stop_price = sweep_low * 0.99  # Always 1% below the actual swept wick low.
@@ -1972,6 +1977,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                             "🟢━━━━━━━━━━━━━━━━━━🟢"
                         )
                         send_message(fib_message)
+                        register_combo_signal(state, contract, "SPIKE", direction="LONG")
                         alerted_levels.add(f"{fib_end_time}:{level_name}")
                         print(
                             f"{contract}: Fib {level_name} reversal entry sent; "
