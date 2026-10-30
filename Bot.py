@@ -1190,12 +1190,11 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
 
     selected_for_oi = []
     selected_contracts = set()
-    # Prioritize tracked LEG SPIKE setups, especially those that already broke/touched
-    # the impulse top and are now at/near Fib 0.50. This keeps the strict filters intact
-    # while using the small Coinalyze quota on candidates closest to the user's alert.
+    # Prioritize tracked LEG SPIKE setups by the next unalerted Fib level.
+    # A live 0.66 touch stays urgent even after the 0.50 alert was sent.
     early_contracts = set(early_pattern_details) | set(candidates)
     fib_top_state_for_rank = state.setdefault("fib_top_alerts", {})
-    fib50_state_for_rank = state.setdefault("fib50_alerts", {})
+    fib_entry_state_for_rank = state.setdefault("fib_entry_alerts", {})
 
     def _tracked_stage_rank(item):
         contract = item.get("contract", "")
@@ -1204,17 +1203,24 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             return 4
         try:
             end_key = str(candidate["end_time"])
-            if fib50_state_for_rank.get(contract) == end_key:
-                return 3  # already alerted for this impulse; don't consume top priority
+            low = float(candidate["low"])
+            high = float(candidate["high"])
+            price = float(item.get("last") or 0)
+            fib50 = float(candidate.get("fib50", high - (high - low) * 0.50))
+            fib66 = float(candidate.get("fib66", high - (high - low) * 0.66))
+            raw_alerted = fib_entry_state_for_rank.get(contract, [])
+            alerted = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
+            alerted50 = f"{end_key}:0.50" in alerted
+            alerted66 = f"{end_key}:0.66" in alerted
             if fib_top_state_for_rank.get(contract) == end_key:
-                low = float(candidate["low"])
-                high = float(candidate["high"])
-                level = high - (high - low) * 0.50
-                price = float(item.get("last") or 0)
-                if low < price <= level:
-                    return 0  # live Fib touch awaiting/refreshing strict confirmations
-                return 1  # top already confirmed; waiting for the pullback
-            return 2  # tracked impulse but top confirmation not yet seen
+                if low < price <= fib66 and not alerted66:
+                    return 0
+                if low < price <= fib50 and not alerted50:
+                    return 1
+                if not alerted50 or not alerted66:
+                    return 2
+                return 3
+            return 2
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             return 2
 
