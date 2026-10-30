@@ -1706,7 +1706,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 if not coinalyze_check.get("valid"):
                     counts["coinalyze_unavailable"] += 1
                     if contract in early_pattern_details:
-                        early_filter_status[contract] = "Coinalyze data unavailable"
+                        unavailable_reason = str(coinalyze_check.get("reason") or "unknown data issue")
+                        early_filter_status[contract] = f"Coinalyze unavailable: {unavailable_reason}"
                     continue
                 aggregate_oi = float(coinalyze_check.get("oi_usd") or 0)
                 aggregate_funding = float(coinalyze_check["funding_rate"])
