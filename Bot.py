@@ -1209,8 +1209,18 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             if not early_candidate:
                 # LEG SPIKE is intentionally 15m-only. Do not emit 1h/4h fallback alerts.
                 tracked_existing = candidates.get(contract)
-                # Keep monitoring an already tracked 15m impulse even when this scan
-                # does not rediscover it. Do not replace that tracked setup with a 1h one.
+                if tracked_existing:
+                    try:
+                        tracked_age_seconds = int(time.time()) - int(tracked_existing["end_time"])
+                        if tracked_age_seconds > 3600:
+                            candidates.pop(contract, None)
+                            print(f"{contract}: Stage-1 impulse expired after 60 minutes")
+                            tracked_existing = None
+                    except (TypeError, ValueError, KeyError):
+                        candidates.pop(contract, None)
+                        print(f"{contract}: invalid tracked impulse removed")
+                        tracked_existing = None
+                # Keep monitoring only active tracked 15m impulses; no higher-timeframe fallback.
                 early_candidate = tracked_existing
                 if not early_candidate:
                     continue
