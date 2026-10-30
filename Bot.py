@@ -699,7 +699,7 @@ def leg_spike_long_short_filter(contract):
         ratio_15m = okx_contract_long_ratio(contract, "15m")
         ratio_1h = okx_contract_long_ratio(contract, "1H")
         ratio_1d = okx_currency_daily_long_ratio(contract)
-        passed = ratio_15m > 50.0 and ratio_1h >= 60.0 and ratio_1d <= 70.0
+        passed = ratio_15m > 50.0 and ratio_1h > 50.0 and ratio_1d <= 70.0
         return {
             "valid": True, "passed": passed,
             "ratio_15m": ratio_15m, "ratio_1h": ratio_1h, "ratio_1d": ratio_1d,
@@ -712,8 +712,8 @@ def leg_spike_long_short_filter(contract):
 
 # Fibonacci pullback strategy configuration.
 # "Several times market cap" is set to >=2x by default and can be tuned here.
-FIB_MIN_VOLUME_TO_MARKET_CAP = 0.50
-FIB_MIN_OI_TO_MARKET_CAP = 0.20
+FIB_MIN_VOLUME_TO_MARKET_CAP = 2.00
+FIB_MAX_OI_TO_MARKET_CAP = 0.50
 # Stage-2 impulse detection: slightly more inclusive so valid developing
 # setups are tracked; Stage-3 entry confirmation remains fully gated by Fib,
 # OI, funding, and long/short checks.
@@ -1325,7 +1325,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     continue
                 aggregate_oi = float(coinalyze_check.get("oi_usd") or 0)
                 aggregate_funding = float(coinalyze_check["funding_rate"])
-                if aggregate_oi <= 0 or aggregate_oi / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
+                if aggregate_oi <= 0 or aggregate_oi / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
                     counts["oi_rejected"] += 1
                     if contract in early_pattern_details:
                         early_filter_status[contract] = f"Coinalyze OI/MC rejected ({aggregate_oi/market_cap:.1%})"
@@ -1354,7 +1354,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if value not in (None, ""):
                         oi_usd = float(value)
                         break
-                if oi_usd is None or oi_usd / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
+                if oi_usd is None or oi_usd / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
                     if contract in early_pattern_details:
                         early_filter_status[contract] = "Gate.io OI missing" if oi_usd is None else f"Gate.io OI/MC rejected ({oi_usd/market_cap:.1%})"
                     continue
@@ -1491,7 +1491,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if metrics.get("long15m") is None or metrics["long15m"] <= 50:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze 15m long share is missing or <=50%")
                         continue
-                    if metrics.get("long1h") is None or metrics["long1h"] < 60:
+                    if metrics.get("long1h") is None or metrics["long1h"] <= 50:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze 1h long share is missing or below 60%")
                         continue
                     if metrics.get("long1d") is None or metrics["long1d"] > 70:
@@ -1499,7 +1499,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         continue
                     alert_oi = metrics.get("oi_usd")
                     alert_funding = metrics.get("funding_avg")
-                    if alert_oi is None or alert_oi <= 0 or alert_oi / market_cap < FIB_MIN_OI_TO_MARKET_CAP:
+                    if alert_oi is None or alert_oi <= 0 or alert_oi / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
                         print(f"{contract}: LEG SPIKE rejected; OI/market cap below minimum")
                         continue
                     counts["ratio_pass"] += 1
