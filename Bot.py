@@ -2127,7 +2127,11 @@ def scan():
             # Use a modest positive-growth floor rather than demanding +0.2% in
             # roughly 10 minutes; retain the separate 15m/1h price confirmations.
             if oi_change < 0.03:
-                print(f"{contract}: skipped; OI change {oi_change:+.3f}% is below +0.03%")
+                print(
+                    f"{contract}: skipped; Gate.io OI change {oi_change:+.5f}% is below +0.03%; "
+                    f"old={old_oi:.10g} at {oi_rows[-2].get('time', 'unknown')}, "
+                    f"new={new_oi:.10g} at {oi_rows[-1].get('time', 'unknown')}"
+                )
                 continue
 
             # Funding must be available and not excessively positive; very high positive
