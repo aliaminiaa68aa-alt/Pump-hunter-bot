@@ -1166,9 +1166,11 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             vol0 = market_volumes.get(symbol0)
             if not cap0 or symbol0 in ambiguous or not vol0:
                 continue
-            # Allow tracked early impulses into the bounded OI sample; the strict
-            # volume/market-cap gate still applies before setup confirmation.
-            if float(vol0) / float(cap0) < FIB_MIN_VOLUME_TO_MARKET_CAP and contract0 not in priority_contracts:
+            # Only spend the scarce Coinalyze quota on symbols that already
+            # pass the mandatory volume/market-cap gate. Previously tracked impulses
+            # bypassed this check, consumed all five API slots, then failed the volume
+            # gate later in the scan and starved genuinely eligible candidates.
+            if float(vol0) / float(cap0) < FIB_MIN_VOLUME_TO_MARKET_CAP:
                 continue
             prequalified.append(item)
         except (TypeError, ValueError, ZeroDivisionError):
