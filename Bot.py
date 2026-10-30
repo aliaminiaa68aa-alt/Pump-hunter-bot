@@ -1066,13 +1066,13 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     live_price = float(item.get("last") or candles[-1]["c"])
                     if fib_low < live_price <= fib50_level:
                         fib50_message = (
-                            "🟣 LEG SPIKE | هشدار رسیدن قیمت به نیم فیبو\\n"
-                            "🟣━━━━━━━━━━━━━━━━━━🟣\\n"
-                            f"🪙 ارز: {contract.replace('_', '/')}\\n"
-                            f"📍 قیمت فعلی: {live_price:.10g}\\n"
-                            f"🎯 سطح فیبو 0.50: {fib50_level:.10g}\\n"
-                            f"🔺 کف اسپایک: {fib_low:.10g} | سقف اسپایک: {fib_high:.10g}\\n"
-                            "⚠️ قیمت به سطح نیم فیبو رسیده؛ این فقط هشدار سطح است، نه سیگنال قطعی خرید.\\n"
+                            "🟣 LEG SPIKE | هشدار رسیدن قیمت به نیم فیبو\n"
+                            "🟣━━━━━━━━━━━━━━━━━━🟣\n"
+                            f"🪙 ارز: {contract.replace('_', '/')}\n"
+                            f"📍 قیمت فعلی: {live_price:.10g}\n"
+                            f"🎯 سطح فیبو 0.50: {fib50_level:.10g}\n"
+                            f"🔺 کف اسپایک: {fib_low:.10g} | سقف اسپایک: {fib_high:.10g}\n"
+                            "⚠️ قیمت به سطح نیم فیبو رسیده؛ این فقط هشدار سطح است، نه سیگنال قطعی خرید.\n"
                             "🟣━━━━━━━━━━━━━━━━━━🟣"
                         )
                         send_message(fib50_message)
