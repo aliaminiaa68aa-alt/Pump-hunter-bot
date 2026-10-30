@@ -929,6 +929,58 @@ def get_market_caps(state, requested_symbols=None):
         except Exception as error:
             print(f"CoinPaprika fallback unavailable for {len(paprika_missing)} candidate symbols: {type(error).__name__}: {error}")
 
+    # Last-resort free lookup for unresolved tickers: search CoinGecko by exact
+    # symbol, then accept market data only when the search yields one exact-symbol coin.
+    # Never choose arbitrarily among duplicate tickers; cap calls to 8 per scan.
+    cg_search_resolved = 0
+    cg_search_ambiguous = 0
+    cg_unresolved = [symbol for symbol in requested if symbol not in caps or symbol in ambiguous]
+    for symbol in cg_unresolved[:8]:
+        try:
+            search_response = SESSION.get(
+                f"{COINGECKO_BASE}/search", params={"query": symbol}, timeout=10
+            )
+            search_response.raise_for_status()
+            search_data = search_response.json()
+            coins = search_data.get("coins", []) if isinstance(search_data, dict) else []
+            exact = [
+                row for row in coins
+                if str(row.get("symbol", "")).upper() == symbol and row.get("id")
+            ]
+            if len(exact) == 1:
+                market_response = SESSION.get(
+                    f"{COINGECKO_BASE}/coins/markets",
+                    params={"vs_currency": "usd", "ids": exact[0]["id"], "sparkline": "false"},
+                    timeout=10,
+                )
+                market_response.raise_for_status()
+                market_rows = market_response.json()
+                if isinstance(market_rows, list) and len(market_rows) == 1:
+                    row = market_rows[0]
+                    cap, volume = row.get("market_cap"), row.get("total_volume")
+                    if cap not in (None, "") and float(cap) > 0:
+                        caps[symbol] = float(cap)
+                        if volume not in (None, "") and float(volume) > 0:
+                            volumes[symbol] = float(volume)
+                        ambiguous.discard(symbol)
+                        cg_search_resolved += 1
+            elif len(exact) > 1:
+                caps.pop(symbol, None)
+                volumes.pop(symbol, None)
+                ambiguous.add(symbol)
+                cg_search_ambiguous += 1
+        except Exception as search_error:
+            print(
+                f"CoinGecko exact-symbol lookup failed for {symbol}: "
+                f"{type(search_error).__name__}; "
+                f"status={getattr(getattr(search_error, 'response', None), 'status_code', 'n/a')}"
+            )
+    if cg_unresolved:
+        print(
+            f"CoinGecko exact-symbol fallback: tried={min(len(cg_unresolved), 8)}, "
+            f"resolved={cg_search_resolved}, ambiguous={cg_search_ambiguous}"
+        )
+
     state["market_cap_cache"] = {
         "fetched_at": now if not fresh else cache.get("fetched_at", now),
         "caps": caps, "volumes": volumes, "ambiguous": sorted(ambiguous),
