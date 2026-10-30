@@ -1213,6 +1213,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 if not early_candidate:
                     continue
                 print(f"{contract}: monitoring previously tracked LEG SPIKE impulse")
+                # Include tracked setups in per-stage diagnostics too. This does not
+                # count them as newly discovered patterns or send any alert.
+                early_pattern_details[contract] = early_candidate
             else:
                 counts["early_patterns_seen"] += 1
                 early_pattern_details[contract] = early_candidate
