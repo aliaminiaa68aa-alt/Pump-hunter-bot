@@ -1492,7 +1492,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze 15m long share is missing or <=50%")
                         continue
                     if metrics.get("long1h") is None or metrics["long1h"] <= 50:
-                        print(f"{contract}: LEG SPIKE rejected; Coinalyze 1h long share is missing or below 60%")
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze 1h long share is missing or <=50%")
                         continue
                     if metrics.get("long1d") is None or metrics["long1d"] > 70:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze daily long share is missing or exceeds 70%")
