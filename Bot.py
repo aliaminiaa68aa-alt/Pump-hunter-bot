@@ -973,8 +973,8 @@ def detect_fib_pump(candles, min_body_pct=FIB_MIN_BODY_PCT, min_total_pump_pct=F
                     "candle_count": len(seq),
                     "fvg_low": float(a["h"]),
                     "fvg_high": float(c["l"]),
-                    "fib50": high - (high - body_start) * 0.50,
-                    "fib66": high - (high - body_start) * 0.66,
+                    "fib50": high - (high - swing_low) * 0.50,
+                    "fib66": high - (high - swing_low) * 0.66,
                 })
             if options:
                 options.sort(key=lambda x: (x["candle_count"], x["pump_pct"]), reverse=True)
