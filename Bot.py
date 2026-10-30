@@ -1063,7 +1063,8 @@ def diagnose_fib_pump(candles, min_body_pct=0.6, min_total_pump_pct=3.0):
             if float(current["l"]) <= float(a["h"]) or float(current["c"]) <= float(current["o"]):
                 continue
             result["bullish_fvg"] += 1
-            for anchor_idx in (first_idx, first_idx + 1):
+            anchor_start = max(start_min, first_idx - 3)
+            for anchor_idx in range(anchor_start, first_idx + 2):
                 seq = candles[anchor_idx:end_idx + 1]
                 strong = sum(
                     1 for item in seq
