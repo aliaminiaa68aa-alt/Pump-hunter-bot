@@ -1643,8 +1643,9 @@ def scan():
                 impulse_time = int(candidate["impulse_time"])
             except (TypeError, ValueError):
                 impulse_time = latest_time
-            # Expire unconfirmed setups after one hour.
-            if latest_time - impulse_time > 14400:
+            # Expire unconfirmed setups after one hour (12 closed 5m candles).
+            if latest_time - impulse_time > 3600:
+                print(f"{contract}: setup expired after 1h without full confirmation")
                 candidates.pop(contract, None)
                 continue
 
@@ -1697,13 +1698,22 @@ def scan():
 
             confirmed15, change15 = confirms_15m(contract)
             if not confirmed15:
-                print(f"{contract}: BOS seen; waiting for closed 15m bullish confirmation")
+                print(
+                    f"{contract}: BOS waiting on 15m confirmation; last closed 15m change="
+                    f"{change15 if change15 is not None else 'n/a'}% "
+                    "(requires close > open and close > previous close)"
+                )
                 continue
             confirms15 += 1
 
             confirmed1h, change1h, _ema20 = confirms_1h(contract)
             if not confirmed1h:
-                print(f"{contract}: 15m confirmed; waiting for price above rising 1h EMA20")
+                print(
+                    f"{contract}: 15m confirmed; 1h trend rejected; "
+                    f"last closed 1h change={change1h if change1h is not None else 'n/a'}%, "
+                    f"price={candles[-1]['c']}, EMA20={_ema20 if _ema20 is not None else 'n/a'} "
+                    "(requires price above rising 1h EMA20)"
+                )
                 continue
             confirms1h += 1
 
