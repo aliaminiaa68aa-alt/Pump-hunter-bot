@@ -1114,6 +1114,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
         "early_scan_checked": 0, "early_patterns_seen": 0, "early_warnings_sent": 0,
         "early_duplicate_suppressed": 0, "early_recent_suppressed": 0, "early_candle_errors": 0, "volume_pass": 0, "oi_pass": 0,
         "pump_detected": 0, "pump_pattern_rejected": 0,
+        "stage1_candidates_monitored": 0, "reversal_checks": 0,
+        "reversal_detected": 0,
         "coinalyze_unavailable": 0, "oi_rejected": 0, "quota_skipped": 0,
         "ratio_pass": 0, "ratio_rejected": 0,
         "ratio_unavailable": 0, "fib_reactions": 0,
@@ -1242,6 +1244,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             # Monitor the saved Stage-1 impulse on every scan, before derivatives
             # gates. The user wants a top-touch/break alert, not a filtered entry call.
             tracked_for_top = candidates.get(contract) or early_candidate
+            counts["stage1_candidates_monitored"] += 1
             try:
                 top_low = float(tracked_for_top["low"])
                 top_high = float(tracked_for_top["high"])
@@ -1716,8 +1719,17 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             alerted_levels = set(raw_alerted if isinstance(raw_alerted, list) else [raw_alerted])
             # A prior top-break is not required: evaluate the tracked 15m impulse,
             # liquidity sweep and closed-candle Fib reclaim directly.
+            counts["reversal_checks"] += 1
             reversal = detect_fib_liquidity_reversal(candles, candidate)
             if reversal:
+                counts["reversal_detected"] += 1
+                counts["fib_reactions"] += len(reversal.get("levels", []))
+                print(
+                    f"{contract}: confirmed reversal structure detected; "
+                    f"levels={[''.join([str(name), '@', f'{float(level):.10g}']) for name, level in reversal.get('levels', [])]}, "
+                    f"sweep_low={float(reversal.get('sweep_low', 0)):.10g}, "
+                    f"entry={float(reversal.get('entry_price', 0)):.10g}"
+                )
                 new_levels = [
                     (name, level) for name, level in reversal["levels"]
                     if f"{fib_end_time}:{name}" not in alerted_levels
@@ -1820,7 +1832,6 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         continue
                 if reaction_candle is not None:
                     reaction_close = float(reaction_candle["c"])
-                    counts["fib_reactions"] += 1
                     risk = level - low
                     reward = high - level
                     if risk <= 0:
