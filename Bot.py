@@ -2316,9 +2316,8 @@ def is_high_quality_liquidity_candidate(radar):
 
 def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
     """
-    Return a risk-defined long entry only when 5m price compression/turnover
-    expansion is followed by a CLOSED 1m breakout with abnormal turnover.
-    This is a rule-based setup, not proof of manipulation or guaranteed profit.
+    Return a risk-defined long entry on a CLOSED 5m breakout.
+    1m turnover is supporting confirmation only; it does not define the entry candle.
     """
     def reject(reason):
         if diagnostics is not None:
@@ -2328,9 +2327,10 @@ def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
     if len(candles_1m) < 22 or len(candles_5m) < 19:
         return reject("insufficient_candles")
     try:
-        current = candles_1m[-1]
-        prior_1m = candles_1m[-6:-1]
+        current = candles_5m[-1]
+        prior_5m = candles_5m[-6:-1]
         baseline_1m = candles_1m[-21:-1]
+        current_1m = candles_1m[-1]
         context_5m = candles_5m[-7:-1]
         baseline_5m = candles_5m[-19:-7]
         op, close = float(current["o"]), float(current["c"])
@@ -2338,43 +2338,39 @@ def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
         if op <= 0 or close <= 0 or high <= low:
             return reject("invalid_ohlc")
 
-        prior_high = max(float(c["h"]) for c in prior_1m)
-        swing_low = min(float(c["l"]) for c in prior_1m)
-        avg_1m_turnover = sum(float(c.get("sum", 0) or 0) for c in baseline_1m) / len(baseline_1m)
-        current_turnover = float(current.get("sum", 0) or 0)
-        recent_5m_turnover = sum(float(c.get("sum", 0) or 0) for c in context_5m) / len(context_5m)
-        baseline_5m_turnover = sum(float(c.get("sum", 0) or 0) for c in baseline_5m) / len(baseline_5m)
-        if min(avg_1m_turnover, baseline_5m_turnover, current_turnover) <= 0:
+        prior_high = max(float(row["h"]) for row in prior_5m)
+        swing_low = min(float(row["l"]) for row in prior_5m)
+        avg_1m_turnover = sum(float(row.get("sum", 0) or 0) for row in baseline_1m) / len(baseline_1m)
+        current_1m_turnover = float(current_1m.get("sum", 0) or 0)
+        current_5m_turnover = float(current.get("sum", 0) or 0)
+        baseline_5m_turnover = sum(float(row.get("sum", 0) or 0) for row in baseline_5m) / len(baseline_5m)
+        if min(avg_1m_turnover, baseline_5m_turnover, current_1m_turnover, current_5m_turnover) <= 0:
             return reject("missing_turnover")
 
-        turnover_ratio_1m = current_turnover / avg_1m_turnover
-        turnover_ratio_5m = recent_5m_turnover / baseline_5m_turnover
-        compression_low = min(float(c["l"]) for c in context_5m)
-        compression_high = max(float(c["h"]) for c in context_5m)
+        turnover_ratio_1m = current_1m_turnover / avg_1m_turnover
+        turnover_ratio_5m = current_5m_turnover / baseline_5m_turnover
+        compression_low = min(float(row["l"]) for row in context_5m)
+        compression_high = max(float(row["h"]) for row in context_5m)
         if compression_low <= 0:
             return reject("invalid_compression_range")
         compression_pct = (compression_high / compression_low - 1) * 100
         candle_change_pct = (close / op - 1) * 100
         close_position = (close - low) / (high - low)
 
-        # Breakout must occur now, after a relatively tight range and increasing
-        # 5m turnover. Reject entries after an already-extended 1m candle.
         if compression_pct > 4.0:
             return reject("compression_too_wide")
-        # Check price structure first so logs distinguish missing breakouts from low volume.
         if close <= prior_high:
-            return reject("no_1m_breakout")
+            return reject("no_5m_breakout")
         if close <= op:
             return reject("not_bullish")
         if not (0.10 <= candle_change_pct <= 2.0):
-            return reject("1m_move_out_of_range")
+            return reject("5m_move_out_of_range")
         if close_position < 0.65:
             return reject("weak_close_position")
-        # Volume confirms a structurally valid breakout; it does not replace one.
-        if turnover_ratio_5m < 0.80:
-            return reject("low_5m_turnover_below_0.80x")
-        if turnover_ratio_1m < 1.5:
-            return reject("low_1m_turnover")
+        if turnover_ratio_5m < 1.20:
+            return reject("low_5m_breakout_turnover")
+        if turnover_ratio_1m < 1.50:
+            return reject("low_1m_confirmation_turnover")
 
         entry = close
         stop = min(swing_low, prior_high) - entry * 0.001
@@ -2386,8 +2382,8 @@ def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
             "candle_time": str(current.get("t", "")),
             "entry": entry,
             "stop": stop,
-            "tp1": entry + 1.5 * risk,
-            "tp2": entry + 2.5 * risk,
+            "tp1": entry + 2.0 * risk,
+            "tp2": entry + 3.0 * risk,
             "risk_pct": risk_pct,
             "turnover_ratio_1m": turnover_ratio_1m,
             "turnover_ratio_5m": turnover_ratio_5m,
@@ -2398,30 +2394,25 @@ def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
         return reject("malformed_candle")
 
-
-
 def detect_recent_prepump_entry(candles_1m, candles_5m, lookback=5, diagnostics=None):
-    """Check several recent CLOSED 1m candles so a 5m scheduler doesn't miss a brief breakout."""
+    """Check recent CLOSED 5m candles for a valid breakout; age is reported in minutes."""
     if lookback < 1:
         return None
-    # Try newest first. Older setups are considered only if the latest closed candles
-    # did not themselves qualify. Caller should keep lookback short to limit stale entries.
-    max_offset = min(lookback - 1, max(0, len(candles_1m) - 22))
+    max_offset = min(lookback - 1, max(0, len(candles_5m) - 19))
     for offset in range(max_offset + 1):
-        window = candles_1m if offset == 0 else candles_1m[:-offset]
+        window = candles_5m if offset == 0 else candles_5m[:-offset]
         local_diagnostics = {}
-        setup = detect_prepump_entry(window, candles_5m, local_diagnostics)
+        setup = detect_prepump_entry(candles_1m, window, local_diagnostics)
         if setup:
-            setup["minutes_since_breakout_candle"] = offset
+            setup["minutes_since_breakout_candle"] = offset * 5
             if diagnostics is not None:
                 diagnostics["setup_found"] = diagnostics.get("setup_found", 0) + 1
-                diagnostics[f"setup_age_{offset}m"] = diagnostics.get(f"setup_age_{offset}m", 0) + 1
+                diagnostics[f"setup_age_{offset * 5}m"] = diagnostics.get(f"setup_age_{offset * 5}m", 0) + 1
             return setup
         if diagnostics is not None:
             for reason, count in local_diagnostics.items():
                 diagnostics[reason] = diagnostics.get(reason, 0) + count
     return None
-
 
 def refresh_prepump_entry(setup, latest_close, diagnostics=None, max_chase_pct=0.50, max_pullback_pct=0.20):
     """Refresh a recent breakout at the latest closed price; reject lost or chased setups."""
@@ -2451,8 +2442,8 @@ def refresh_prepump_entry(setup, latest_close, diagnostics=None, max_chase_pct=0
         refreshed["entry"] = latest_close
         refreshed["risk_pct"] = risk_pct
         risk = latest_close - stop
-        refreshed["tp1"] = latest_close + 1.5 * risk
-        refreshed["tp2"] = latest_close + 2.5 * risk
+        refreshed["tp1"] = latest_close + 2.0 * risk
+        refreshed["tp2"] = latest_close + 3.0 * risk
         refreshed["entry_drift_pct"] = drift_pct
         return refreshed
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
@@ -2477,7 +2468,7 @@ def prepump_suppression_reason(previous, setup, now, cooldown_seconds=1800, diag
     return reason
 
 def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60):
-    """Independently scan liquid contracts for risk-defined 1m breakout entries."""
+    """Independently scan liquid contracts for risk-defined 5m breakout entries."""
     if not confirmed_entries:
         print("PRE-PUMP entry scan paused by BTC risk filter; no final-entry messages sent")
         return
@@ -2527,7 +2518,7 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
             if not setup:
                 continue
             try:
-                latest_close = float(candles_1m[-1]["c"])
+                latest_close = float(candles_5m[-1]["c"])
             except (TypeError, ValueError, KeyError, IndexError):
                 rejection_counts["missing_latest_close"] = rejection_counts.get("missing_latest_close", 0) + 1
                 continue
@@ -2543,15 +2534,15 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
             message = (
                 "🎯 PRE-PUMP | سیگنال ورود تأییدشده\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                f"🪙 ارز: {contract.replace('_', '/')} | سیگنال بر پایه شکست اخیر ۱ دقیقه\n"
+                f"🪙 ارز: {contract.replace('_', '/')} | سیگنال بر پایه شکست تأییدشده ۵ دقیقه\n"
                 f"🟢 نقطه ورود به‌روز: {setup['entry']:.10g}\n"
                 f"📍 تغییر از ورود شکست: {setup['entry_drift_pct']:+.2f}%\n"
                 f"⏱️ سن کندل شکست: {setup['minutes_since_breakout_candle']} دقیقه قبل\n"
                 f"🛑 حد ضرر: {setup['stop']:.10g} | ریسک قیمت: {setup['risk_pct']:.2f}%\n"
-                f"🎯 هدف ۱ (1.5R): {setup['tp1']:.10g}\n"
-                f"🎯 هدف ۲ (2.5R): {setup['tp2']:.10g}\n"
-                f"📊 گردش معاملات ۱دقیقه: {setup['turnover_ratio_1m']:.2f}x میانگین ۲۰ کندل\n"
-                f"💧 گردش معاملات ۵دقیقه: {setup['turnover_ratio_5m']:.2f}x خط پایه (فیلتر زمینه‌ای: 0.80x)\n"
+                f"🎯 هدف ۱ (2R): {setup['tp1']:.10g}\n"
+                f"🎯 هدف ۲ (3R): {setup['tp2']:.10g}\n"
+                f"📊 تأیید حجم ۱دقیقه: {setup['turnover_ratio_1m']:.2f}x میانگین ۲۰ کندل\n"
+                f"💧 حجم کندل شکست ۵دقیقه: {setup['turnover_ratio_5m']:.2f}x خط پایه (حداقل: 1.20x)\n"
                 f"📦 فشردگی ۵دقیقه: {setup['compression_pct']:.2f}%\n"
                 f"🚧 سطح شکست: {setup['breakout_level']:.10g}\n"
                 f"💰 گردش معاملات ۲۴ساعته: {turnover:,.0f} USDT\n"
