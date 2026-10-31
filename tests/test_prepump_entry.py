@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import Bot
 
@@ -189,6 +190,19 @@ class PrePumpEntryTests(unittest.TestCase):
         weak["price_change_3m_pct"] = 0.2
         weak["close_position"] = 0.52
         self.assertFalse(Bot.is_high_quality_liquidity_candidate(weak))
+
+
+    def test_radar_only_candidate_never_sends_telegram_message(self):
+        candles = [candle(i, 100.0, 100.2, 99.8, 100.05, 100) for i in range(31)]
+        radar = {
+            "candle_time": "123456", "score": 5, "turnover_1m_ratio": 2.1,
+            "turnover_5m_ratio": 1.4, "compression_pct": 1.0,
+            "price_change_3m_pct": 0.2, "close_position": 0.8,
+        }
+        tickers = [{"contract": "AIN_USDT", "volume_24h_quote": "1000000"}]
+        with patch.object(Bot, "is_crypto_contract", return_value=True), patch.object(Bot, "closed_candles", return_value=candles), patch.object(Bot, "detect_liquidity_buildup", return_value=radar), patch.object(Bot, "is_high_quality_liquidity_candidate", return_value=True), patch.object(Bot, "detect_recent_prepump_entry", return_value=None), patch.object(Bot, "send_message") as send_message:
+            Bot.scan_prepump_entries(tickers, {}, confirmed_entries=True, max_symbols=60)
+        send_message.assert_not_called()
 
 
 if __name__ == "__main__":
