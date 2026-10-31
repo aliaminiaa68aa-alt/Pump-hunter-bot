@@ -2220,6 +2220,142 @@ def scan_gateio_spot_liquidity(state, max_symbols=60):
 
     print(f"Gate.io spot liquidity scan: candidates={len(candidates)}, checked={checked}, alerts={sent}")
 
+
+def detect_prepump_entry(candles_1m, candles_5m):
+    """
+    Return a risk-defined long entry only when 5m price compression/turnover
+    expansion is followed by a CLOSED 1m breakout with abnormal turnover.
+    This is a rule-based setup, not proof of manipulation or guaranteed profit.
+    """
+    if len(candles_1m) < 22 or len(candles_5m) < 19:
+        return None
+    try:
+        current = candles_1m[-1]
+        prior_1m = candles_1m[-6:-1]
+        baseline_1m = candles_1m[-21:-1]
+        context_5m = candles_5m[-7:-1]
+        baseline_5m = candles_5m[-19:-7]
+        op, close = float(current["o"]), float(current["c"])
+        high, low = float(current["h"]), float(current["l"])
+        if op <= 0 or close <= 0 or high <= low:
+            return None
+
+        prior_high = max(float(c["h"]) for c in prior_1m)
+        swing_low = min(float(c["l"]) for c in prior_1m)
+        avg_1m_turnover = sum(float(c.get("sum", 0) or 0) for c in baseline_1m) / len(baseline_1m)
+        current_turnover = float(current.get("sum", 0) or 0)
+        recent_5m_turnover = sum(float(c.get("sum", 0) or 0) for c in context_5m) / len(context_5m)
+        baseline_5m_turnover = sum(float(c.get("sum", 0) or 0) for c in baseline_5m) / len(baseline_5m)
+        if min(avg_1m_turnover, baseline_5m_turnover, current_turnover) <= 0:
+            return None
+
+        turnover_ratio_1m = current_turnover / avg_1m_turnover
+        turnover_ratio_5m = recent_5m_turnover / baseline_5m_turnover
+        compression_low = min(float(c["l"]) for c in context_5m)
+        compression_high = max(float(c["h"]) for c in context_5m)
+        if compression_low <= 0:
+            return None
+        compression_pct = (compression_high / compression_low - 1) * 100
+        candle_change_pct = (close / op - 1) * 100
+        close_position = (close - low) / (high - low)
+
+        # Breakout must occur now, after a relatively tight range and increasing
+        # 5m turnover. Reject entries after an already-extended 1m candle.
+        if compression_pct > 3.5 or turnover_ratio_5m < 1.15:
+            return None
+        if not (close > prior_high and close > op and 0.10 <= candle_change_pct <= 2.0):
+            return None
+        if turnover_ratio_1m < 1.5 or close_position < 0.65:
+            return None
+
+        entry = close
+        stop = min(swing_low, prior_high) - entry * 0.001
+        risk_pct = (entry - stop) / entry * 100
+        if not (0.20 <= risk_pct <= 1.50):
+            return None
+        risk = entry - stop
+        return {
+            "candle_time": str(current.get("t", "")),
+            "entry": entry,
+            "stop": stop,
+            "tp1": entry + 1.5 * risk,
+            "tp2": entry + 2.5 * risk,
+            "risk_pct": risk_pct,
+            "turnover_ratio_1m": turnover_ratio_1m,
+            "turnover_ratio_5m": turnover_ratio_5m,
+            "compression_pct": compression_pct,
+            "breakout_level": prior_high,
+            "price_change_pct": candle_change_pct,
+        }
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return None
+
+
+def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60):
+    """Independently scan liquid contracts for risk-defined 1m breakout entries."""
+    if not confirmed_entries:
+        print("PRE-PUMP entry scan paused by BTC risk filter; no final-entry messages sent")
+        return
+    ranked = []
+    for ticker in tickers:
+        contract = ticker.get("contract", "")
+        if not is_crypto_contract(contract):
+            continue
+        try:
+            turnover = float(ticker.get("volume_24h_quote") or ticker.get("volume_24h_usd") or 0)
+        except (TypeError, ValueError):
+            continue
+        if turnover >= 500_000:
+            ranked.append((turnover, contract))
+    ranked.sort(reverse=True)
+    ranked = ranked[:max_symbols]
+    sent_state = state.setdefault("prepump_entry_alerts", {})
+    now = int(time.time())
+    checked = signals = 0
+
+    for turnover, contract in ranked:
+        try:
+            candles_1m = closed_candles(contract, "1m", 25)
+            candles_5m = closed_candles(contract, "5m", 25)
+            checked += 1
+            setup = detect_prepump_entry(candles_1m, candles_5m)
+            if not setup:
+                continue
+            previous = sent_state.get(contract, {})
+            if isinstance(previous, str):
+                previous = {"candle_time": previous, "sent_at": 0}
+            if (str(previous.get("candle_time", "")) == setup["candle_time"]
+                    or now - int(previous.get("sent_at", 0) or 0) < 1800):
+                continue
+
+            message = (
+                "🎯 PRE-PUMP | سیگنال ورود تأییدشده\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                f"🪙 ارز: {contract.replace('_', '/')} | ورود بر اساس کندل بسته‌شده ۱ دقیقه\n"
+                f"🟢 نقطه ورود: {setup['entry']:.10g}\n"
+                f"🛑 حد ضرر: {setup['stop']:.10g} | ریسک قیمت: {setup['risk_pct']:.2f}%\n"
+                f"🎯 هدف ۱ (1.5R): {setup['tp1']:.10g}\n"
+                f"🎯 هدف ۲ (2.5R): {setup['tp2']:.10g}\n"
+                f"📊 گردش معاملات ۱دقیقه: {setup['turnover_ratio_1m']:.2f}x میانگین ۲۰ کندل\n"
+                f"💧 گردش معاملات ۵دقیقه: {setup['turnover_ratio_5m']:.2f}x خط پایه\n"
+                f"📦 فشردگی ۵دقیقه: {setup['compression_pct']:.2f}%\n"
+                f"🚧 سطح شکست: {setup['breakout_level']:.10g}\n"
+                f"💰 گردش معاملات ۲۴ساعته: {turnover:,.0f} USDT\n"
+                "⚠️ سیگنال الگوریتمی است، تضمین سود نیست؛ قبل از معامله اسپرد و لغزش قیمت را بررسی کن و ریسک هر معامله را محدود نگه دار."
+            )
+            send_message(message)
+            sent_state[contract] = {"candle_time": setup["candle_time"], "sent_at": now}
+            signals += 1
+            print(
+                f"PRE-PUMP entry sent: {contract}; entry={setup['entry']:.10g}; "
+                f"risk={setup['risk_pct']:.2f}%; relvol1m={setup['turnover_ratio_1m']:.2f}x"
+            )
+            time.sleep(0.15)
+        except Exception as error:
+            print(f"PRE-PUMP {contract} scan failed: {type(error).__name__}: {error}")
+    print(f"PRE-PUMP entry scan: candidates={len(ranked)}, checked={checked}, final_signals={signals}")
+
+
 def scan():
     tickers = get_json("/futures/usdt/tickers")
     check_derivatives_data(tickers)
@@ -2256,6 +2392,9 @@ def scan():
     scan_gateio_spot_liquidity(state)
 
     btc_ok, btc_change = btc_market_filter()
+
+    # Independent early-breakout strategy: sends entry/SL/TP, not preliminary warnings.
+    scan_prepump_entries(tickers, state, confirmed_entries=btc_ok)
 
     # Both strategies scan independently even when BTC pauses confirmed entries.
     # LEG SPIKE scans the full Gate.io USDT perpetual universe; HYPE/BOS stays top-100 liquid only.
