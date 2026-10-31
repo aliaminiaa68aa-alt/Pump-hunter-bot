@@ -2292,6 +2292,28 @@ def detect_liquidity_buildup(candles_1m, candles_5m):
         return None
 
 
+
+def is_high_quality_liquidity_candidate(radar):
+    """
+    Strict alert gate for the early radar.
+    Broad detector output is only an internal candidate; alert only when
+    turnover expansion, tight range, price location and non-chased price align.
+    """
+    if not isinstance(radar, dict):
+        return False
+    try:
+        return (
+            int(radar.get("score", 0)) == 5
+            and float(radar.get("turnover_1m_ratio", 0)) >= 2.0
+            and float(radar.get("turnover_5m_ratio", 0)) >= 1.35
+            and float(radar.get("compression_pct", 99)) <= 3.5
+            and -0.10 <= float(radar.get("price_change_3m_pct", -99)) <= 1.0
+            and float(radar.get("close_position", 0)) >= 0.65
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
     """
     Return a risk-defined long entry only when 5m price compression/turnover
@@ -2472,7 +2494,7 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
             previous_radar = radar_state.get(contract, {})
             if isinstance(previous_radar, str):
                 previous_radar = {"candle_time": previous_radar, "sent_at": 0}
-            if radar:
+            if radar and is_high_quality_liquidity_candidate(radar):
                 radar_age = now - int(previous_radar.get("sent_at", 0) or 0)
                 same_radar_candle = str(previous_radar.get("candle_time", "")) == radar["candle_time"]
                 if not same_radar_candle and radar_age >= 2700:
@@ -2539,8 +2561,12 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
             time.sleep(0.15)
         except Exception as error:
             print(f"PRE-PUMP {contract} scan failed: {type(error).__name__}: {error}")
-    # Batch early-watch candidates into one Telegram message per scan to avoid spam.
-    if radar_alerts_to_send:
+    # A global digest cooldown prevents a fresh Telegram message every five-minute scan.
+    radar_digest_state = state.setdefault("liquidity_radar_digest", {})
+    last_digest_sent = int(radar_digest_state.get("sent_at", 0) or 0)
+    digest_cooldown_seconds = 600
+    # Batch only strict, high-quality candidates; keep collecting during cooldown.
+    if radar_alerts_to_send and now - last_digest_sent >= digest_cooldown_seconds:
         radar_alerts_to_send.sort(
             key=lambda item: (
                 item[1]["score"],
@@ -2549,8 +2575,8 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
             ),
             reverse=True,
         )
-        # Telegram messages have a length limit; send at most 8 best candidates.
-        batch = radar_alerts_to_send[:8]
+        # Telegram messages have a length limit; send at most 5 best candidates.
+        batch = radar_alerts_to_send[:5]
         lines = [
             "💧 رادار نقدینگی | فهرست نامزدهای احتمالی حرکت",
             "━━━━━━━━━━━━━━━━━━",
@@ -2568,9 +2594,16 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
         send_message("\n".join(lines))
         for contract, radar in batch:
             radar_state[contract] = {"candle_time": radar["candle_time"], "sent_at": now}
+        radar_digest_state["sent_at"] = now
         print(
-            f"LIQUIDITY RADAR batch sent: included={len(batch)}, "
-            f"candidates={len(radar_alerts_to_send)}"
+            f"LIQUIDITY RADAR high-quality digest sent: included={len(batch)}, "
+            f"qualified_candidates={len(radar_alerts_to_send)}, cooldown={digest_cooldown_seconds}s"
+        )
+    elif radar_alerts_to_send:
+        print(
+            f"LIQUIDITY RADAR digest held by global cooldown: "
+            f"qualified_candidates={len(radar_alerts_to_send)}, "
+            f"seconds_remaining={max(0, digest_cooldown_seconds - (now - last_digest_sent))}"
         )
 
     reasons = ", ".join(f"{key}={value}" for key, value in sorted(rejection_counts.items()))

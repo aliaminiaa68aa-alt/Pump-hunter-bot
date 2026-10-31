@@ -151,5 +151,45 @@ class PrePumpEntryTests(unittest.TestCase):
         self.assertEqual(result["minutes_since_breakout_candle"], 4)
 
 
+    def test_high_quality_radar_accepts_only_converging_signals(self):
+        strong = {
+            "score": 5,
+            "turnover_1m_ratio": 2.4,
+            "turnover_5m_ratio": 1.8,
+            "compression_pct": 1.2,
+            "price_change_3m_pct": 0.15,
+            "close_position": 0.82,
+        }
+        self.assertTrue(Bot.is_high_quality_liquidity_candidate(strong))
+
+    def test_high_quality_radar_rejects_four_of_five_and_weak_turnover(self):
+        weak = {
+            "score": 4,
+            "turnover_1m_ratio": 2.5,
+            "turnover_5m_ratio": 3.4,
+            "compression_pct": 0.5,
+            "price_change_3m_pct": -0.05,
+            "close_position": 0.80,
+        }
+        self.assertFalse(Bot.is_high_quality_liquidity_candidate(weak))
+        weak["score"] = 5
+        weak["turnover_5m_ratio"] = 1.05
+        self.assertFalse(Bot.is_high_quality_liquidity_candidate(weak))
+
+    def test_high_quality_radar_rejects_chased_or_weak_close(self):
+        weak = {
+            "score": 5,
+            "turnover_1m_ratio": 2.5,
+            "turnover_5m_ratio": 1.8,
+            "compression_pct": 1.0,
+            "price_change_3m_pct": 1.2,
+            "close_position": 0.80,
+        }
+        self.assertFalse(Bot.is_high_quality_liquidity_candidate(weak))
+        weak["price_change_3m_pct"] = 0.2
+        weak["close_position"] = 0.52
+        self.assertFalse(Bot.is_high_quality_liquidity_candidate(weak))
+
+
 if __name__ == "__main__":
     unittest.main()
