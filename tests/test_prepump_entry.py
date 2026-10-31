@@ -24,10 +24,10 @@ class PrePumpEntryTests(unittest.TestCase):
         one_minute.append(candle(25, 100.10, 100.48, 100.08, 100.40, 220))
 
         five_minute = []
-        for i in range(12):
+        for i in range(13):
             five_minute.append(candle(100 + i, 100.0, 100.25, 99.85, 100.05, 100))
         for i in range(6):
-            five_minute.append(candle(112 + i, 100.02, 100.35, 99.90, 100.20, 130))
+            five_minute.append(candle(113 + i, 100.02, 100.35, 99.90, 100.20, 130))
         return one_minute, five_minute
 
     def test_returns_entry_stop_and_targets_for_valid_breakout(self):
