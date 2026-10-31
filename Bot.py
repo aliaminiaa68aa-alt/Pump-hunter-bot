@@ -2304,6 +2304,29 @@ def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
         return reject("malformed_candle")
 
 
+
+def detect_recent_prepump_entry(candles_1m, candles_5m, lookback=5, diagnostics=None):
+    """Check several recent CLOSED 1m candles so a 5m scheduler doesn't miss a brief breakout."""
+    if lookback < 1:
+        return None
+    # Try newest first. Older setups are considered only if the latest closed candles
+    # did not themselves qualify. Caller should keep lookback short to limit stale entries.
+    max_offset = min(lookback - 1, max(0, len(candles_1m) - 22))
+    for offset in range(max_offset + 1):
+        window = candles_1m if offset == 0 else candles_1m[:-offset]
+        local_diagnostics = {}
+        setup = detect_prepump_entry(window, candles_5m, local_diagnostics)
+        if setup:
+            setup["minutes_since_breakout_candle"] = offset
+            if diagnostics is not None:
+                diagnostics["setup_found"] = diagnostics.get("setup_found", 0) + 1
+                diagnostics[f"setup_age_{offset}m"] = diagnostics.get(f"setup_age_{offset}m", 0) + 1
+            return setup
+        if diagnostics is not None:
+            for reason, count in local_diagnostics.items():
+                diagnostics[reason] = diagnostics.get(reason, 0) + count
+    return None
+
 def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40):
     """Independently scan liquid contracts for risk-defined 1m breakout entries."""
     if not confirmed_entries:
@@ -2329,10 +2352,10 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40)
 
     for turnover, contract in ranked:
         try:
-            candles_1m = closed_candles(contract, "1m", 25)
+            candles_1m = closed_candles(contract, "1m", 31)
             candles_5m = closed_candles(contract, "5m", 25)
             checked += 1
-            setup = detect_prepump_entry(candles_1m, candles_5m, rejection_counts)
+            setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=5, diagnostics=rejection_counts)
             if not setup:
                 continue
             previous = sent_state.get(contract, {})

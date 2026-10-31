@@ -54,6 +54,19 @@ class PrePumpEntryTests(unittest.TestCase):
         one_minute[-1]["sum"] = "1000"
         self.assertIsNone(Bot.detect_prepump_entry(one_minute, five_minute))
 
+    def test_finds_breakout_in_recent_closed_candles(self):
+        one_minute, five_minute = self.make_valid_setup()
+        # The breakout occurred four candles ago; newer candles no longer break out.
+        for i in range(4):
+            base = 100.12 + i * 0.005
+            one_minute.append(candle(26 + i, base, base + 0.04, base - 0.05, base + 0.01, 100))
+        current_only = Bot.detect_prepump_entry(one_minute, five_minute)
+        self.assertIsNone(current_only)
+        diagnostics = {}
+        result = Bot.detect_recent_prepump_entry(one_minute, five_minute, lookback=5, diagnostics=diagnostics)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["minutes_since_breakout_candle"], 4)
+
 
 if __name__ == "__main__":
     unittest.main()
