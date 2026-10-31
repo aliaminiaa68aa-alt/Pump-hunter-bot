@@ -54,6 +54,16 @@ class PrePumpEntryTests(unittest.TestCase):
         one_minute[-1]["sum"] = "1000"
         self.assertIsNone(Bot.detect_prepump_entry(one_minute, five_minute))
 
+    def test_allows_normal_5m_turnover_when_1m_breakout_is_strong(self):
+        one_minute, five_minute = self.make_valid_setup()
+        # Bring the six-candle 5m context to 0.85x baseline turnover.
+        for candle_row in five_minute[-6:]:
+            candle_row["sum"] = "85"
+        result = Bot.detect_prepump_entry(one_minute, five_minute)
+        self.assertIsNotNone(result)
+        self.assertGreaterEqual(result["turnover_ratio_1m"], 1.5)
+        self.assertGreaterEqual(result["turnover_ratio_5m"], 0.80)
+
     def test_rejects_setup_without_minimum_5m_turnover_expansion(self):
         one_minute, five_minute = self.make_valid_setup()
         for candle_5m in five_minute[-6:]:
