@@ -1379,13 +1379,13 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         "👀 حجم غیرعادی در کنار قیمت فشرده دیده شده؛ این فقط رصد قبل از حرکت احتمالی است، نه اثبات پامپ و نه سیگنال ورود. منتظر شکست معتبر سقف و تأیید ساختار بمان.\n"
                         "🟡━━━━━━━━━━━━━━━━━━🟡"
                     )
-                    send_message(liquidity_message)
+                    # Keep the pre-pump observation internal; Telegram is reserved for entry/SL/TP signals.
                     liquidity_state[contract] = {"candle_time": candle_key, "sent_at": int(time.time())}
                     print(
-                        f"{contract}: pre-pump liquidity watch sent; "
+                        f"{contract}: pre-pump liquidity condition tracked internally; "
                         f"turnover={liquidity_signal['volume_ratio']:.2f}x, "
                         f"compression={liquidity_signal['compression_pct']:.2f}%, "
-                        f"price={liquidity_signal['price_change_pct']:+.2f}%"
+                        f"price={liquidity_signal['price_change_pct']:+.2f}%; waiting for entry confirmation"
                     )
                 elif ticker_turnover < 500000:
                     print(f"{contract}: liquidity burst ignored; 24h turnover below 500k USDT")
@@ -2388,8 +2388,8 @@ def scan():
     candidates = state["candidates"]
     early_alerts_state = state["early_alerts"]
 
-    # Spot liquidity alerts are independent from the Gate.io futures strategies.
-    scan_gateio_spot_liquidity(state)
+    # Do not send standalone spot-liquidity warnings; Telegram is reserved for risk-defined entries.
+    print("Spot-only preliminary liquidity warnings disabled; PRE-PUMP strategy sends entry/SL/TP signals.")
 
     btc_ok, btc_change = btc_market_filter()
 
