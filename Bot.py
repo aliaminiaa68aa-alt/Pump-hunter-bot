@@ -2773,13 +2773,18 @@ def pre_pump_oi_gate(derivatives, min_oi_change=0.30, max_funding=0.0005):
         return False
 
 
-def detect_oi_prepump_watch(candles_1m, candles_5m):
+def detect_oi_prepump_watch(candles_1m, candles_5m, diagnostics=None):
     """
     Find a quiet, high-turnover compression close to resistance BEFORE breakout.
     This is an internal watch state only, never an entry signal.
     """
-    if len(candles_1m) < 22 or len(candles_5m) < 19:
+    def reject(reason):
+        if diagnostics is not None:
+            diagnostics[reason] = diagnostics.get(reason, 0) + 1
         return None
+
+    if len(candles_1m) < 22 or len(candles_5m) < 19:
+        return reject("insufficient_candles")
     try:
         current = candles_5m[-1]
         prior = candles_5m[-6:-1]
@@ -2789,12 +2794,12 @@ def detect_oi_prepump_watch(candles_1m, candles_5m):
         op, close = float(current["o"]), float(current["c"])
         high, low = float(current["h"]), float(current["l"])
         if min(op, close, low) <= 0 or high <= low:
-            return None
+            return reject("invalid_ohlc")
         prior_high = max(float(row["h"]) for row in prior)
         compression_low = min(float(row["l"]) for row in context)
         compression_high = max(float(row["h"]) for row in context)
         if compression_low <= 0 or prior_high <= 0:
-            return None
+            return reject("invalid_structure")
         compression_pct = (compression_high / compression_low - 1) * 100
         distance_to_breakout_pct = (prior_high / close - 1) * 100
         change_pct = (close / op - 1) * 100
@@ -2804,18 +2809,22 @@ def detect_oi_prepump_watch(candles_1m, candles_5m):
         current_1m_turnover = float(current_1m.get("sum", 0) or 0)
         current_5m_turnover = float(current.get("sum", 0) or 0)
         if min(avg_1m, avg_5m, current_1m_turnover, current_5m_turnover) <= 0:
-            return None
+            return reject("missing_turnover")
         ratio_1m = current_1m_turnover / avg_1m
         ratio_5m = current_5m_turnover / avg_5m
 
         # The watch must be genuinely pre-breakout, quiet in price, compressed,
         # and supported by abnormal turnover. It cannot emit an entry by itself.
         if not (0.0 <= distance_to_breakout_pct <= 0.75):
-            return None
+            return reject("not_near_resistance")
         if not (0.0 <= change_pct <= 0.80):
-            return None
-        if compression_pct > 3.0 or ratio_1m < 1.50 or ratio_5m < 1.50:
-            return None
+            return reject("price_change_out_of_range")
+        if compression_pct > 3.0:
+            return reject("compression_too_wide")
+        if ratio_1m < 1.50:
+            return reject("low_1m_watch_turnover")
+        if ratio_5m < 1.50:
+            return reject("low_5m_watch_turnover")
         return {
             "candle_time": str(current.get("t", "")),
             "breakout_level": prior_high,
@@ -2826,8 +2835,7 @@ def detect_oi_prepump_watch(candles_1m, candles_5m):
             "turnover_ratio_5m": ratio_5m,
         }
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
-        return None
-
+        return reject("malformed_candle_data")
 
 def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=30):
     """
@@ -2854,8 +2862,9 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
 
     sent_state = state.setdefault("oi_prepump_entry_alerts", {})
     now = int(time.time())
-    checked = candidates = signals = 0
+    checked = candidates = signals = watch_candidates = 0
     rejects = {}
+    watch_rejects = {}
     for turnover, contract in ranked:
         try:
             candles_1m = closed_candles(contract, "1m", 31)
@@ -2865,8 +2874,9 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
             if not setup:
                 # Observe potential setups before a breakout. This stage is diagnostic/
                 # stateful only; it never sends a Telegram entry alert.
-                watch = detect_oi_prepump_watch(candles_1m, candles_5m)
+                watch = detect_oi_prepump_watch(candles_1m, candles_5m, diagnostics=watch_rejects)
                 if watch:
+                    watch_candidates += 1
                     # Check derivatives before the price breakout so the scanner can
                     # identify genuine OI-led watch candidates early. This remains
                     # internal monitoring only; final entry still needs a closed 5m
@@ -2975,7 +2985,8 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
             print(f"OI PRE-PUMP {contract} failed: {type(error).__name__}: {error}")
     print(
         f"OI PRE-PUMP diagnostics: checked={checked}, structural_candidates={candidates}, "
-        f"signals={signals}, rejections={rejects}"
+        f"signals={signals}, rejections={rejects}, "
+        f"prebreakout_watch_candidates={watch_candidates}, watch_rejections={watch_rejects}"
     )
 
 
