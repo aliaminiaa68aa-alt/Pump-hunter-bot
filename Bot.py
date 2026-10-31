@@ -2268,20 +2268,20 @@ def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
         # 5m turnover. Reject entries after an already-extended 1m candle.
         if compression_pct > 4.0:
             return reject("compression_too_wide")
-        # 5m turnover is contextual, not the primary trigger; the breakout candle
-        # must still show >=1.5x 1m turnover and a strong close above the local high.
-        if turnover_ratio_5m < 0.80:
-            return reject("low_5m_turnover_below_0.80x")
+        # Check price structure first so logs distinguish missing breakouts from low volume.
         if close <= prior_high:
             return reject("no_1m_breakout")
         if close <= op:
             return reject("not_bullish")
         if not (0.10 <= candle_change_pct <= 2.0):
             return reject("1m_move_out_of_range")
-        if turnover_ratio_1m < 1.5:
-            return reject("low_1m_turnover")
         if close_position < 0.65:
             return reject("weak_close_position")
+        # Volume confirms a structurally valid breakout; it does not replace one.
+        if turnover_ratio_5m < 0.80:
+            return reject("low_5m_turnover_below_0.80x")
+        if turnover_ratio_1m < 1.5:
+            return reject("low_1m_turnover")
 
         entry = close
         stop = min(swing_low, prior_high) - entry * 0.001
