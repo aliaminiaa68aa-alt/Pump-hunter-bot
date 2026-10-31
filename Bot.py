@@ -2393,7 +2393,7 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40)
             candles_1m = closed_candles(contract, "1m", 31)
             candles_5m = closed_candles(contract, "5m", 25)
             checked += 1
-            setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=3, diagnostics=rejection_counts)
+            setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=5, diagnostics=rejection_counts)
             if not setup:
                 continue
             try:
@@ -2417,11 +2417,12 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40)
                 f"🪙 ارز: {contract.replace('_', '/')} | سیگنال بر پایه شکست اخیر ۱ دقیقه\n"
                 f"🟢 نقطه ورود به‌روز: {setup['entry']:.10g}\n"
                 f"📍 تغییر از ورود شکست: {setup['entry_drift_pct']:+.2f}%\n"
+                f"⏱️ سن کندل شکست: {setup['minutes_since_breakout_candle']} دقیقه قبل\n"
                 f"🛑 حد ضرر: {setup['stop']:.10g} | ریسک قیمت: {setup['risk_pct']:.2f}%\n"
                 f"🎯 هدف ۱ (1.5R): {setup['tp1']:.10g}\n"
                 f"🎯 هدف ۲ (2.5R): {setup['tp2']:.10g}\n"
                 f"📊 گردش معاملات ۱دقیقه: {setup['turnover_ratio_1m']:.2f}x میانگین ۲۰ کندل\n"
-                f"💧 گردش معاملات ۵دقیقه: {setup['turnover_ratio_5m']:.2f}x خط پایه (حداقل 1.05x)\n"
+                f"💧 گردش معاملات ۵دقیقه: {setup['turnover_ratio_5m']:.2f}x خط پایه (فیلتر زمینه‌ای: 0.80x)\n"
                 f"📦 فشردگی ۵دقیقه: {setup['compression_pct']:.2f}%\n"
                 f"🚧 سطح شکست: {setup['breakout_level']:.10g}\n"
                 f"💰 گردش معاملات ۲۴ساعته: {turnover:,.0f} USDT\n"
