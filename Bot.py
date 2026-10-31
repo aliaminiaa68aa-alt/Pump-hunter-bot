@@ -2248,6 +2248,169 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     print(f"LEG SPIKE highest volume/market-cap candidates: {top_volume}")
 
 
+def detect_spot_pump_entry(candles_5m, candles_15m):
+    """Return a risk-defined spot breakout only after closed-candle price/turnover confirmation."""
+    if len(candles_5m) < 22 or len(candles_15m) < 20:
+        return None
+    try:
+        current = candles_5m[-1]
+        prior = candles_5m[-13:-1]
+        baseline = candles_5m[-21:-1]
+        op, close = float(current["o"]), float(current["c"])
+        high, low = float(current["h"]), float(current["l"])
+        prior_high = max(float(row["h"]) for row in prior)
+        turnovers = [float(row.get("sum", 0) or 0) for row in baseline]
+        avg_turnover = sum(turnovers) / len(turnovers)
+        current_turnover = float(current.get("sum", 0) or 0)
+        if min(op, close, low, prior_high, avg_turnover, current_turnover) <= 0 or high <= low:
+            return None
+
+        change_pct = (close / op - 1) * 100
+        volume_ratio = current_turnover / avg_turnover
+        close_position = (close - low) / (high - low)
+        breakout_distance_pct = (close / prior_high - 1) * 100
+        if not (close > op and close > prior_high):
+            return None
+        if not (0.5 <= change_pct <= 4.5 and volume_ratio >= 2.2):
+            return None
+        if close_position < 0.65 or not (0 <= breakout_distance_pct <= 2.5):
+            return None
+
+        closes_15m = [float(row["c"]) for row in candles_15m[-20:]]
+        last15 = candles_15m[-1]
+        previous15 = candles_15m[-2]
+        last15_close = closes_15m[-1]
+        last15_open = float(last15["o"])
+        previous15_close = float(previous15["c"])
+        ema = closes_15m[0]
+        alpha = 2 / (len(closes_15m) + 1)
+        for price in closes_15m[1:]:
+            ema = alpha * price + (1 - alpha) * ema
+        if last15_close <= ema or last15_close < previous15_close:
+            return None
+        if last15_open <= 0 or (last15_close / last15_open - 1) * 100 < -1.0:
+            return None
+
+        stop = min(low, prior_high * 0.997)
+        risk_pct = (close - stop) / close * 100
+        if not (0.4 <= risk_pct <= 3.0) or stop >= close:
+            return None
+        risk = close - stop
+        return {
+            "candle_time": str(current.get("t", "")),
+            "entry": close,
+            "stop": stop,
+            "risk_pct": risk_pct,
+            "tp2r": close + 2 * risk,
+            "tp3r": close + 3 * risk,
+            "stretch10": close * 1.10,
+            "stretch20": close * 1.20,
+            "volume_ratio": volume_ratio,
+            "change_pct": change_pct,
+            "breakout_level": prior_high,
+            "breakout_distance_pct": breakout_distance_pct,
+        }
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return None
+
+
+def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=40):
+    """Scan actual Gate.io spot USDT markets for confirmed, risk-defined pump entries."""
+    if not confirmed_entries:
+        print("SPOT PUMP entry scan paused by BTC risk filter")
+        return
+    try:
+        response = SESSION.get(BASE + "/spot/tickers", timeout=15)
+        response.raise_for_status()
+        tickers = response.json()
+        if not isinstance(tickers, list):
+            raise RuntimeError("Unexpected Gate.io spot ticker response")
+    except Exception as error:
+        print(f"Gate.io spot entry scan unavailable: {type(error).__name__}: {error}")
+        return
+
+    candidates = []
+    for ticker in tickers:
+        symbol = str(ticker.get("currency_pair", "")).upper()
+        if not symbol.endswith("_USDT") or not is_crypto_contract(symbol):
+            continue
+        try:
+            quote_volume = float(ticker.get("quote_volume", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if quote_volume >= 1_000_000:
+            candidates.append((symbol, quote_volume))
+    candidates.sort(key=lambda item: item[1], reverse=True)
+    candidates = candidates[:max_symbols]
+
+    sent_state = state.setdefault("spot_pump_entry_alerts", {})
+    now = int(time.time())
+    checked = signals = 0
+    rejections = {"no_confirmed_setup": 0, "api_or_candle_error": 0, "cooldown": 0}
+    for symbol, quote_volume in candidates:
+        try:
+            parsed = {}
+            for interval, limit in (("5m", 32), ("15m", 22)):
+                response = SESSION.get(
+                    BASE + "/spot/candlesticks",
+                    params={"currency_pair": symbol, "interval": interval, "limit": limit},
+                    timeout=8,
+                )
+                response.raise_for_status()
+                rows = response.json()
+                # Normalize API ordering explicitly; the newest/forming candle is discarded.
+                rows = sorted(rows, key=lambda row: int(row[0]))
+                rows = rows[:-1]
+                parsed[interval] = [{
+                    "t": str(row[0]), "sum": row[1], "c": row[2],
+                    "h": row[3], "l": row[4], "o": row[5],
+                } for row in rows]
+            checked += 1
+            setup = detect_spot_pump_entry(parsed["5m"], parsed["15m"])
+            if not setup:
+                rejections["no_confirmed_setup"] += 1
+                continue
+
+            previous = sent_state.get(symbol, {})
+            if not isinstance(previous, dict):
+                previous = {"candle_time": str(previous), "sent_at": 0}
+            if (str(previous.get("candle_time", "")) == setup["candle_time"]
+                    or now - int(previous.get("sent_at", 0) or 0) < 6 * 3600):
+                rejections["cooldown"] += 1
+                continue
+
+            message = (
+                "🎯 SPOT PUMP | ورود تأییدشده، بدون اهرم\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                f"🪙 ارز: {symbol.replace('_', '/')} | بازار اسپات Gate.io\n"
+                f"📊 حجم کندل بسته‌شده ۵دقیقه: {setup['volume_ratio']:.2f} برابر میانگین ۲۰ کندل\n"
+                f"📈 رشد کندل شکست: {setup['change_pct']:+.2f}% | فاصله از سطح شکست: {setup['breakout_distance_pct']:.2f}%\n"
+                f"💰 گردش ۲۴ساعته اسپات: {quote_volume:,.0f} USDT\n\n"
+                f"🟢 قیمت ورودِ بررسی‌شده: {setup['entry']:.10g}\n"
+                f"🛑 حد ضرر: {setup['stop']:.10g} | فاصله ریسک: {setup['risk_pct']:.2f}%\n"
+                f"🎯 هدف ۲R: {setup['tp2r']:.10g} | هدف ۳R: {setup['tp3r']:.10g}\n"
+                f"🚀 هدف امتدادی +۱۰٪: {setup['stretch10']:.10g} | +۲۰٪: {setup['stretch20']:.10g}\n\n"
+                "✅ تأیید بر اساس کندل بسته‌شده، شکست مقاومت، افزایش گردش معاملات و روند ۱۵دقیقه است.\n"
+                "⚠️ هدف‌های +۱۰٪ و +۲۰٪ تضمین نیستند؛ قبل از خرید، اسپرد و عمق سفارش‌ها را بررسی کن. اگر قیمت از ورود فاصله گرفت، تعقیبش نکن."
+            )
+            send_message(message)
+            sent_state[symbol] = {"candle_time": setup["candle_time"], "sent_at": now}
+            signals += 1
+            print(
+                f"SPOT PUMP final entry sent: {symbol}; volume={setup['volume_ratio']:.2f}x, "
+                f"risk={setup['risk_pct']:.2f}%, entry={setup['entry']:.10g}"
+            )
+            time.sleep(0.2)
+        except Exception as error:
+            rejections["api_or_candle_error"] += 1
+            print(f"Gate.io spot entry {symbol} failed: {type(error).__name__}: {error}")
+
+    print(
+        f"SPOT PUMP diagnostics: candidates={len(candidates)}, checked={checked}, "
+        f"signals={signals}, rejections={rejections}"
+    )
+
+
 def scan_gateio_spot_liquidity(state, max_symbols=60):
     """Independently scan liquid Gate.io spot USDT pairs for a closed 15m turnover burst."""
     try:
@@ -3220,6 +3383,9 @@ def scan():
     print("Spot-only preliminary liquidity warnings disabled; PRE-PUMP strategy sends entry/SL/TP signals.")
 
     btc_ok, btc_change = btc_market_filter()
+
+    # Dedicated spot-only pump entries: no leverage and no perpetual-contract price assumptions.
+    scan_gateio_spot_entries(state, confirmed_entries=btc_ok)
 
     # Independent early-breakout strategy: sends entry/SL/TP, not preliminary warnings.
     scan_prepump_entries(tickers, state, confirmed_entries=btc_ok)
