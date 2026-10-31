@@ -2331,6 +2331,42 @@ def detect_recent_prepump_entry(candles_1m, candles_5m, lookback=5, diagnostics=
                 diagnostics[reason] = diagnostics.get(reason, 0) + count
     return None
 
+
+def refresh_prepump_entry(setup, latest_close, diagnostics=None, max_chase_pct=0.50, max_pullback_pct=0.20):
+    """Refresh a recent breakout at the latest closed price; reject lost or chased setups."""
+    def reject(reason):
+        if diagnostics is not None:
+            diagnostics[reason] = diagnostics.get(reason, 0) + 1
+        return None
+
+    try:
+        entry = float(setup["entry"])
+        stop = float(setup["stop"])
+        breakout_level = float(setup["breakout_level"])
+        latest_close = float(latest_close)
+        if min(entry, stop, breakout_level, latest_close) <= 0:
+            return reject("invalid_refresh_price")
+        if latest_close <= breakout_level:
+            return reject("breakout_lost_before_alert")
+        drift_pct = (latest_close / entry - 1) * 100
+        if drift_pct < -max_pullback_pct:
+            return reject("price_pulled_back_before_alert")
+        if drift_pct > max_chase_pct:
+            return reject("price_chased_before_alert")
+        risk_pct = (latest_close - stop) / latest_close * 100
+        if latest_close <= stop or not (0.20 <= risk_pct <= 1.50):
+            return reject("refreshed_risk_out_of_range")
+        refreshed = dict(setup)
+        refreshed["entry"] = latest_close
+        refreshed["risk_pct"] = risk_pct
+        risk = latest_close - stop
+        refreshed["tp1"] = latest_close + 1.5 * risk
+        refreshed["tp2"] = latest_close + 2.5 * risk
+        refreshed["entry_drift_pct"] = drift_pct
+        return refreshed
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return reject("invalid_refresh_data")
+
 def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40):
     """Independently scan liquid contracts for risk-defined 1m breakout entries."""
     if not confirmed_entries:
@@ -2362,6 +2398,14 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40)
             setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=5, diagnostics=rejection_counts)
             if not setup:
                 continue
+            try:
+                latest_close = float(candles_1m[-1]["c"])
+            except (TypeError, ValueError, KeyError, IndexError):
+                rejection_counts["missing_latest_close"] = rejection_counts.get("missing_latest_close", 0) + 1
+                continue
+            setup = refresh_prepump_entry(setup, latest_close, rejection_counts)
+            if not setup:
+                continue
             previous = sent_state.get(contract, {})
             if isinstance(previous, str):
                 previous = {"candle_time": previous, "sent_at": 0}
@@ -2372,13 +2416,14 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40)
             message = (
                 "🎯 PRE-PUMP | سیگنال ورود تأییدشده\n"
                 "━━━━━━━━━━━━━━━━━━\n"
-                f"🪙 ارز: {contract.replace('_', '/')} | ورود بر اساس کندل بسته‌شده ۱ دقیقه\n"
-                f"🟢 نقطه ورود: {setup['entry']:.10g}\n"
+                f"🪙 ارز: {contract.replace('_', '/')} | سیگنال بر پایه شکست اخیر ۱ دقیقه\n"
+                f"🟢 نقطه ورود به‌روز: {setup['entry']:.10g}\n"
+                f"📍 تغییر از ورود شکست: {setup['entry_drift_pct']:+.2f}%\n"
                 f"🛑 حد ضرر: {setup['stop']:.10g} | ریسک قیمت: {setup['risk_pct']:.2f}%\n"
                 f"🎯 هدف ۱ (1.5R): {setup['tp1']:.10g}\n"
                 f"🎯 هدف ۲ (2.5R): {setup['tp2']:.10g}\n"
                 f"📊 گردش معاملات ۱دقیقه: {setup['turnover_ratio_1m']:.2f}x میانگین ۲۰ کندل\n"
-                f"💧 گردش معاملات ۵دقیقه: {setup['turnover_ratio_5m']:.2f}x خط پایه\n"
+                f"💧 گردش معاملات ۵دقیقه: {setup['turnover_ratio_5m']:.2f}x خط پایه (حداقل 1.05x)\n"
                 f"📦 فشردگی ۵دقیقه: {setup['compression_pct']:.2f}%\n"
                 f"🚧 سطح شکست: {setup['breakout_level']:.10g}\n"
                 f"💰 گردش معاملات ۲۴ساعته: {turnover:,.0f} USDT\n"

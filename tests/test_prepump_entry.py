@@ -54,6 +54,26 @@ class PrePumpEntryTests(unittest.TestCase):
         one_minute[-1]["sum"] = "1000"
         self.assertIsNone(Bot.detect_prepump_entry(one_minute, five_minute))
 
+    def test_refreshes_entry_and_targets_at_latest_close(self):
+        one_minute, five_minute = self.make_valid_setup()
+        setup = Bot.detect_prepump_entry(one_minute, five_minute)
+        latest_close = setup["entry"] * 1.002
+        refreshed = Bot.refresh_prepump_entry(setup, latest_close)
+        self.assertIsNotNone(refreshed)
+        self.assertAlmostEqual(refreshed["entry"], latest_close)
+        self.assertAlmostEqual(refreshed["tp1"], refreshed["entry"] + 1.5 * (refreshed["entry"] - refreshed["stop"]))
+        self.assertAlmostEqual(refreshed["tp2"], refreshed["entry"] + 2.5 * (refreshed["entry"] - refreshed["stop"]))
+
+    def test_rejects_stale_or_chased_breakout(self):
+        one_minute, five_minute = self.make_valid_setup()
+        setup = Bot.detect_prepump_entry(one_minute, five_minute)
+        diagnostics = {}
+        self.assertIsNone(Bot.refresh_prepump_entry(setup, setup["entry"] * 1.01, diagnostics))
+        self.assertEqual(diagnostics.get("price_chased_before_alert"), 1)
+        diagnostics = {}
+        self.assertIsNone(Bot.refresh_prepump_entry(setup, setup["breakout_level"] * 0.999, diagnostics))
+        self.assertEqual(diagnostics.get("breakout_lost_before_alert"), 1)
+
     def test_rejects_setup_without_minimum_5m_turnover_expansion(self):
         one_minute, five_minute = self.make_valid_setup()
         for candle_5m in five_minute[-6:]:
