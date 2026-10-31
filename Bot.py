@@ -2350,7 +2350,7 @@ def _fetch_spot_entry_setup(symbol):
     return setup, reason
 
 
-def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=40):
+def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=80):
     """Scan actual Gate.io spot USDT markets for confirmed, risk-defined pump entries."""
     if not confirmed_entries:
         print("SPOT PUMP entry scan paused by BTC risk filter")
