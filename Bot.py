@@ -2458,7 +2458,6 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
     now = int(time.time())
     checked = signals = 0
     rejection_counts = {}
-    radar_alerts_to_send = []
 
     for turnover, contract in ranked:
         try:
@@ -2476,23 +2475,13 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
                 radar_age = now - int(previous_radar.get("sent_at", 0) or 0)
                 same_radar_candle = str(previous_radar.get("candle_time", "")) == radar["candle_time"]
                 if not same_radar_candle and radar_age >= 2700:
-                    radar_message = (
-                        "💧 رادار نقدینگی | نامزد احتمالی حرکت\n"
-                        "━━━━━━━━━━━━━━━━━━\n"
-                        f"🪙 ارز: {contract.replace('_', '/')}\n"
-                        f"⭐ امتیاز نشانه‌ها: {radar['score']}/5\n"
-                        f"📊 گردش ۱دقیقه نسبت به خط پایه: {radar['turnover_1m_ratio']:.2f}x\n"
-                        f"💧 گردش ۵دقیقه نسبت به خط پایه: {radar['turnover_5m_ratio']:.2f}x\n"
-                        f"📦 دامنهٔ ۶ کندل ۵دقیقه: {radar['compression_pct']:.2f}%\n"
-                        f"📈 تغییر قیمت ۳دقیقه: {radar['price_change_3m_pct']:+.2f}%\n"
-                        "👀 فقط رصد اولیه است؛ ورود نیست و هنوز باید جهت جریان سفارش/OI و شکست قیمت تأیید شود."
-                    )
-                    radar_alerts_to_send.append((contract, radar))
+                    # Radar is internal-only: Telegram is reserved for confirmed entries with SL/TP.
                     print(
-                        f"LIQUIDITY RADAR candidate: {contract}; score={radar['score']}/5; "
+                        f"LIQUIDITY RADAR internal candidate: {contract}; score={radar['score']}/5; "
                         f"relvol1m={radar['turnover_1m_ratio']:.2f}x; "
                         f"relvol5m={radar['turnover_5m_ratio']:.2f}x"
                     )
+                    radar_state[contract] = {"candle_time": radar["candle_time"], "sent_at": now}
 
             setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=5, diagnostics=rejection_counts)
             if not setup:
@@ -2539,40 +2528,6 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
             time.sleep(0.15)
         except Exception as error:
             print(f"PRE-PUMP {contract} scan failed: {type(error).__name__}: {error}")
-    # Batch early-watch candidates into one Telegram message per scan to avoid spam.
-    if radar_alerts_to_send:
-        radar_alerts_to_send.sort(
-            key=lambda item: (
-                item[1]["score"],
-                item[1]["turnover_1m_ratio"],
-                item[1]["turnover_5m_ratio"],
-            ),
-            reverse=True,
-        )
-        # Telegram messages have a length limit; send at most 8 best candidates.
-        batch = radar_alerts_to_send[:8]
-        lines = [
-            "💧 رادار نقدینگی | فهرست نامزدهای احتمالی حرکت",
-            "━━━━━━━━━━━━━━━━━━",
-            f"🔎 تعداد نامزدهای تازه در این اسکن: {len(radar_alerts_to_send)}",
-            "",
-        ]
-        for contract, radar in batch:
-            lines.extend([
-                f"🪙 {contract.replace('_', '/')}",
-                f"⭐ نشانه‌ها: {radar['score']}/5 | گردش ۱دقیقه: {radar['turnover_1m_ratio']:.2f}x | گردش ۵دقیقه: {radar['turnover_5m_ratio']:.2f}x",
-                f"📦 دامنه: {radar['compression_pct']:.2f}% | تغییر قیمت ۳دقیقه: {radar['price_change_3m_pct']:+.2f}%",
-                "",
-            ])
-        lines.append("👀 رصد اولیه است، سیگنال ورود نیست؛ جهت جریان سفارش/OI و شکست قیمت باید تأیید شوند.")
-        send_message("\n".join(lines))
-        for contract, radar in batch:
-            radar_state[contract] = {"candle_time": radar["candle_time"], "sent_at": now}
-        print(
-            f"LIQUIDITY RADAR batch sent: included={len(batch)}, "
-            f"candidates={len(radar_alerts_to_send)}"
-        )
-
     reasons = ", ".join(f"{key}={value}" for key, value in sorted(rejection_counts.items()))
     print(f"PRE-PUMP entry scan: candidates={len(ranked)}, checked={checked}, final_signals={signals}; rejections: {reasons or 'none'}")
 
