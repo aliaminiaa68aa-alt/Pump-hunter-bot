@@ -40,6 +40,13 @@ class SpotPumpEntryTests(unittest.TestCase):
         five[-1]["sum"] = "110"
         self.assertIsNone(detect_spot_pump_entry(five, fifteen))
 
+    def test_reports_first_failed_gate_for_diagnostics(self):
+        five, fifteen = valid_setup()
+        five[-1]["sum"] = "110"
+        diagnostics = {}
+        self.assertIsNone(detect_spot_pump_entry(five, fifteen, diagnostics))
+        self.assertEqual(diagnostics, {"low_turnover_ratio": 1})
+
     def test_rejects_price_that_did_not_break_resistance(self):
         five, fifteen = valid_setup()
         five[-1]["c"] = "99.9"
