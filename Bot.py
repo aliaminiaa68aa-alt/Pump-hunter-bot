@@ -257,6 +257,52 @@ def bybit_get_json(path, params=None):
     return payload.get("result", {})
 
 
+def binance_public_derivatives_check(contract):
+    """Best-effort public Binance Futures OI/funding fallback when Bybit is unreachable."""
+    base_asset = contract[:-5] if contract.endswith("_USDT") else contract
+    symbol = base_asset.replace("_", "") + "USDT"
+    try:
+        oi_response = SESSION.get(
+            "https://fapi.binance.com/futures/data/openInterestHist",
+            params={"symbol": symbol, "period": "5m", "limit": 3},
+            timeout=12,
+        )
+        oi_response.raise_for_status()
+        oi_rows = oi_response.json()
+        if not isinstance(oi_rows, list):
+            return {"valid": False, "reason": "ساختار پاسخ OI عمومی Binance نامعتبر است"}
+        oi_rows = sorted(oi_rows, key=lambda row: int(row.get("timestamp", 0)))
+        oi_rows = [row for row in oi_rows if row.get("sumOpenInterest") not in (None, "")]
+        if len(oi_rows) < 2:
+            return {"valid": False, "reason": "تاریخچه OI پنج‌دقیقه‌ای Binance کافی نیست"}
+        old_oi = float(oi_rows[-2]["sumOpenInterest"])
+        new_oi = float(oi_rows[-1]["sumOpenInterest"])
+        if old_oi <= 0:
+            return {"valid": False, "reason": "مقدار OI عمومی Binance نامعتبر است"}
+        oi_change = (new_oi / old_oi - 1) * 100
+
+        funding_response = SESSION.get(
+            "https://fapi.binance.com/fapi/v1/premiumIndex",
+            params={"symbol": symbol},
+            timeout=12,
+        )
+        funding_response.raise_for_status()
+        funding_payload = funding_response.json()
+        funding_raw = funding_payload.get("lastFundingRate") if isinstance(funding_payload, dict) else None
+        if funding_raw in (None, ""):
+            return {"valid": False, "reason": "Funding فعلی عمومی Binance در دسترس نیست"}
+        return {
+            "valid": True,
+            "oi_change": oi_change,
+            "funding_rate": float(funding_raw),
+            "symbol": symbol,
+            "source": "Binance Futures public",
+        }
+    except Exception as error:
+        print(f"{contract}: public Binance derivatives check failed: {type(error).__name__}: {error}")
+        return {"valid": False, "reason": "داده عمومی OI/Funding از Binance دریافت نشد"}
+
+
 def public_derivatives_check(contract):
     """
     Validate the setup using Bybit's public linear-perpetual OI history and
@@ -300,7 +346,21 @@ def public_derivatives_check(contract):
         }
     except Exception as error:
         print(f"{contract}: public Bybit derivatives check failed: {type(error).__name__}: {error}")
-        return {"valid": False, "reason": "داده عمومی OI/Funding از Bybit دریافت نشد"}
+        # Public-source fallback: one provider's 403/region block should not
+        # disable OI-based screening if Binance Futures has the same contract.
+        fallback = binance_public_derivatives_check(contract)
+        if fallback.get("valid"):
+            print(
+                f"{contract}: using Binance Futures public fallback; "
+                f"OI5m={float(fallback['oi_change']):+.3f}%, "
+                f"funding={float(fallback['funding_rate'])*100:+.4f}%"
+            )
+            return fallback
+        return {
+            "valid": False,
+            "reason": "Bybit و Binance هر دو در دسترس نیستند "
+                      f"(Bybit: {type(error).__name__}; Binance: {fallback.get('reason', 'نامشخص')})",
+        }
 
 
 
