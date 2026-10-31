@@ -2807,20 +2807,46 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                 # stateful only; it never sends a Telegram entry alert.
                 watch = detect_oi_prepump_watch(candles_1m, candles_5m)
                 if watch:
-                    watch_state = state.setdefault("oi_prepump_watch", {})
-                    previous_watch = watch_state.get(contract, {})
-                    if not isinstance(previous_watch, dict) or previous_watch.get("candle_time") != watch["candle_time"]:
-                        watch_state[contract] = {
-                            **watch,
-                            "seen_at": now,
-                        }
+                    # Check derivatives before the price breakout so the scanner can
+                    # identify genuine OI-led watch candidates early. This remains
+                    # internal monitoring only; final entry still needs a closed 5m
+                    # breakout and a fresh derivatives check below.
+                    coinalyze_watch = coinalyze_derivatives_check(contract, state)
+                    if coinalyze_watch.get("configured"):
+                        watch_derivatives = coinalyze_watch
+                        watch_source = "Coinalyze aggregate"
+                    else:
+                        watch_derivatives = public_derivatives_check(contract)
+                        watch_source = "Bybit public 5m"
+                    if pre_pump_oi_gate(watch_derivatives):
+                        watch_state = state.setdefault("oi_prepump_watch", {})
+                        previous_watch = watch_state.get(contract, {})
+                        if not isinstance(previous_watch, dict) or previous_watch.get("candle_time") != watch["candle_time"]:
+                            watch_state[contract] = {
+                                **watch,
+                                "seen_at": now,
+                                "oi_change": float(watch_derivatives["oi_change"]),
+                                "funding_rate": float(watch_derivatives["funding_rate"]),
+                                "oi_change4h": watch_derivatives.get("oi_change4h"),
+                                "source": watch_source,
+                            }
+                            print(
+                                f"OI PRE-PUMP watch {contract}: OI-confirmed pre-breakout candidate; "
+                                f"source={watch_source}, OI5m={float(watch_derivatives['oi_change']):+.3f}%, "
+                                f"funding={float(watch_derivatives['funding_rate'])*100:+.4f}%, "
+                                f"turnover5m={watch['turnover_ratio_5m']:.2f}x, "
+                                f"turnover1m={watch['turnover_ratio_1m']:.2f}x, "
+                                f"compression={watch['compression_pct']:.2f}%, "
+                                f"distance_to_breakout={watch['distance_to_breakout_pct']:.2f}%, "
+                                f"price_change={watch['price_change_pct']:+.2f}%; no entry sent"
+                            )
+                    else:
                         print(
-                            f"OI PRE-PUMP watch {contract}: pre-breakout candidate; "
-                            f"turnover5m={watch['turnover_ratio_5m']:.2f}x, "
-                            f"turnover1m={watch['turnover_ratio_1m']:.2f}x, "
-                            f"compression={watch['compression_pct']:.2f}%, "
-                            f"distance_to_breakout={watch['distance_to_breakout_pct']:.2f}%, "
-                            f"price_change={watch['price_change_pct']:+.2f}%; no entry sent"
+                            f"OI PRE-PUMP watch {contract}: pre-breakout price/volume candidate "
+                            f"rejected by derivatives; source={'Coinalyze aggregate' if coinalyze_watch.get('configured') else 'Bybit public 5m'}, "
+                            f"OI5m={watch_derivatives.get('oi_change')}, "
+                            f"funding={watch_derivatives.get('funding_rate')}, "
+                            f"reason={watch_derivatives.get('reason', 'OI/funding thresholds not met')}"
                         )
                 continue
             latest_close = float(candles_5m[-1]["c"])
