@@ -2694,6 +2694,131 @@ def scan_high_potential_pumps(tickers, state, confirmed_entries=True, max_symbol
 
 
 
+
+def pre_pump_oi_gate(derivatives, min_oi_change=0.30, max_funding=0.0005):
+    """Strict OI inflow gate: fresh positive OI growth without crowded positive funding."""
+    if not isinstance(derivatives, dict) or not derivatives.get("valid"):
+        return False
+    try:
+        oi_change = float(derivatives["oi_change"])
+        funding = float(derivatives["funding_rate"])
+        oi4h = derivatives.get("oi_change4h")
+        if oi_change < min_oi_change or funding >= max_funding:
+            return False
+        # When the aggregate 4h trend exists, do not buy into a broader OI contraction.
+        if oi4h is not None and float(oi4h) < 0:
+            return False
+        return True
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=30):
+    """
+    Separate OI-led pre-pump entry engine.
+    Looks for 5m structure/turnover confirmation while the move is still small,
+    then requires rising 5m OI and non-crowded funding before sending entry/SL/TP.
+    """
+    if not confirmed_entries:
+        print("OI PRE-PUMP paused by BTC risk filter")
+        return
+    ranked = []
+    for ticker in tickers:
+        contract = ticker.get("contract", "")
+        if not is_crypto_contract(contract):
+            continue
+        try:
+            turnover = float(ticker.get("volume_24h_quote") or ticker.get("volume_24h_usd") or 0)
+        except (TypeError, ValueError):
+            continue
+        if turnover >= 1_000_000:
+            ranked.append((turnover, contract))
+    ranked.sort(reverse=True)
+    ranked = ranked[:max_symbols]
+
+    sent_state = state.setdefault("oi_prepump_entry_alerts", {})
+    now = int(time.time())
+    checked = candidates = signals = 0
+    rejects = {}
+    for turnover, contract in ranked:
+        try:
+            candles_1m = closed_candles(contract, "1m", 31)
+            candles_5m = closed_candles(contract, "5m", 25)
+            checked += 1
+            setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=3, diagnostics=rejects)
+            if not setup:
+                continue
+            latest_close = float(candles_5m[-1]["c"])
+            setup = refresh_prepump_entry(setup, latest_close, rejects)
+            if not setup:
+                continue
+            candidates += 1
+
+            # Prefer multi-exchange OI history if Coinalyze is configured; otherwise
+            # use Bybit's public 5m OI. Missing/invalid derivatives data never passes.
+            coinalyze = coinalyze_derivatives_check(contract, state)
+            if coinalyze.get("configured"):
+                derivatives = coinalyze
+                source = "Coinalyze aggregate"
+            else:
+                derivatives = public_derivatives_check(contract)
+                source = "Bybit public 5m"
+            if not pre_pump_oi_gate(derivatives):
+                oi = derivatives.get("oi_change")
+                funding = derivatives.get("funding_rate")
+                print(
+                    f"OI PRE-PUMP {contract}: rejected; source={source}; "
+                    f"valid={derivatives.get('valid')}; OI5m={oi}; funding={funding}; "
+                    f"reason={derivatives.get('reason', 'OI/funding thresholds not met')}"
+                )
+                continue
+
+            previous = sent_state.get(contract, {})
+            if not isinstance(previous, dict):
+                previous = {"candle_time": str(previous), "sent_at": 0}
+            if str(previous.get("candle_time", "")) == str(setup["candle_time"]):
+                continue
+            if now - int(previous.get("sent_at", 0) or 0) < 6 * 3600:
+                continue
+
+            oi_change = float(derivatives["oi_change"])
+            funding = float(derivatives["funding_rate"])
+            oi4h = derivatives.get("oi_change4h")
+            oi4h_text = f"{float(oi4h):+.2f}%" if oi4h is not None else "ناموجود"
+            message = (
+                "🚨 OI PRE-PUMP | ورود زودهنگام با تأیید نقدینگی\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                f"🪙 ارز: {contract.replace('_', '/')}\n"
+                "✅ شکست ساختار ۵دقیقه + افزایش حجم + تأیید رشد OI\n"
+                f"📈 تغییر OI پنج‌دقیقه: {oi_change:+.3f}% ({source})\n"
+                f"📊 تغییر OI چهار‌ساعته: {oi4h_text}\n"
+                f"💸 Funding: {funding * 100:+.4f}%\n"
+                f"📊 حجم شکست ۵دقیقه: {setup['turnover_ratio_5m']:.2f}x | حجم ۱دقیقه: {setup['turnover_ratio_1m']:.2f}x\n"
+                f"📦 فشردگی قبل از شکست: {setup['compression_pct']:.2f}% | رشد کندل شکست: {setup['price_change_pct']:+.2f}%\n"
+                f"💰 گردش ۲۴ساعته: {turnover:,.0f} USDT\n\n"
+                f"🟢 نقطه ورود: {setup['entry']:.10g}\n"
+                f"🛑 حد ضرر: {setup['stop']:.10g} | ریسک: {setup['risk_pct']:.2f}%\n"
+                f"🎯 هدف ۱ (2R): {setup['tp1']:.10g}\n"
+                f"🎯 هدف ۲ (3R): {setup['tp2']:.10g}\n"
+                "⚠️ هدف سیگنال، ورود قبل از حرکت بزرگ است؛ رشد ۱۰–۲۰٪ تضمین نیست. اگر قیمت از نقطه ورود دور شده، تعقیب نکن."
+            )
+            send_message(message)
+            sent_state[contract] = {"candle_time": str(setup["candle_time"]), "sent_at": now}
+            signals += 1
+            print(
+                f"OI PRE-PUMP final signal sent: {contract}; OI5m={oi_change:+.3f}%; "
+                f"entry={setup['entry']:.10g}; source={source}"
+            )
+            time.sleep(0.2)
+        except Exception as error:
+            print(f"OI PRE-PUMP {contract} failed: {type(error).__name__}: {error}")
+    print(
+        f"OI PRE-PUMP diagnostics: checked={checked}, structural_candidates={candidates}, "
+        f"signals={signals}, rejections={rejects}"
+    )
+
+
+
 def scan():
     tickers = get_json("/futures/usdt/tickers")
     check_derivatives_data(tickers)
@@ -2733,6 +2858,9 @@ def scan():
 
     # Independent early-breakout strategy: sends entry/SL/TP, not preliminary warnings.
     scan_prepump_entries(tickers, state, confirmed_entries=btc_ok)
+
+    # OI-led pre-pump strategy: separate entry engine using rising 5m OI and volume.
+    scan_oi_prepump_entries(tickers, state, confirmed_entries=btc_ok)
 
     # Dedicated high-selectivity strategy; does not alter PRE-PUMP or LEG SPIKE rules.
     scan_high_potential_pumps(tickers, state, confirmed_entries=btc_ok)
