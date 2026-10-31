@@ -2733,7 +2733,7 @@ def detect_high_potential_pump(candles_15m, candles_1h, candles_4h, turnover_24h
         return None
 
 
-def scan_high_potential_pumps(tickers, state, confirmed_entries=True, max_symbols=20):
+def scan_high_potential_pumps(tickers, state, confirmed_entries=True, max_symbols=30):
     """Independent, selective engine for early breakouts with room for larger moves."""
     if not confirmed_entries:
         print("BIG-PUMP strategy paused by BTC risk filter")
@@ -3001,7 +3001,7 @@ def update_oi_prepump_outcomes(state, now=None):
         )
 
 
-def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=30):
+def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=50):
     """
     Separate OI-led pre-pump entry engine.
     Looks for 5m structure/turnover confirmation while the move is still small,
