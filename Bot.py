@@ -766,8 +766,8 @@ def leg_spike_long_short_filter(contract):
 
 # Fibonacci pullback strategy configuration.
 # "Several times market cap" is set to >=2x by default and can be tuned here.
-FIB_MIN_VOLUME_TO_MARKET_CAP = 1.00
-FIB_MAX_OI_TO_MARKET_CAP = 2.00
+FIB_MIN_VOLUME_TO_MARKET_CAP = 2.00
+FIB_MAX_OI_TO_MARKET_CAP = 0.50
 # Stage-2 impulse detection: slightly more inclusive so valid developing
 # setups are tracked; Stage-3 entry confirmation remains fully gated by Fib,
 # OI, funding, and long/short checks.
