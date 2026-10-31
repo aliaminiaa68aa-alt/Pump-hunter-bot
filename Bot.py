@@ -182,6 +182,7 @@ def load_alert_state():
     data.setdefault("regular_setup_alerts", {})
     data.setdefault("fib_setup_alerts", {})
     data.setdefault("market_cap_cache", {})
+    data.setdefault("spot_pump_outcomes", [])
     return data
 
 
@@ -2350,8 +2351,129 @@ def _fetch_spot_entry_setup(symbol):
     return setup, reason
 
 
+def apply_spot_pump_outcome_candles(record, candles, now=None):
+    """Track forward-only 24h outcomes for a confirmed spot entry alert."""
+    now = int(time.time()) if now is None else int(now)
+    entry = float(record["entry"])
+    stop = float(record["stop"])
+    targets = {
+        "tp2r": float(record["tp2r"]),
+        "tp3r": float(record["tp3r"]),
+        "stretch10": float(record["stretch10"]),
+        "stretch20": float(record["stretch20"]),
+    }
+    last_time = int(record.get("last_candle_time", 0) or 0)
+    ordered = sorted(candles, key=lambda row: int(row.get("t", 0) or 0))
+    touched = record.setdefault("targets_hit", {name: False for name in targets})
+    for candle in ordered:
+        candle_time = int(candle.get("t", 0) or 0)
+        if candle_time <= last_time:
+            continue
+        high, low = float(candle["h"]), float(candle["l"])
+        if high <= 0 or low <= 0:
+            continue
+        record["max_favorable_pct"] = max(
+            float(record.get("max_favorable_pct", 0.0)), (high / entry - 1) * 100
+        )
+        record["max_adverse_pct"] = min(
+            float(record.get("max_adverse_pct", 0.0)), (low / entry - 1) * 100
+        )
+        hit_stop = low <= stop
+        hit_targets = [name for name, price in targets.items() if high >= price]
+        for name in hit_targets:
+            touched[name] = True
+        if record.get("first_result") is None:
+            if hit_stop and hit_targets:
+                record["first_result"] = "ambiguous_same_candle_stop_first"
+                record["first_result_time"] = candle_time
+            elif hit_stop:
+                record["first_result"] = "stop"
+                record["stop_hit"] = True
+                record["first_result_time"] = candle_time
+            elif hit_targets:
+                record["first_result"] = min(hit_targets, key=lambda name: targets[name])
+                record["first_result_time"] = candle_time
+        if hit_stop:
+            record["stop_hit"] = True
+        last_time = candle_time
+    record["last_candle_time"] = last_time
+    if now - int(record.get("created_at", now) or now) >= 24 * 3600:
+        record["completed"] = True
+        record["completed_at"] = now
+    return record
+
+
+def summarize_spot_pump_outcomes(records):
+    """Summarize completed observations; target touches are not a win-rate claim."""
+    completed = [r for r in records if isinstance(r, dict) and r.get("completed")]
+    names = ("tp2r", "tp3r", "stretch10", "stretch20", "stop", "ambiguous_same_candle_stop_first")
+    counts = {name: 0 for name in names}
+    for row in completed:
+        if row.get("first_result") in counts:
+            counts[row["first_result"]] += 1
+    targets = ("tp2r", "tp3r", "stretch10", "stretch20")
+    return {
+        "completed": len(completed),
+        "first_result_counts": counts,
+        "target_touches": {
+            name: sum(bool((row.get("targets_hit") or {}).get(name)) for row in completed)
+            for name in targets
+        },
+        "stop_hit": sum(bool(row.get("stop_hit")) for row in completed),
+        "no_level_hit": sum(row.get("first_result") is None for row in completed),
+    }
+
+
+def update_spot_pump_outcomes(state, now=None):
+    """Track 24h spot-entry outcomes with Gate.io 1m candles, without extra alerts."""
+    now = int(time.time()) if now is None else int(now)
+    records = state.setdefault("spot_pump_outcomes", [])
+    if not isinstance(records, list) or not records:
+        return
+    active = {}
+    for record in records:
+        if isinstance(record, dict) and not record.get("completed") and record.get("symbol"):
+            active.setdefault(record["symbol"], []).append(record)
+    for symbol, group in active.items():
+        try:
+            response = SESSION.get(
+                BASE + "/spot/candlesticks",
+                params={"currency_pair": symbol, "interval": "1m", "limit": 31},
+                timeout=5,
+            )
+            response.raise_for_status()
+            raw = response.json()
+            if not isinstance(raw, list):
+                raise RuntimeError("Unexpected Gate.io spot outcome candle response")
+            raw = sorted(raw, key=lambda row: int(row[0]))[:-1]
+            candles = [
+                {"t": str(row[0]), "h": row[3], "l": row[4], "c": row[2]}
+                for row in raw if isinstance(row, (list, tuple)) and len(row) >= 6
+            ]
+            for record in group:
+                apply_spot_pump_outcome_candles(record, candles, now=now)
+        except Exception as error:
+            print(f"SPOT PUMP outcome tracking failed for {symbol}: {type(error).__name__}: {error}")
+    for record in records:
+        if isinstance(record, dict) and not record.get("completed"):
+            if now - int(record.get("created_at", now) or now) >= 24 * 3600:
+                record["completed"] = True
+                record["completed_at"] = now
+    summary = summarize_spot_pump_outcomes(records)
+    tracked = sum(1 for r in records if isinstance(r, dict) and not r.get("completed"))
+    print(f"SPOT PUMP outcomes: tracked={tracked}, completed_24h={summary['completed']}, total={len(records)}")
+    if summary["completed"]:
+        print(
+            "SPOT PUMP outcome summary (completed 24h observations; not a guaranteed win rate): "
+            f"first_result={summary['first_result_counts']}, target_touches={summary['target_touches']}, "
+            f"stop_or_ambiguous={summary['stop_hit']}/{summary['completed']}, "
+            f"no_level_hit={summary['no_level_hit']}"
+        )
+
+
 def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=80):
     """Scan actual Gate.io spot USDT markets for confirmed, risk-defined pump entries."""
+    update_spot_pump_outcomes(state)
     if not confirmed_entries:
         print("SPOT PUMP entry scan paused by BTC risk filter")
         return
@@ -2431,6 +2553,30 @@ def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=80):
         try:
             send_message(message)
             sent_state[symbol] = {"candle_time": setup["candle_time"], "sent_at": now}
+            outcome_records = state.setdefault("spot_pump_outcomes", [])
+            outcome_records.append({
+                "symbol": symbol,
+                "strategy": "SPOT PUMP",
+                "direction": "LONG",
+                "created_at": now,
+                # Start after the current minute to exclude pre-alert price action.
+                "last_candle_time": (now // 60) * 60,
+                "entry": float(setup["entry"]),
+                "stop": float(setup["stop"]),
+                "tp2r": float(setup["tp2r"]),
+                "tp3r": float(setup["tp3r"]),
+                "stretch10": float(setup["stretch10"]),
+                "stretch20": float(setup["stretch20"]),
+                "max_favorable_pct": 0.0,
+                "max_adverse_pct": 0.0,
+                "targets_hit": {"tp2r": False, "tp3r": False, "stretch10": False, "stretch20": False},
+                "stop_hit": False,
+                "first_result": None,
+                "first_result_time": None,
+                "completed": False,
+            })
+            if len(outcome_records) > 200:
+                del outcome_records[:-200]
             signals += 1
             print(
                 f"SPOT PUMP final entry sent: {symbol}; volume={setup['volume_ratio']:.2f}x, "
