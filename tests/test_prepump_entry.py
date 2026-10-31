@@ -30,6 +30,39 @@ class PrePumpEntryTests(unittest.TestCase):
             five_minute.append(candle(113 + i, 100.02, 100.35, 99.90, 100.20, 130))
         return one_minute, five_minute
 
+    def test_detects_early_liquidity_buildup_before_price_extension(self):
+        one_minute = []
+        for i in range(21):
+            base = 100.0 + (i % 2) * 0.01
+            turnover = 220 if i >= 18 else 100
+            one_minute.append(candle(i, base, base + 0.10, base - 0.10, base + 0.05, turnover))
+
+        five_minute = []
+        for i in range(18):
+            turnover = 130 if i >= 16 else 100
+            five_minute.append(candle(100 + i, 100.0, 100.30, 99.80, 100.20, turnover))
+
+        result = Bot.detect_liquidity_buildup(one_minute, five_minute)
+        self.assertIsNotNone(result)
+        self.assertGreaterEqual(result["score"], 4)
+        self.assertGreaterEqual(result["turnover_1m_ratio"], 1.8)
+        self.assertLessEqual(result["price_change_3m_pct"], 1.8)
+
+    def test_liquidity_radar_rejects_already_extended_price(self):
+        one_minute = []
+        for i in range(21):
+            base = 100.0
+            turnover = 220 if i >= 18 else 100
+            one_minute.append(candle(i, base, base + 0.10, base - 0.10, base + 0.05, turnover))
+        one_minute[-1] = candle(20, 101.9, 102.1, 101.8, 102.0, 500)
+
+        five_minute = []
+        for i in range(18):
+            turnover = 130 if i >= 16 else 100
+            five_minute.append(candle(100 + i, 100.0, 100.30, 99.80, 100.20, turnover))
+
+        self.assertIsNone(Bot.detect_liquidity_buildup(one_minute, five_minute))
+
     def test_returns_entry_stop_and_targets_for_valid_breakout(self):
         one_minute, five_minute = self.make_valid_setup()
         result = Bot.detect_prepump_entry(one_minute, five_minute)
