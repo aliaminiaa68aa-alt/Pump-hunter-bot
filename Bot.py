@@ -2713,6 +2713,62 @@ def pre_pump_oi_gate(derivatives, min_oi_change=0.30, max_funding=0.0005):
         return False
 
 
+def detect_oi_prepump_watch(candles_1m, candles_5m):
+    """
+    Find a quiet, high-turnover compression close to resistance BEFORE breakout.
+    This is an internal watch state only, never an entry signal.
+    """
+    if len(candles_1m) < 22 or len(candles_5m) < 19:
+        return None
+    try:
+        current = candles_5m[-1]
+        prior = candles_5m[-6:-1]
+        context = candles_5m[-7:-1]
+        baseline_1m = candles_1m[-21:-1]
+        current_1m = candles_1m[-1]
+        op, close = float(current["o"]), float(current["c"])
+        high, low = float(current["h"]), float(current["l"])
+        if min(op, close, low) <= 0 or high <= low:
+            return None
+        prior_high = max(float(row["h"]) for row in prior)
+        compression_low = min(float(row["l"]) for row in context)
+        compression_high = max(float(row["h"]) for row in context)
+        if compression_low <= 0 or prior_high <= 0:
+            return None
+        compression_pct = (compression_high / compression_low - 1) * 100
+        distance_to_breakout_pct = (prior_high / close - 1) * 100
+        change_pct = (close / op - 1) * 100
+        avg_1m = sum(float(row.get("sum", 0) or 0) for row in baseline_1m) / len(baseline_1m)
+        avg_5m_rows = candles_5m[-19:-7]
+        avg_5m = sum(float(row.get("sum", 0) or 0) for row in avg_5m_rows) / len(avg_5m_rows)
+        current_1m_turnover = float(current_1m.get("sum", 0) or 0)
+        current_5m_turnover = float(current.get("sum", 0) or 0)
+        if min(avg_1m, avg_5m, current_1m_turnover, current_5m_turnover) <= 0:
+            return None
+        ratio_1m = current_1m_turnover / avg_1m
+        ratio_5m = current_5m_turnover / avg_5m
+
+        # The watch must be genuinely pre-breakout, quiet in price, compressed,
+        # and supported by abnormal turnover. It cannot emit an entry by itself.
+        if not (0.0 <= distance_to_breakout_pct <= 0.75):
+            return None
+        if not (0.0 <= change_pct <= 0.80):
+            return None
+        if compression_pct > 3.0 or ratio_1m < 1.50 or ratio_5m < 1.50:
+            return None
+        return {
+            "candle_time": str(current.get("t", "")),
+            "breakout_level": prior_high,
+            "distance_to_breakout_pct": distance_to_breakout_pct,
+            "compression_pct": compression_pct,
+            "price_change_pct": change_pct,
+            "turnover_ratio_1m": ratio_1m,
+            "turnover_ratio_5m": ratio_5m,
+        }
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return None
+
+
 def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=30):
     """
     Separate OI-led pre-pump entry engine.
@@ -2747,6 +2803,51 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
             checked += 1
             setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=3, diagnostics=rejects)
             if not setup:
+                # Observe potential setups before a breakout. This stage is diagnostic/
+                # stateful only; it never sends a Telegram entry alert.
+                watch = detect_oi_prepump_watch(candles_1m, candles_5m)
+                if watch:
+                    # Check derivatives before the price breakout so the scanner can
+                    # identify genuine OI-led watch candidates early. This remains
+                    # internal monitoring only; final entry still needs a closed 5m
+                    # breakout and a fresh derivatives check below.
+                    coinalyze_watch = coinalyze_derivatives_check(contract, state)
+                    if coinalyze_watch.get("configured"):
+                        watch_derivatives = coinalyze_watch
+                        watch_source = "Coinalyze aggregate"
+                    else:
+                        watch_derivatives = public_derivatives_check(contract)
+                        watch_source = "Bybit public 5m"
+                    if pre_pump_oi_gate(watch_derivatives):
+                        watch_state = state.setdefault("oi_prepump_watch", {})
+                        previous_watch = watch_state.get(contract, {})
+                        if not isinstance(previous_watch, dict) or previous_watch.get("candle_time") != watch["candle_time"]:
+                            watch_state[contract] = {
+                                **watch,
+                                "seen_at": now,
+                                "oi_change": float(watch_derivatives["oi_change"]),
+                                "funding_rate": float(watch_derivatives["funding_rate"]),
+                                "oi_change4h": watch_derivatives.get("oi_change4h"),
+                                "source": watch_source,
+                            }
+                            print(
+                                f"OI PRE-PUMP watch {contract}: OI-confirmed pre-breakout candidate; "
+                                f"source={watch_source}, OI5m={float(watch_derivatives['oi_change']):+.3f}%, "
+                                f"funding={float(watch_derivatives['funding_rate'])*100:+.4f}%, "
+                                f"turnover5m={watch['turnover_ratio_5m']:.2f}x, "
+                                f"turnover1m={watch['turnover_ratio_1m']:.2f}x, "
+                                f"compression={watch['compression_pct']:.2f}%, "
+                                f"distance_to_breakout={watch['distance_to_breakout_pct']:.2f}%, "
+                                f"price_change={watch['price_change_pct']:+.2f}%; no entry sent"
+                            )
+                    else:
+                        print(
+                            f"OI PRE-PUMP watch {contract}: pre-breakout price/volume candidate "
+                            f"rejected by derivatives; source={'Coinalyze aggregate' if coinalyze_watch.get('configured') else 'Bybit public 5m'}, "
+                            f"OI5m={watch_derivatives.get('oi_change')}, "
+                            f"funding={watch_derivatives.get('funding_rate')}, "
+                            f"reason={watch_derivatives.get('reason', 'OI/funding thresholds not met')}"
+                        )
                 continue
             latest_close = float(candles_5m[-1]["c"])
             setup = refresh_prepump_entry(setup, latest_close, rejects)
