@@ -79,9 +79,9 @@ def register_combo_signal(state, symbol, strategy, direction="LONG"):
         "⏱ هر سه رویداد در بازهٔ حداکثر یک‌ساعته و هم‌جهت ثبت شده‌اند.\n"
         "⚠️ این هم‌پوشانی تضمین سود نیست؛ قیمت، حدضرر، اسپرد و نقدشوندگی را بررسی کن."
     )
-    send_message(message)
+    # Do not send non-actionable combo notifications; strategies send their own final entry with SL/TP.
     sent_state[normalized] = now
-    print(f"COMBO alert sent: {normalized}; strategies=LIQUIDITY,SPIKE,BOS")
+    print(f"COMBO alignment recorded internally: {normalized}; strategies=LIQUIDITY,SPIKE,BOS")
 
 
 def get_json(path, params=None):
@@ -2266,14 +2266,12 @@ def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
 
         # Breakout must occur now, after a relatively tight range and increasing
         # 5m turnover. Reject entries after an already-extended 1m candle.
-        if compression_pct > 3.5:
+        if compression_pct > 4.0:
             return reject("compression_too_wide")
-        if turnover_ratio_5m < 1.05:
-            if turnover_ratio_5m < 0.80:
-                return reject("low_5m_turnover_below_0.80x")
-            if turnover_ratio_5m < 1.00:
-                return reject("low_5m_turnover_0.80_to_1.00x")
-            return reject("low_5m_turnover_1.00_to_1.05x")
+        # 5m turnover is contextual, not the primary trigger; the breakout candle
+        # must still show >=1.5x 1m turnover and a strong close above the local high.
+        if turnover_ratio_5m < 0.80:
+            return reject("low_5m_turnover_below_0.80x")
         if close <= prior_high:
             return reject("no_1m_breakout")
         if close <= op:
@@ -2395,7 +2393,7 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40)
             candles_1m = closed_candles(contract, "1m", 31)
             candles_5m = closed_candles(contract, "5m", 25)
             checked += 1
-            setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=5, diagnostics=rejection_counts)
+            setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=3, diagnostics=rejection_counts)
             if not setup:
                 continue
             try:
@@ -2556,10 +2554,9 @@ def scan():
                     f"کف حرکت اولیه: {float(candidate['impulse_low'])}\n\n"
                     "هنوز سیگنال ورود نیست. ربات منتظر شکست ساختار ۵دقیقه، تأیید روند ۱۵دقیقه و روند ۱ساعته، سپس بررسی OI و Funding می‌ماند."
                 )
-                    send_message(early_message)
                     early_alerts_state[contract] = candidate["impulse_time"]
                     recent_early[contract] = int(time.time())
-                    print(f"Early warning sent: {contract}")
+                    print(f"Early warning suppressed; final-entry-only mode: {contract}")
 
             try:
                 impulse_time = int(candidate["impulse_time"])
@@ -2603,8 +2600,8 @@ def scan():
                             f"قیمت کندل بسته‌شده: {latest_close}\n\n"
                             "این مرحله از هشدار اولیه قوی‌تر است، اما هنوز تأیید ورود نیست. ربات منتظر کندل ۱۵دقیقه‌ای، روند ۱ساعته و بررسی OI/Funding می‌ماند."
                         )
-                        send_message(setup_message)
                         setup_alerts[contract] = candidate["impulse_time"]
+                        print(f"{contract}: BOS progress message suppressed; waiting for final entry with SL/TP")
                     print(f"{contract}: 5m break of structure detected at {short_term_high}")
 
             # If BOS occurred earlier, wait for confirmation while price remains above its level.

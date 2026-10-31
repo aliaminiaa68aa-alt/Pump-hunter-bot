@@ -74,14 +74,23 @@ class PrePumpEntryTests(unittest.TestCase):
         self.assertIsNone(Bot.refresh_prepump_entry(setup, setup["breakout_level"] * 0.999, diagnostics))
         self.assertEqual(diagnostics.get("breakout_lost_before_alert"), 1)
 
-    def test_rejects_setup_without_minimum_5m_turnover_expansion(self):
+    def test_allows_normal_5m_turnover_when_1m_breakout_is_strong(self):
+        one_minute, five_minute = self.make_valid_setup()
+        for candle_row in five_minute[-6:]:
+            candle_row["sum"] = "85"
+        result = Bot.detect_prepump_entry(one_minute, five_minute)
+        self.assertIsNotNone(result)
+        self.assertGreaterEqual(result["turnover_ratio_1m"], 1.5)
+        self.assertGreaterEqual(result["turnover_ratio_5m"], 0.80)
+
+    def test_rejects_setup_with_very_low_5m_turnover(self):
         one_minute, five_minute = self.make_valid_setup()
         for candle_5m in five_minute[-6:]:
-            candle_5m["sum"] = "100"
+            candle_5m["sum"] = "50"
         diagnostics = {}
         result = Bot.detect_prepump_entry(one_minute, five_minute, diagnostics)
         self.assertIsNone(result)
-        self.assertEqual(diagnostics.get("low_5m_turnover_1.00_to_1.05x"), 1)
+        self.assertEqual(diagnostics.get("low_5m_turnover_below_0.80x"), 1)
 
     def test_finds_breakout_in_recent_closed_candles(self):
         one_minute, five_minute = self.make_valid_setup()
