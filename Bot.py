@@ -2291,7 +2291,7 @@ def detect_prepump_entry(candles_1m, candles_5m):
         return None
 
 
-def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60):
+def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40):
     """Independently scan liquid contracts for risk-defined 1m breakout entries."""
     if not confirmed_entries:
         print("PRE-PUMP entry scan paused by BTC risk filter; no final-entry messages sent")
