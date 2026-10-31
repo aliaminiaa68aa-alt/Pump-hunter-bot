@@ -1,6 +1,6 @@
 import unittest
 
-from Bot import apply_oi_prepump_outcome_candles
+from Bot import apply_oi_prepump_outcome_candles, summarize_oi_prepump_outcomes
 
 
 def candle(t, high, low):
@@ -46,6 +46,32 @@ class OIPrePumpOutcomeTests(unittest.TestCase):
         self.assertTrue(row["tp1_hit"])
         self.assertTrue(row["tp2_hit"])
         self.assertEqual(row["first_result"], "ambiguous_same_candle_stop_first")
+
+    def test_summary_uses_completed_records_only_and_counts_touch_events(self):
+        completed_tp1 = record()
+        completed_tp1.update({
+            "completed": True, "first_result": "tp1",
+            "tp1_hit": True, "tp2_hit": False, "stop_hit": False,
+        })
+        completed_ambiguous = record()
+        completed_ambiguous.update({
+            "completed": True,
+            "first_result": "ambiguous_same_candle_stop_first",
+            "tp1_hit": True, "tp2_hit": True, "stop_hit": True,
+        })
+        completed_none = record()
+        completed_none.update({"completed": True, "first_result": None})
+        still_tracking = record()
+        summary = summarize_oi_prepump_outcomes([
+            completed_tp1, completed_ambiguous, completed_none, still_tracking
+        ])
+        self.assertEqual(summary["completed"], 3)
+        self.assertEqual(summary["first_result_counts"]["tp1"], 1)
+        self.assertEqual(summary["first_result_counts"]["ambiguous_same_candle_stop_first"], 1)
+        self.assertEqual(summary["tp1_hit"], 2)
+        self.assertEqual(summary["tp2_hit"], 1)
+        self.assertEqual(summary["stop_hit"], 1)
+        self.assertEqual(summary["no_level_hit"], 1)
 
     def test_marks_record_complete_after_24_hours(self):
         row = record()
