@@ -3153,16 +3153,20 @@ def scan():
     # coin reaches the final confirmation stage.
     try:
         bybit_health = public_derivatives_check("BTC_USDT")
+        health_source = bybit_health.get("source", "Bybit public")
         if bybit_health.get("valid"):
             print(
-                "Bybit public-source check: OK; BTC OI change="
+                f"{health_source} derivatives-source check: OK; BTC OI change="
                 f"{float(bybit_health['oi_change']):+.3f}%, "
                 f"current funding={float(bybit_health['funding_rate']) * 100:+.4f}%"
             )
         else:
-            print(f"Bybit public-source check: unavailable ({bybit_health.get('reason', 'unknown')})")
+            print(
+                f"Public derivatives-source check: unavailable "
+                f"({bybit_health.get('reason', 'unknown')})"
+            )
     except Exception as error:
-        print(f"Bybit public-source check failed: {type(error).__name__}: {error}")
+        print(f"Public derivatives-source check failed: {type(error).__name__}: {error}")
     liquid = []
     print(f"Gate.io tickers received: {len(tickers)}")
     for item in tickers:
