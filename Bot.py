@@ -303,6 +303,46 @@ def binance_public_derivatives_check(contract):
         return {"valid": False, "reason": "داده عمومی OI/Funding از Binance دریافت نشد"}
 
 
+def gateio_public_derivatives_check(contract):
+    """Use Gate.io's own public contract OI history and funding as the final data fallback."""
+    try:
+        now = int(time.time())
+        oi_rows = get_json(
+            "/futures/usdt/contract_stats",
+            {"contract": contract, "from": now - 1800, "interval": "5m", "limit": 6},
+        )
+        if not isinstance(oi_rows, list):
+            return {"valid": False, "reason": "ساختار پاسخ OI گیت نامعتبر است"}
+        oi_rows = sorted(oi_rows, key=lambda row: int(row.get("time", 0) or 0))
+        oi_rows = [row for row in oi_rows if row.get("open_interest") not in (None, "")]
+        if len(oi_rows) < 2:
+            return {"valid": False, "reason": "تاریخچه OI پنج‌دقیقه‌ای Gate.io کافی نیست"}
+        old_oi = float(oi_rows[-2]["open_interest"])
+        new_oi = float(oi_rows[-1]["open_interest"])
+        if old_oi <= 0:
+            return {"valid": False, "reason": "مقدار OI عمومی Gate.io نامعتبر است"}
+        oi_change = (new_oi / old_oi - 1) * 100
+
+        contract_info = get_json(f"/futures/usdt/contracts/{contract}")
+        if not isinstance(contract_info, dict):
+            return {"valid": False, "reason": "اطلاعات Funding عمومی Gate.io نامعتبر است"}
+        funding_raw = contract_info.get("funding_rate")
+        if funding_raw in (None, ""):
+            funding_raw = contract_info.get("funding_rate_indicative")
+        if funding_raw in (None, ""):
+            return {"valid": False, "reason": "Funding عمومی Gate.io در دسترس نیست"}
+        return {
+            "valid": True,
+            "oi_change": oi_change,
+            "funding_rate": float(funding_raw),
+            "symbol": contract,
+            "source": "Gate.io public",
+        }
+    except Exception as error:
+        print(f"{contract}: public Gate.io derivatives check failed: {type(error).__name__}: {error}")
+        return {"valid": False, "reason": "داده عمومی OI/Funding از Gate.io دریافت نشد"}
+
+
 def public_derivatives_check(contract):
     """
     Validate the setup using Bybit's public linear-perpetual OI history and
@@ -356,10 +396,19 @@ def public_derivatives_check(contract):
                 f"funding={float(fallback['funding_rate'])*100:+.4f}%"
             )
             return fallback
+        gateio_fallback = gateio_public_derivatives_check(contract)
+        if gateio_fallback.get("valid"):
+            print(
+                f"{contract}: using Gate.io public derivatives fallback; "
+                f"OI5m={float(gateio_fallback['oi_change']):+.3f}%, "
+                f"funding={float(gateio_fallback['funding_rate'])*100:+.4f}%"
+            )
+            return gateio_fallback
         return {
             "valid": False,
-            "reason": "Bybit و Binance هر دو در دسترس نیستند "
-                      f"(Bybit: {type(error).__name__}; Binance: {fallback.get('reason', 'نامشخص')})",
+            "reason": "Bybit و Binance و Gate.io هیچ‌کدام داده معتبر ندادند "
+                      f"(Bybit: {type(error).__name__}; Binance: {fallback.get('reason', 'نامشخص')}; "
+                      f"Gate.io: {gateio_fallback.get('reason', 'نامشخص')})",
         }
 
 
