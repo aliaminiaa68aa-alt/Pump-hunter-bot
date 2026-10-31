@@ -2565,7 +2565,7 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
                 "",
             ])
         lines.append("👀 رصد اولیه است، سیگنال ورود نیست؛ جهت جریان سفارش/OI و شکست قیمت باید تأیید شوند.")
-        send_message("\\n".join(lines))
+        send_message("\n".join(lines))
         for contract, radar in batch:
             radar_state[contract] = {"candle_time": radar["candle_time"], "sent_at": now}
         print(
