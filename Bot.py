@@ -2562,6 +2562,138 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
     print(f"PRE-PUMP entry scan: candidates={len(ranked)}, checked={checked}, final_signals={signals}; rejections: {reasons or 'none'}")
 
 
+
+def _rising_ema20(candles):
+    if len(candles) < 22:
+        return False
+    try:
+        closes = [float(x["c"]) for x in candles]
+        alpha = 2 / 21
+        ema = closes[0]
+        old_ema = None
+        for value in closes[1:]:
+            old_ema, ema = ema, value * alpha + ema * (1 - alpha)
+        return closes[-1] > ema and old_ema is not None and ema > old_ema
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def detect_high_potential_pump(candles_15m, candles_1h, candles_4h, turnover_24h):
+    """Strict early breakout detector; +10%/+20% are potential extensions, not promises."""
+    if min(len(candles_15m), len(candles_1h), len(candles_4h)) < 22:
+        return None
+    try:
+        if float(turnover_24h) < 1_000_000:
+            return None
+        current = candles_15m[-1]
+        prior = candles_15m[-13:-1]
+        baseline = candles_15m[-21:-1]
+        op, close = float(current["o"]), float(current["c"])
+        high, low = float(current["h"]), float(current["l"])
+        if min(op, close, low) <= 0 or high <= low:
+            return None
+        prior_high = max(float(x["h"]) for x in prior)
+        prior_low = min(float(x["l"]) for x in prior)
+        avg_turnover = sum(float(x.get("sum", 0) or 0) for x in baseline) / len(baseline)
+        current_turnover = float(current.get("sum", 0) or 0)
+        if avg_turnover <= 0 or current_turnover <= 0:
+            return None
+        volume_ratio = current_turnover / avg_turnover
+        change_pct = (close / op - 1) * 100
+        close_position = (close - low) / (high - low)
+        compression_pct = (prior_high / prior_low - 1) * 100 if prior_low > 0 else 999
+        if close <= prior_high or not (0.4 <= change_pct <= 3.5):
+            return None
+        if volume_ratio < 2.5 or close_position < 0.75 or compression_pct > 8:
+            return None
+        if not _rising_ema20(candles_1h) or not _rising_ema20(candles_4h):
+            return None
+        stop = min(float(x["l"]) for x in candles_15m[-4:]) - close * 0.001
+        risk = close - stop
+        risk_pct = risk / close * 100 if close > 0 else 999
+        if risk <= 0 or not (0.25 <= risk_pct <= 2.5):
+            return None
+        return {
+            "candle_time": str(current.get("t", "")), "entry": close, "stop": stop,
+            "risk_pct": risk_pct, "tp2r": close + 2 * risk, "tp4r": close + 4 * risk,
+            "stretch10": close * 1.10, "stretch20": close * 1.20,
+            "volume_ratio": volume_ratio, "change_pct": change_pct,
+            "compression_pct": compression_pct, "breakout_level": prior_high,
+        }
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return None
+
+
+def scan_high_potential_pumps(tickers, state, confirmed_entries=True, max_symbols=20):
+    """Independent, selective engine for early breakouts with room for larger moves."""
+    if not confirmed_entries:
+        print("BIG-PUMP strategy paused by BTC risk filter")
+        return
+    ranked = []
+    for ticker in tickers:
+        contract = ticker.get("contract", "")
+        if not is_crypto_contract(contract):
+            continue
+        try:
+            turnover = float(ticker.get("volume_24h_quote") or ticker.get("volume_24h_usd") or 0)
+        except (TypeError, ValueError):
+            continue
+        if turnover >= 1_000_000:
+            ranked.append((turnover, contract))
+    ranked.sort(reverse=True)
+    sent_state = state.setdefault("big_pump_alerts", {})
+    now = int(time.time())
+    checked = candidates = signals = 0
+    for turnover, contract in ranked[:max_symbols]:
+        try:
+            c15 = closed_candles(contract, "15m", 24)
+            setup = detect_high_potential_pump(c15, closed_candles(contract, "1h", 28),
+                                               closed_candles(contract, "4h", 28), turnover)
+            checked += 1
+            if not setup:
+                continue
+            candidates += 1
+            derivatives = public_derivatives_check(contract)
+            if not derivatives.get("valid"):
+                print(f"BIG-PUMP {contract}: rejected; OI/funding unavailable")
+                continue
+            oi_change = float(derivatives["oi_change"])
+            funding = float(derivatives["funding_rate"])
+            if oi_change < 0.15 or funding >= 0.0005:
+                print(f"BIG-PUMP {contract}: rejected; OI={oi_change:+.3f}%, funding={funding*100:+.4f}%")
+                continue
+            previous = sent_state.get(contract, {})
+            if not isinstance(previous, dict):
+                previous = {"candle_time": str(previous), "sent_at": 0}
+            if previous.get("candle_time") == setup["candle_time"]:
+                continue
+            if now - int(previous.get("sent_at", 0) or 0) < 12 * 3600:
+                continue
+            message = (
+                "💎 BIG-PUMP | ستاپ با فیلتر سخت‌گیرانه\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                f"🪙 ارز: {contract.replace('_', '/')}\n"
+                "✅ شکست ۱۵دقیقه + حجم بالا + روند صعودی ۱ساعته و ۴ساعته\n"
+                f"📊 حجم شکست: {setup['volume_ratio']:.2f} برابر میانگین | رشد کندل: {setup['change_pct']:+.2f}%\n"
+                f"📈 OI پنج‌دقیقه Bybit: {oi_change:+.3f}% | Funding: {funding*100:+.4f}%\n"
+                f"💰 گردش ۲۴ساعته: {turnover:,.0f} USDT\n\n"
+                f"🟢 ورود: {setup['entry']:.10g}\n"
+                f"🛑 حد ضرر: {setup['stop']:.10g} | ریسک: {setup['risk_pct']:.2f}%\n"
+                f"🎯 هدف ۲R: {setup['tp2r']:.10g} | هدف ۴R: {setup['tp4r']:.10g}\n"
+                f"🚀 محدودهٔ امتدادی +۱۰٪: {setup['stretch10']:.10g} | +۲۰٪: {setup['stretch20']:.10g}\n"
+                "⚠️ محدوده‌های ۱۰٪ و ۲۰٪ تضمین نیستند. اگر قیمت از ورود پیشنهادی دور شد، تعقیب قیمت نکن."
+            )
+            send_message(message)
+            sent_state[contract] = {"candle_time": setup["candle_time"], "sent_at": now}
+            signals += 1
+            print(f"BIG-PUMP confirmed signal sent: {contract}")
+            time.sleep(1)
+        except Exception as error:
+            print(f"BIG-PUMP {contract}: {type(error).__name__}: {error}")
+    print(f"BIG-PUMP diagnostics: checked={checked}, candidates={candidates}, signals={signals}")
+
+
+
 def scan():
     tickers = get_json("/futures/usdt/tickers")
     check_derivatives_data(tickers)
@@ -2601,6 +2733,9 @@ def scan():
 
     # Independent early-breakout strategy: sends entry/SL/TP, not preliminary warnings.
     scan_prepump_entries(tickers, state, confirmed_entries=btc_ok)
+
+    # Dedicated high-selectivity strategy; does not alter PRE-PUMP or LEG SPIKE rules.
+    scan_high_potential_pumps(tickers, state, confirmed_entries=btc_ok)
 
     # Both strategies scan independently even when BTC pauses confirmed entries.
     # LEG SPIKE scans the full Gate.io USDT perpetual universe; HYPE/BOS stays top-100 liquid only.
