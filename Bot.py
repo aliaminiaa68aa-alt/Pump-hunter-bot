@@ -2221,6 +2221,77 @@ def scan_gateio_spot_liquidity(state, max_symbols=60):
     print(f"Gate.io spot liquidity scan: candidates={len(candidates)}, checked={checked}, alerts={sent}")
 
 
+def detect_liquidity_buildup(candles_1m, candles_5m):
+    """
+    Detect early turnover accumulation before a large price extension.
+    This is a WATCH candidate only, never a trade-entry signal.
+    Uses completed candles and relative quote turnover rather than absolute volume.
+    """
+    if len(candles_1m) < 21 or len(candles_5m) < 18:
+        return None
+    try:
+        recent_1m = candles_1m[-3:]
+        baseline_1m = candles_1m[-18:-3]
+        recent_5m = candles_5m[-2:]
+        baseline_5m = candles_5m[-14:-2]
+        current = candles_1m[-1]
+
+        avg_1m = sum(float(c.get("sum", 0) or 0) for c in baseline_1m) / len(baseline_1m)
+        recent_1m_avg = sum(float(c.get("sum", 0) or 0) for c in recent_1m) / len(recent_1m)
+        avg_5m = sum(float(c.get("sum", 0) or 0) for c in baseline_5m) / len(baseline_5m)
+        recent_5m_avg = sum(float(c.get("sum", 0) or 0) for c in recent_5m) / len(recent_5m)
+        if min(avg_1m, avg_5m, recent_1m_avg, recent_5m_avg) <= 0:
+            return None
+
+        close = float(current["c"])
+        high = float(current["h"])
+        low = float(current["l"])
+        if min(close, low) <= 0 or high <= low:
+            return None
+        price_3m_ago = float(candles_1m[-4]["c"])
+        if price_3m_ago <= 0:
+            return None
+
+        turnover_1m_ratio = recent_1m_avg / avg_1m
+        turnover_5m_ratio = recent_5m_avg / avg_5m
+        context_5m = candles_5m[-6:]
+        compression_low = min(float(c["l"]) for c in context_5m)
+        compression_high = max(float(c["h"]) for c in context_5m)
+        if compression_low <= 0:
+            return None
+        compression_pct = (compression_high / compression_low - 1) * 100
+        price_change_3m_pct = (close / price_3m_ago - 1) * 100
+        close_position = (close - low) / (high - low)
+
+        checks = {
+            "1m turnover acceleration": turnover_1m_ratio >= 1.8,
+            "5m turnover support": turnover_5m_ratio >= 1.10,
+            "tight recent range": compression_pct <= 4.5,
+            "price not already extended": -0.8 <= price_change_3m_pct <= 1.8,
+            "close holds upper range": close_position >= 0.55,
+        }
+        score = sum(checks.values())
+        # Never label an already-extended or sharply falling move as early accumulation.
+        if not (-0.8 <= price_change_3m_pct <= 1.8):
+            return None
+        # Require clear short-term turnover acceleration, some 5m support, and
+        # at least four independent signs. Do not alert on a price spike alone.
+        if turnover_1m_ratio < 1.8 or turnover_5m_ratio < 0.80 or score < 4:
+            return None
+        return {
+            "candle_time": str(current.get("t", "")),
+            "score": score,
+            "turnover_1m_ratio": turnover_1m_ratio,
+            "turnover_5m_ratio": turnover_5m_ratio,
+            "compression_pct": compression_pct,
+            "price_change_3m_pct": price_change_3m_pct,
+            "close_position": close_position,
+            "checks": checks,
+        }
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return None
+
+
 def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
     """
     Return a risk-defined long entry only when 5m price compression/turnover
@@ -2365,7 +2436,7 @@ def refresh_prepump_entry(setup, latest_close, diagnostics=None, max_chase_pct=0
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
         return reject("invalid_refresh_data")
 
-def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40):
+def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60):
     """Independently scan liquid contracts for risk-defined 1m breakout entries."""
     if not confirmed_entries:
         print("PRE-PUMP entry scan paused by BTC risk filter; no final-entry messages sent")
@@ -2379,7 +2450,7 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40)
             turnover = float(ticker.get("volume_24h_quote") or ticker.get("volume_24h_usd") or 0)
         except (TypeError, ValueError):
             continue
-        if turnover >= 500_000:
+        if turnover >= 250_000:
             ranked.append((turnover, contract))
     ranked.sort(reverse=True)
     ranked = ranked[:max_symbols]
@@ -2393,6 +2464,36 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40)
             candles_1m = closed_candles(contract, "1m", 31)
             candles_5m = closed_candles(contract, "5m", 25)
             checked += 1
+            # Early liquidity radar: a separate watch alert, not a buy signal.
+            # Keep it low-noise with a per-symbol cooldown and require multiple signs.
+            radar = detect_liquidity_buildup(candles_1m, candles_5m)
+            radar_state = state.setdefault("liquidity_radar_alerts", {})
+            previous_radar = radar_state.get(contract, {})
+            if isinstance(previous_radar, str):
+                previous_radar = {"candle_time": previous_radar, "sent_at": 0}
+            if radar:
+                radar_age = now - int(previous_radar.get("sent_at", 0) or 0)
+                same_radar_candle = str(previous_radar.get("candle_time", "")) == radar["candle_time"]
+                if not same_radar_candle and radar_age >= 2700:
+                    radar_message = (
+                        "💧 رادار نقدینگی | نامزد احتمالی حرکت\n"
+                        "━━━━━━━━━━━━━━━━━━\n"
+                        f"🪙 ارز: {contract.replace('_', '/')}\n"
+                        f"⭐ امتیاز نشانه‌ها: {radar['score']}/5\n"
+                        f"📊 گردش ۱دقیقه نسبت به خط پایه: {radar['turnover_1m_ratio']:.2f}x\n"
+                        f"💧 گردش ۵دقیقه نسبت به خط پایه: {radar['turnover_5m_ratio']:.2f}x\n"
+                        f"📦 دامنهٔ ۶ کندل ۵دقیقه: {radar['compression_pct']:.2f}%\n"
+                        f"📈 تغییر قیمت ۳دقیقه: {radar['price_change_3m_pct']:+.2f}%\n"
+                        "👀 فقط رصد اولیه است؛ ورود نیست و هنوز باید جهت جریان سفارش/OI و شکست قیمت تأیید شود."
+                    )
+                    send_message(radar_message)
+                    radar_state[contract] = {"candle_time": radar["candle_time"], "sent_at": now}
+                    print(
+                        f"LIQUIDITY RADAR: {contract}; score={radar['score']}/5; "
+                        f"relvol1m={radar['turnover_1m_ratio']:.2f}x; "
+                        f"relvol5m={radar['turnover_5m_ratio']:.2f}x"
+                    )
+
             setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=5, diagnostics=rejection_counts)
             if not setup:
                 continue
