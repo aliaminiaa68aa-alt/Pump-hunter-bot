@@ -47,6 +47,18 @@ class PrePumpEntryTests(unittest.TestCase):
         one_minute[-1]["h"] = "100.20"
         self.assertIsNone(Bot.detect_prepump_entry(one_minute, five_minute))
 
+    def test_diagnostics_prioritize_missing_breakout_over_low_volume(self):
+        one_minute, five_minute = self.make_valid_setup()
+        one_minute[-1]["c"] = "100.10"
+        one_minute[-1]["h"] = "100.20"
+        for candle_5m in five_minute[-6:]:
+            candle_5m["sum"] = "10"
+        diagnostics = {}
+        result = Bot.detect_prepump_entry(one_minute, five_minute, diagnostics)
+        self.assertIsNone(result)
+        self.assertEqual(diagnostics.get("no_1m_breakout"), 1)
+        self.assertNotIn("low_5m_turnover_below_0.80x", diagnostics)
+
     def test_rejects_excessive_price_extension(self):
         one_minute, five_minute = self.make_valid_setup()
         one_minute[-1]["c"] = "103.00"
