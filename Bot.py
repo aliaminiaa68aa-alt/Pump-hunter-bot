@@ -2476,14 +2476,14 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
                 same_radar_candle = str(previous_radar.get("candle_time", "")) == radar["candle_time"]
                 if not same_radar_candle and radar_age >= 2700:
                     radar_message = (
-                        "💧 رادار نقدینگی | نامزد احتمالی حرکت\\n"
-                        "━━━━━━━━━━━━━━━━━━\\n"
-                        f"🪙 ارز: {contract.replace('_', '/')}\\n"
-                        f"⭐ امتیاز نشانه‌ها: {radar['score']}/5\\n"
-                        f"📊 گردش ۱دقیقه نسبت به خط پایه: {radar['turnover_1m_ratio']:.2f}x\\n"
-                        f"💧 گردش ۵دقیقه نسبت به خط پایه: {radar['turnover_5m_ratio']:.2f}x\\n"
-                        f"📦 دامنهٔ ۶ کندل ۵دقیقه: {radar['compression_pct']:.2f}%\\n"
-                        f"📈 تغییر قیمت ۳دقیقه: {radar['price_change_3m_pct']:+.2f}%\\n"
+                        "💧 رادار نقدینگی | نامزد احتمالی حرکت\n"
+                        "━━━━━━━━━━━━━━━━━━\n"
+                        f"🪙 ارز: {contract.replace('_', '/')}\n"
+                        f"⭐ امتیاز نشانه‌ها: {radar['score']}/5\n"
+                        f"📊 گردش ۱دقیقه نسبت به خط پایه: {radar['turnover_1m_ratio']:.2f}x\n"
+                        f"💧 گردش ۵دقیقه نسبت به خط پایه: {radar['turnover_5m_ratio']:.2f}x\n"
+                        f"📦 دامنهٔ ۶ کندل ۵دقیقه: {radar['compression_pct']:.2f}%\n"
+                        f"📈 تغییر قیمت ۳دقیقه: {radar['price_change_3m_pct']:+.2f}%\n"
                         "👀 فقط رصد اولیه است؛ ورود نیست و هنوز باید جهت جریان سفارش/OI و شکست قیمت تأیید شود."
                     )
                     send_message(radar_message)
