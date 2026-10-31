@@ -2314,13 +2314,36 @@ def detect_spot_pump_entry(candles_5m, candles_15m):
         return None
 
 
+def _fetch_spot_entry_setup(symbol):
+    """Fetch closed spot candles and evaluate one market; suitable for bounded parallel scans."""
+    parsed = {}
+    for interval, limit in (("5m", 32), ("15m", 22)):
+        response = SESSION.get(
+            BASE + "/spot/candlesticks",
+            params={"currency_pair": symbol, "interval": interval, "limit": limit},
+            timeout=5,
+        )
+        response.raise_for_status()
+        rows = response.json()
+        if not isinstance(rows, list):
+            raise RuntimeError("Unexpected spot candle response")
+        rows = sorted(rows, key=lambda row: int(row[0]))
+        # Gate.io returns the active candle too; discard it to avoid intrabar/repainting signals.
+        rows = rows[:-1]
+        parsed[interval] = [{
+            "t": str(row[0]), "sum": row[1], "c": row[2],
+            "h": row[3], "l": row[4], "o": row[5],
+        } for row in rows]
+    return detect_spot_pump_entry(parsed["5m"], parsed["15m"])
+
+
 def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=40):
     """Scan actual Gate.io spot USDT markets for confirmed, risk-defined pump entries."""
     if not confirmed_entries:
         print("SPOT PUMP entry scan paused by BTC risk filter")
         return
     try:
-        response = SESSION.get(BASE + "/spot/tickers", timeout=15)
+        response = SESSION.get(BASE + "/spot/tickers", timeout=10)
         response.raise_for_status()
         tickers = response.json()
         if not isinstance(tickers, list):
@@ -2347,52 +2370,52 @@ def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=40):
     now = int(time.time())
     checked = signals = 0
     rejections = {"no_confirmed_setup": 0, "api_or_candle_error": 0, "cooldown": 0}
-    for symbol, quote_volume in candidates:
+    results = []
+
+    # Bounded concurrency prevents 40 symbols x 2 sequential HTTP calls from exhausting
+    # the workflow's four-minute scan budget before the older strategies run.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_fetch_spot_entry_setup, symbol): (symbol, volume)
+                   for symbol, volume in candidates}
+        for future in as_completed(futures):
+            symbol, volume = futures[future]
+            try:
+                setup = future.result()
+                checked += 1
+                if setup:
+                    results.append((symbol, volume, setup))
+                else:
+                    rejections["no_confirmed_setup"] += 1
+            except Exception as error:
+                rejections["api_or_candle_error"] += 1
+                print(f"Gate.io spot entry {symbol} failed: {type(error).__name__}: {error}")
+
+    # Send messages sequentially and update cooldown only after Telegram confirms delivery.
+    for symbol, quote_volume, setup in sorted(results, key=lambda item: item[1], reverse=True):
+        previous = sent_state.get(symbol, {})
+        if not isinstance(previous, dict):
+            previous = {"candle_time": str(previous), "sent_at": 0}
+        if (str(previous.get("candle_time", "")) == setup["candle_time"]
+                or now - int(previous.get("sent_at", 0) or 0) < 6 * 3600):
+            rejections["cooldown"] += 1
+            continue
+
+        message = (
+            "🎯 SPOT PUMP | ورود تأییدشده، بدون اهرم\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"🪙 ارز: {symbol.replace('_', '/')} | بازار اسپات Gate.io\n"
+            f"📊 حجم کندل بسته‌شده ۵دقیقه: {setup['volume_ratio']:.2f} برابر میانگین ۲۰ کندل\n"
+            f"📈 رشد کندل شکست: {setup['change_pct']:+.2f}% | فاصله از سطح شکست: {setup['breakout_distance_pct']:.2f}%\n"
+            f"💰 گردش ۲۴ساعته اسپات: {quote_volume:,.0f} USDT\n\n"
+            f"🟢 قیمت ورودِ بررسی‌شده: {setup['entry']:.10g}\n"
+            f"🛑 حد ضرر: {setup['stop']:.10g} | فاصله ریسک: {setup['risk_pct']:.2f}%\n"
+            f"🎯 هدف ۲R: {setup['tp2r']:.10g} | هدف ۳R: {setup['tp3r']:.10g}\n"
+            f"🚀 هدف امتدادی +۱۰٪: {setup['stretch10']:.10g} | +۲۰٪: {setup['stretch20']:.10g}\n\n"
+            "✅ تأیید بر اساس کندل بسته‌شده، شکست مقاومت، افزایش گردش معاملات و روند ۱۵دقیقه است.\n"
+            "⚠️ هدف‌های +۱۰٪ و +۲۰٪ تضمین نیستند؛ قبل از خرید، اسپرد و عمق سفارش‌ها را بررسی کن. اگر قیمت از ورود فاصله گرفت، تعقیبش نکن."
+        )
         try:
-            parsed = {}
-            for interval, limit in (("5m", 32), ("15m", 22)):
-                response = SESSION.get(
-                    BASE + "/spot/candlesticks",
-                    params={"currency_pair": symbol, "interval": interval, "limit": limit},
-                    timeout=8,
-                )
-                response.raise_for_status()
-                rows = response.json()
-                # Normalize API ordering explicitly; the newest/forming candle is discarded.
-                rows = sorted(rows, key=lambda row: int(row[0]))
-                rows = rows[:-1]
-                parsed[interval] = [{
-                    "t": str(row[0]), "sum": row[1], "c": row[2],
-                    "h": row[3], "l": row[4], "o": row[5],
-                } for row in rows]
-            checked += 1
-            setup = detect_spot_pump_entry(parsed["5m"], parsed["15m"])
-            if not setup:
-                rejections["no_confirmed_setup"] += 1
-                continue
-
-            previous = sent_state.get(symbol, {})
-            if not isinstance(previous, dict):
-                previous = {"candle_time": str(previous), "sent_at": 0}
-            if (str(previous.get("candle_time", "")) == setup["candle_time"]
-                    or now - int(previous.get("sent_at", 0) or 0) < 6 * 3600):
-                rejections["cooldown"] += 1
-                continue
-
-            message = (
-                "🎯 SPOT PUMP | ورود تأییدشده، بدون اهرم\n"
-                "━━━━━━━━━━━━━━━━━━\n"
-                f"🪙 ارز: {symbol.replace('_', '/')} | بازار اسپات Gate.io\n"
-                f"📊 حجم کندل بسته‌شده ۵دقیقه: {setup['volume_ratio']:.2f} برابر میانگین ۲۰ کندل\n"
-                f"📈 رشد کندل شکست: {setup['change_pct']:+.2f}% | فاصله از سطح شکست: {setup['breakout_distance_pct']:.2f}%\n"
-                f"💰 گردش ۲۴ساعته اسپات: {quote_volume:,.0f} USDT\n\n"
-                f"🟢 قیمت ورودِ بررسی‌شده: {setup['entry']:.10g}\n"
-                f"🛑 حد ضرر: {setup['stop']:.10g} | فاصله ریسک: {setup['risk_pct']:.2f}%\n"
-                f"🎯 هدف ۲R: {setup['tp2r']:.10g} | هدف ۳R: {setup['tp3r']:.10g}\n"
-                f"🚀 هدف امتدادی +۱۰٪: {setup['stretch10']:.10g} | +۲۰٪: {setup['stretch20']:.10g}\n\n"
-                "✅ تأیید بر اساس کندل بسته‌شده، شکست مقاومت، افزایش گردش معاملات و روند ۱۵دقیقه است.\n"
-                "⚠️ هدف‌های +۱۰٪ و +۲۰٪ تضمین نیستند؛ قبل از خرید، اسپرد و عمق سفارش‌ها را بررسی کن. اگر قیمت از ورود فاصله گرفت، تعقیبش نکن."
-            )
             send_message(message)
             sent_state[symbol] = {"candle_time": setup["candle_time"], "sent_at": now}
             signals += 1
@@ -2400,10 +2423,8 @@ def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=40):
                 f"SPOT PUMP final entry sent: {symbol}; volume={setup['volume_ratio']:.2f}x, "
                 f"risk={setup['risk_pct']:.2f}%, entry={setup['entry']:.10g}"
             )
-            time.sleep(0.2)
         except Exception as error:
-            rejections["api_or_candle_error"] += 1
-            print(f"Gate.io spot entry {symbol} failed: {type(error).__name__}: {error}")
+            print(f"Telegram send failed for spot entry {symbol}: {type(error).__name__}: {error}")
 
     print(
         f"SPOT PUMP diagnostics: candidates={len(candidates)}, checked={checked}, "
