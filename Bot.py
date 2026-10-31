@@ -2937,6 +2937,28 @@ def apply_oi_prepump_outcome_candles(record, candles, now=None):
     return record
 
 
+def summarize_oi_prepump_outcomes(records):
+    """Summarize only completed 24h observations without presenting touch rates as win rate."""
+    completed = [
+        row for row in records
+        if isinstance(row, dict) and row.get("completed")
+    ]
+    result_names = ("tp1", "tp2", "stop", "ambiguous_same_candle_stop_first")
+    result_counts = {name: 0 for name in result_names}
+    for row in completed:
+        result = row.get("first_result")
+        if result in result_counts:
+            result_counts[result] += 1
+    return {
+        "completed": len(completed),
+        "first_result_counts": result_counts,
+        "tp1_hit": sum(bool(row.get("tp1_hit")) for row in completed),
+        "tp2_hit": sum(bool(row.get("tp2_hit")) for row in completed),
+        "stop_hit": sum(bool(row.get("stop_hit")) for row in completed),
+        "no_level_hit": sum(row.get("first_result") is None for row in completed),
+    }
+
+
 def update_oi_prepump_outcomes(state, now=None):
     """Track 24h post-signal outcomes using closed 1m candles; never sends Telegram messages."""
     now = int(time.time()) if now is None else int(now)
@@ -2962,9 +2984,21 @@ def update_oi_prepump_outcomes(state, now=None):
                 apply_oi_prepump_outcome_candles(record, candles, now=now)
         except Exception as error:
             print(f"OI PRE-PUMP outcome tracking failed for {contract}: {type(error).__name__}: {error}")
-    completed = sum(1 for row in records if isinstance(row, dict) and row.get("completed"))
+    summary = summarize_oi_prepump_outcomes(records)
     tracked = sum(1 for row in records if isinstance(row, dict) and not row.get("completed"))
-    print(f"OI PRE-PUMP outcomes: tracked={tracked}, completed_24h={completed}, total={len(records)}")
+    print(
+        "OI PRE-PUMP outcomes: "
+        f"tracked={tracked}, completed_24h={summary['completed']}, total={len(records)}"
+    )
+    if summary["completed"]:
+        print(
+            "OI PRE-PUMP outcome summary (completed records only; not a guaranteed win rate): "
+            f"first_result={summary['first_result_counts']}, "
+            f"TP1_touched={summary['tp1_hit']}/{summary['completed']}, "
+            f"TP2_touched={summary['tp2_hit']}/{summary['completed']}, "
+            f"SL_touched={summary['stop_hit']}/{summary['completed']}, "
+            f"no_level_hit={summary['no_level_hit']}"
+        )
 
 
 def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=30):
