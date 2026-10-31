@@ -2365,7 +2365,7 @@ def refresh_prepump_entry(setup, latest_close, diagnostics=None, max_chase_pct=0
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
         return reject("invalid_refresh_data")
 
-def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40):
+def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60):
     """Independently scan liquid contracts for risk-defined 1m breakout entries."""
     if not confirmed_entries:
         print("PRE-PUMP entry scan paused by BTC risk filter; no final-entry messages sent")
