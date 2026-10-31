@@ -2344,7 +2344,10 @@ def _fetch_spot_entry_setup(symbol):
             "t": str(row[0]), "sum": row[1], "c": row[2],
             "h": row[3], "l": row[4], "o": row[5],
         } for row in rows]
-    return detect_spot_pump_entry(parsed["5m"], parsed["15m"])
+    diagnostics = {}
+    setup = detect_spot_pump_entry(parsed["5m"], parsed["15m"], diagnostics)
+    reason = next(iter(diagnostics), "unknown_rejection")
+    return setup, reason
 
 
 def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=40):
@@ -2379,7 +2382,7 @@ def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=40):
     sent_state = state.setdefault("spot_pump_entry_alerts", {})
     now = int(time.time())
     checked = signals = 0
-    rejections = {"no_confirmed_setup": 0, "api_or_candle_error": 0, "cooldown": 0}
+    rejections = {"api_or_candle_error": 0, "cooldown": 0}
     results = []
 
     # Bounded concurrency prevents 40 symbols x 2 sequential HTTP calls from exhausting
@@ -2391,12 +2394,12 @@ def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=40):
         for future in as_completed(futures):
             symbol, volume = futures[future]
             try:
-                setup = future.result()
+                setup, reason = future.result()
                 checked += 1
                 if setup:
                     results.append((symbol, volume, setup))
                 else:
-                    rejections["no_confirmed_setup"] += 1
+                    rejections[reason] = rejections.get(reason, 0) + 1
             except Exception as error:
                 rejections["api_or_candle_error"] += 1
                 print(f"Gate.io spot entry {symbol} failed: {type(error).__name__}: {error}")
