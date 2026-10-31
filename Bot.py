@@ -2271,6 +2271,9 @@ def detect_liquidity_buildup(candles_1m, candles_5m):
             "close holds upper range": close_position >= 0.55,
         }
         score = sum(checks.values())
+        # Never label an already-extended or sharply falling move as early accumulation.
+        if not (-0.8 <= price_change_3m_pct <= 1.8):
+            return None
         # Require clear short-term turnover acceleration, some 5m support, and
         # at least four independent signs. Do not alert on a price spike alone.
         if turnover_1m_ratio < 1.8 or turnover_5m_ratio < 0.80 or score < 4:
