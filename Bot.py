@@ -1006,8 +1006,14 @@ def get_market_caps(state, requested_symbols=None):
     }
     return caps, sorted(ambiguous)
 
-def detect_liquidity_inflow(candles, min_volume_ratio=2.5, min_price_change_pct=0.5):
-    """Detect a closed 15m candle with an abnormal quote-turnover burst and bullish close."""
+def detect_liquidity_inflow(candles, min_volume_ratio=1.8, max_price_change_pct=0.8):
+    """
+    Detect a possible pre-pump accumulation candle on a CLOSED 15m chart.
+
+    This is an OHLCV proxy, not proof of "smart money": turnover must expand
+    while price remains relatively compressed, before a large bullish candle.
+    A separate breakout/structure confirmation is still required for entry.
+    """
     if len(candles) < 13:
         return None
     current = candles[-1]
@@ -1018,16 +1024,26 @@ def detect_liquidity_inflow(candles, min_volume_ratio=2.5, min_price_change_pct=
         avg_turnover = sum(previous_turnovers) / len(previous_turnovers)
         op, close = float(current["o"]), float(current["c"])
         high, low = float(current["h"]), float(current["l"])
-        if avg_turnover <= 0 or current_turnover <= 0 or op <= 0 or high <= low:
+        if avg_turnover <= 0 or current_turnover <= 0 or op <= 0 or high <= low or close <= 0:
             return None
+
         volume_ratio = current_turnover / avg_turnover
         price_change_pct = (close / op - 1) * 100
         close_position = (close - low) / (high - low)
+
+        # Prior four CLOSED candles should be relatively compressed; a large
+        # already-running candle is not what this early detector is looking for.
+        compression_candles = candles[-5:-1]
+        compression_high = max(float(c["h"]) for c in compression_candles)
+        compression_low = min(float(c["l"]) for c in compression_candles)
+        compression_pct = ((compression_high / compression_low) - 1) * 100 if compression_low > 0 else 999
         if (volume_ratio < min_volume_ratio
-                or price_change_pct < min_price_change_pct
-                or close_position < 0.70
-                or close <= op):
+                or price_change_pct < -0.6
+                or price_change_pct > max_price_change_pct
+                or close_position < 0.45
+                or compression_pct > 3.0):
             return None
+
         return {
             "candle_time": str(current.get("t", "")),
             "volume_ratio": volume_ratio,
@@ -1037,6 +1053,8 @@ def detect_liquidity_inflow(candles, min_volume_ratio=2.5, min_price_change_pct=
             "high": high,
             "low": low,
             "close_position": close_position,
+            "compression_pct": compression_pct,
+            "pre_pump_watch": True,
         }
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
         return None
@@ -1350,22 +1368,23 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 # Require a minimum 24h venue turnover to reduce illiquid one-candle spikes.
                 if ticker_turnover >= 500000 and last_candle_key != candle_key and int(time.time()) - last_sent_at >= 3600:
                     liquidity_message = (
-                        "💧 LEG SPIKE | هشدار ورود نقدینگی اولیه\n"
+                        "💧 LEG SPIKE | هشدار زودهنگام تجمع نقدینگی احتمالی\n"
                         "🟡━━━━━━━━━━━━━━━━━━🟡\n"
                         f"🪙 ارز: {contract.replace('_', '/')} | تایم‌فریم: ۱۵ دقیقه\n"
                         f"📊 گردش معاملات کندل: {liquidity_signal['volume_ratio']:.2f} برابر میانگین ۱۲ کندل قبلی\n"
+                        f"📦 فشردگی ۴ کندل قبلی: {liquidity_signal['compression_pct']:.2f}%\n"
                         f"📈 تغییر قیمت کندل بسته‌شده: {liquidity_signal['price_change_pct']:+.2f}%\n"
                         f"💰 قیمت بسته‌شدن: {liquidity_signal['close']:.10g}\n"
                         f"💧 گردش معاملات ۲۴ساعته صرافی: {ticker_turnover:,.0f} USDT\n"
-                        "👀 این هشدار یعنی افزایش غیرعادی فعالیت معاملاتی دیده شده؛ هنوز تأیید پامپ یا سیگنال ورود نیست. شکست سقف و ادامه حجم را بررسی کن.\n"
+                        "👀 حجم غیرعادی در کنار قیمت فشرده دیده شده؛ این فقط رصد قبل از حرکت احتمالی است، نه اثبات پامپ و نه سیگنال ورود. منتظر شکست معتبر سقف و تأیید ساختار بمان.\n"
                         "🟡━━━━━━━━━━━━━━━━━━🟡"
                     )
-                    # Suppress preliminary LEG SPIKE/liquidity Telegram alerts. Keep the signal internally for diagnostics only.
-                    print(f"{contract}: preliminary LEG SPIKE liquidity alert suppressed; waiting for confirmed entry with entry/SL/TP")
+                    send_message(liquidity_message)
                     liquidity_state[contract] = {"candle_time": candle_key, "sent_at": int(time.time())}
                     print(
-                        f"{contract}: liquidity inflow alert sent; "
+                        f"{contract}: pre-pump liquidity watch sent; "
                         f"turnover={liquidity_signal['volume_ratio']:.2f}x, "
+                        f"compression={liquidity_signal['compression_pct']:.2f}%, "
                         f"price={liquidity_signal['price_change_pct']:+.2f}%"
                     )
                 elif ticker_turnover < 500000:
