@@ -2268,8 +2268,12 @@ def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
         # 5m turnover. Reject entries after an already-extended 1m candle.
         if compression_pct > 3.5:
             return reject("compression_too_wide")
-        if turnover_ratio_5m < 1.15:
-            return reject("low_5m_turnover")
+        if turnover_ratio_5m < 1.05:
+            if turnover_ratio_5m < 0.80:
+                return reject("low_5m_turnover_below_0.80x")
+            if turnover_ratio_5m < 1.00:
+                return reject("low_5m_turnover_0.80_to_1.00x")
+            return reject("low_5m_turnover_1.00_to_1.05x")
         if close <= prior_high:
             return reject("no_1m_breakout")
         if close <= op:
