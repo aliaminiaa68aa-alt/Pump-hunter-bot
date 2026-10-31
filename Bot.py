@@ -2837,12 +2837,95 @@ def detect_oi_prepump_watch(candles_1m, candles_5m, diagnostics=None):
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
         return reject("malformed_candle_data")
 
+def apply_oi_prepump_outcome_candles(record, candles, now=None):
+    """Update a long OI PRE-PUMP signal's observed excursion and first risk/target event."""
+    now = int(time.time()) if now is None else int(now)
+    entry = float(record["entry"])
+    stop = float(record["stop"])
+    tp1 = float(record["tp1"])
+    tp2 = float(record["tp2"])
+    last_time = int(record.get("last_candle_time", 0) or 0)
+    ordered = sorted(candles, key=lambda row: int(row.get("t", 0) or 0))
+    for candle in ordered:
+        candle_time = int(candle.get("t", 0) or 0)
+        if candle_time <= last_time:
+            continue
+        high = float(candle["h"])
+        low = float(candle["l"])
+        if high <= 0 or low <= 0:
+            continue
+        favorable = (high / entry - 1) * 100
+        adverse = (low / entry - 1) * 100
+        record["max_favorable_pct"] = max(float(record.get("max_favorable_pct", 0.0)), favorable)
+        record["max_adverse_pct"] = min(float(record.get("max_adverse_pct", 0.0)), adverse)
+        hit_stop = low <= stop
+        hit_tp1 = high >= tp1
+        hit_tp2 = high >= tp2
+        record["tp1_hit"] = bool(record.get("tp1_hit")) or hit_tp1
+        record["tp2_hit"] = bool(record.get("tp2_hit")) or hit_tp2
+        record["stop_hit"] = bool(record.get("stop_hit")) or hit_stop
+        if record.get("first_result") is None:
+            if hit_stop and (hit_tp1 or hit_tp2):
+                # OHLC does not tell which level was touched first inside one candle.
+                # Use the conservative assumption: stop happened first.
+                record["first_result"] = "ambiguous_same_candle_stop_first"
+                record["first_result_time"] = candle_time
+            elif hit_stop:
+                record["first_result"] = "stop"
+                record["first_result_time"] = candle_time
+            elif hit_tp2:
+                record["first_result"] = "tp2"
+                record["first_result_time"] = candle_time
+            elif hit_tp1:
+                record["first_result"] = "tp1"
+                record["first_result_time"] = candle_time
+        last_time = candle_time
+    record["last_candle_time"] = last_time
+    age = now - int(record.get("created_at", now) or now)
+    if age >= 24 * 3600:
+        record["completed"] = True
+        record["completed_at"] = now
+    return record
+
+
+def update_oi_prepump_outcomes(state, now=None):
+    """Track 24h post-signal outcomes using closed 1m candles; never sends Telegram messages."""
+    now = int(time.time()) if now is None else int(now)
+    records = state.setdefault("oi_prepump_outcomes", [])
+    if not isinstance(records, list) or not records:
+        return
+    active_by_symbol = {}
+    for record in records:
+        if not isinstance(record, dict) or record.get("completed"):
+            continue
+        created_at = int(record.get("created_at", now) or now)
+        if now - created_at >= 24 * 3600:
+            record["completed"] = True
+            record["completed_at"] = now
+            continue
+        symbol = record.get("contract")
+        if symbol:
+            active_by_symbol.setdefault(symbol, []).append(record)
+    for contract, active_records in active_by_symbol.items():
+        try:
+            candles = closed_candles(contract, "1m", 30)
+            for record in active_records:
+                apply_oi_prepump_outcome_candles(record, candles, now=now)
+        except Exception as error:
+            print(f"OI PRE-PUMP outcome tracking failed for {contract}: {type(error).__name__}: {error}")
+    completed = sum(1 for row in records if isinstance(row, dict) and row.get("completed"))
+    tracked = sum(1 for row in records if isinstance(row, dict) and not row.get("completed"))
+    print(f"OI PRE-PUMP outcomes: tracked={tracked}, completed_24h={completed}, total={len(records)}")
+
+
 def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=30):
     """
     Separate OI-led pre-pump entry engine.
     Looks for 5m structure/turnover confirmation while the move is still small,
     then requires rising 5m OI and non-crowded funding before sending entry/SL/TP.
     """
+    # Track previous OI PRE-PUMP signals even when new entries are paused by BTC risk.
+    update_oi_prepump_outcomes(state)
     if not confirmed_entries:
         print("OI PRE-PUMP paused by BTC risk filter")
         return
@@ -2975,6 +3058,29 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
             )
             send_message(message)
             sent_state[contract] = {"candle_time": str(setup["candle_time"]), "sent_at": now}
+            outcome_records = state.setdefault("oi_prepump_outcomes", [])
+            outcome_records.append({
+                "contract": contract,
+                "strategy": "OI PRE-PUMP",
+                "direction": "LONG",
+                "created_at": now,
+                "last_candle_time": int(candles_1m[-1].get("t", 0) or 0),
+                "entry": float(setup["entry"]),
+                "stop": float(setup["stop"]),
+                "tp1": float(setup["tp1"]),
+                "tp2": float(setup["tp2"]),
+                "max_favorable_pct": 0.0,
+                "max_adverse_pct": 0.0,
+                "tp1_hit": False,
+                "tp2_hit": False,
+                "stop_hit": False,
+                "first_result": None,
+                "first_result_time": None,
+                "completed": False,
+            })
+            # Bound state size while preserving the newest 200 outcomes.
+            if len(outcome_records) > 200:
+                del outcome_records[:-200]
             signals += 1
             print(
                 f"OI PRE-PUMP final signal sent: {contract}; OI5m={oi_change:+.3f}%; "
