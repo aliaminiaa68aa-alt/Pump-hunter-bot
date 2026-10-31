@@ -2970,7 +2970,7 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                         watch_source = "Coinalyze aggregate"
                     else:
                         watch_derivatives = public_derivatives_check(contract)
-                        watch_source = "Bybit public 5m"
+                        watch_source = watch_derivatives.get("source", "Bybit public 5m")
                     if pre_pump_oi_gate(watch_derivatives):
                         watch_state = state.setdefault("oi_prepump_watch", {})
                         previous_watch = watch_state.get(contract, {})
@@ -3016,7 +3016,7 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                 source = "Coinalyze aggregate"
             else:
                 derivatives = public_derivatives_check(contract)
-                source = "Bybit public 5m"
+                source = derivatives.get("source", "Bybit public 5m")
             if not pre_pump_oi_gate(derivatives):
                 oi = derivatives.get("oi_change")
                 funding = derivatives.get("funding_rate")
