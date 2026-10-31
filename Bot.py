@@ -2221,14 +2221,19 @@ def scan_gateio_spot_liquidity(state, max_symbols=60):
     print(f"Gate.io spot liquidity scan: candidates={len(candidates)}, checked={checked}, alerts={sent}")
 
 
-def detect_prepump_entry(candles_1m, candles_5m):
+def detect_prepump_entry(candles_1m, candles_5m, diagnostics=None):
     """
     Return a risk-defined long entry only when 5m price compression/turnover
     expansion is followed by a CLOSED 1m breakout with abnormal turnover.
     This is a rule-based setup, not proof of manipulation or guaranteed profit.
     """
-    if len(candles_1m) < 22 or len(candles_5m) < 19:
+    def reject(reason):
+        if diagnostics is not None:
+            diagnostics[reason] = diagnostics.get(reason, 0) + 1
         return None
+
+    if len(candles_1m) < 22 or len(candles_5m) < 19:
+        return reject("insufficient_candles")
     try:
         current = candles_1m[-1]
         prior_1m = candles_1m[-6:-1]
@@ -2238,7 +2243,7 @@ def detect_prepump_entry(candles_1m, candles_5m):
         op, close = float(current["o"]), float(current["c"])
         high, low = float(current["h"]), float(current["l"])
         if op <= 0 or close <= 0 or high <= low:
-            return None
+            return reject("invalid_ohlc")
 
         prior_high = max(float(c["h"]) for c in prior_1m)
         swing_low = min(float(c["l"]) for c in prior_1m)
@@ -2247,32 +2252,40 @@ def detect_prepump_entry(candles_1m, candles_5m):
         recent_5m_turnover = sum(float(c.get("sum", 0) or 0) for c in context_5m) / len(context_5m)
         baseline_5m_turnover = sum(float(c.get("sum", 0) or 0) for c in baseline_5m) / len(baseline_5m)
         if min(avg_1m_turnover, baseline_5m_turnover, current_turnover) <= 0:
-            return None
+            return reject("missing_turnover")
 
         turnover_ratio_1m = current_turnover / avg_1m_turnover
         turnover_ratio_5m = recent_5m_turnover / baseline_5m_turnover
         compression_low = min(float(c["l"]) for c in context_5m)
         compression_high = max(float(c["h"]) for c in context_5m)
         if compression_low <= 0:
-            return None
+            return reject("invalid_compression_range")
         compression_pct = (compression_high / compression_low - 1) * 100
         candle_change_pct = (close / op - 1) * 100
         close_position = (close - low) / (high - low)
 
         # Breakout must occur now, after a relatively tight range and increasing
         # 5m turnover. Reject entries after an already-extended 1m candle.
-        if compression_pct > 3.5 or turnover_ratio_5m < 1.15:
-            return None
-        if not (close > prior_high and close > op and 0.10 <= candle_change_pct <= 2.0):
-            return None
-        if turnover_ratio_1m < 1.5 or close_position < 0.65:
-            return None
+        if compression_pct > 3.5:
+            return reject("compression_too_wide")
+        if turnover_ratio_5m < 1.15:
+            return reject("low_5m_turnover")
+        if close <= prior_high:
+            return reject("no_1m_breakout")
+        if close <= op:
+            return reject("not_bullish")
+        if not (0.10 <= candle_change_pct <= 2.0):
+            return reject("1m_move_out_of_range")
+        if turnover_ratio_1m < 1.5:
+            return reject("low_1m_turnover")
+        if close_position < 0.65:
+            return reject("weak_close_position")
 
         entry = close
         stop = min(swing_low, prior_high) - entry * 0.001
         risk_pct = (entry - stop) / entry * 100
         if not (0.20 <= risk_pct <= 1.50):
-            return None
+            return reject("risk_out_of_range")
         risk = entry - stop
         return {
             "candle_time": str(current.get("t", "")),
@@ -2288,7 +2301,7 @@ def detect_prepump_entry(candles_1m, candles_5m):
             "price_change_pct": candle_change_pct,
         }
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
-        return None
+        return reject("malformed_candle")
 
 
 def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40):
@@ -2312,13 +2325,14 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40)
     sent_state = state.setdefault("prepump_entry_alerts", {})
     now = int(time.time())
     checked = signals = 0
+    rejection_counts = {}
 
     for turnover, contract in ranked:
         try:
             candles_1m = closed_candles(contract, "1m", 25)
             candles_5m = closed_candles(contract, "5m", 25)
             checked += 1
-            setup = detect_prepump_entry(candles_1m, candles_5m)
+            setup = detect_prepump_entry(candles_1m, candles_5m, rejection_counts)
             if not setup:
                 continue
             previous = sent_state.get(contract, {})
@@ -2353,7 +2367,8 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=40)
             time.sleep(0.15)
         except Exception as error:
             print(f"PRE-PUMP {contract} scan failed: {type(error).__name__}: {error}")
-    print(f"PRE-PUMP entry scan: candidates={len(ranked)}, checked={checked}, final_signals={signals}")
+    reasons = ", ".join(f"{key}={value}" for key, value in sorted(rejection_counts.items()))
+    print(f"PRE-PUMP entry scan: candidates={len(ranked)}, checked={checked}, final_signals={signals}; rejections: {reasons or 'none'}")
 
 
 def scan():
