@@ -45,6 +45,13 @@ class OIPrePumpWatchTests(unittest.TestCase):
         one, five = self.candles(strong_volume=False)
         self.assertIsNone(detect_oi_prepump_watch(one, five))
 
+
+    def test_reports_rejection_reason_for_diagnostics(self):
+        one, five = self.candles(near_resistance=False)
+        diagnostics = {}
+        self.assertIsNone(detect_oi_prepump_watch(one, five, diagnostics=diagnostics))
+        self.assertEqual(diagnostics.get("not_near_resistance"), 1)
+
     def test_rejects_wide_compression(self):
         one, five = self.candles(compressed=False)
         self.assertIsNone(detect_oi_prepump_watch(one, five))
