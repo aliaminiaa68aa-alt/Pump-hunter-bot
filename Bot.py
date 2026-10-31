@@ -2432,13 +2432,31 @@ def scan_gateio_spot_entries(state, confirmed_entries=True, max_symbols=40):
     )
 
 
+def _fetch_spot_liquidity_setup(symbol):
+    """Fetch and evaluate one closed 15m spot candle set; safe for bounded parallel use."""
+    response = SESSION.get(
+        BASE + "/spot/candlesticks",
+        params={"currency_pair": symbol, "interval": "15m", "limit": 14},
+        timeout=5,
+    )
+    response.raise_for_status()
+    raw = response.json()
+    if not isinstance(raw, list):
+        raise RuntimeError("Unexpected Gate.io spot candlestick response")
+    # Gate.io spot candle rows: [timestamp, quote_volume, close, high, low, open].
+    # Drop the currently-forming candle so only completed 15m candles count.
+    raw = raw[:-1]
+    candles = [{
+        "t": str(row[0]), "sum": row[1], "c": row[2],
+        "h": row[3], "l": row[4], "o": row[5],
+    } for row in raw if isinstance(row, (list, tuple)) and len(row) >= 6]
+    return detect_liquidity_inflow(candles)
+
+
 def scan_gateio_spot_liquidity(state, max_symbols=60):
     """Independently scan liquid Gate.io spot USDT pairs for a closed 15m turnover burst."""
     try:
-        response = SESSION.get(
-            BASE + "/spot/tickers",
-            timeout=15,
-        )
+        response = SESSION.get(BASE + "/spot/tickers", timeout=10)
         response.raise_for_status()
         tickers = response.json()
         if not isinstance(tickers, list):
@@ -2464,28 +2482,28 @@ def scan_gateio_spot_liquidity(state, max_symbols=60):
     alert_state = state.setdefault("spot_liquidity_alerts", {})
     checked = sent = 0
     now = int(time.time())
+    results = []
 
-    for symbol, quote_volume in candidates:
+    # Do not let up to 60 sequential candle requests consume the scan budget.
+    # Fetch in parallel, then send Telegram alerts sequentially to preserve state integrity.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {
+            pool.submit(_fetch_spot_liquidity_setup, symbol): (symbol, quote_volume)
+            for symbol, quote_volume in candidates
+        }
+        for future in as_completed(futures):
+            symbol, quote_volume = futures[future]
+            try:
+                signal = future.result()
+                checked += 1
+                if signal:
+                    results.append((symbol, quote_volume, signal))
+            except Exception as error:
+                print(f"Gate.io spot {symbol} scan failed: {type(error).__name__}: {error}")
+
+    for symbol, quote_volume, signal in sorted(results, key=lambda item: item[1], reverse=True):
         try:
-            response = SESSION.get(
-                BASE + "/spot/candlesticks",
-                params={"currency_pair": symbol, "interval": "15m", "limit": 14},
-                timeout=10,
-            )
-            response.raise_for_status()
-            raw = response.json()
-            # Gate.io spot candle rows: [timestamp, quote_volume, close, high, low, open].
-            # Drop the currently-forming candle so only completed 15m candles count.
-            raw = raw[:-1]
-            candles = [{
-                "t": str(row[0]), "sum": row[1], "c": row[2],
-                "h": row[3], "l": row[4], "o": row[5],
-            } for row in raw]
-            checked += 1
-            signal = detect_liquidity_inflow(candles)
-            if not signal:
-                continue
-
             previous = alert_state.get(symbol, {})
             if isinstance(previous, str):
                 previous = {"candle_time": previous, "sent_at": 0}
@@ -2494,12 +2512,12 @@ def scan_gateio_spot_liquidity(state, max_symbols=60):
                 continue
 
             message = (
-                "💧 GATE.IO SPOT | هشدار ورود نقدینگی اولیه\n"
-                f"🪙 {symbol.replace('_', '/')}\n"
-                f"📊 گردش معاملات کندل ۱۵دقیقه: {signal['volume_ratio']:.2f} برابر میانگین ۱۲ کندل قبلی\n"
-                f"📈 تغییر قیمت کندل بسته‌شده: {signal['price_change_pct']:+.2f}%\n"
-                f"💰 گردش معاملات ۲۴ساعته: {quote_volume:,.0f} USDT\n"
-                f"📍 قیمت بسته‌شدن: {signal['close']:.10g}\n\n"
+                "💧 GATE.IO SPOT | هشدار ورود نقدینگی اولیه\\n"
+                f"🪙 {symbol.replace('_', '/')}\\n"
+                f"📊 گردش معاملات کندل ۱۵دقیقه: {signal['volume_ratio']:.2f} برابر میانگین ۱۲ کندل قبلی\\n"
+                f"📈 تغییر قیمت کندل بسته‌شده: {signal['price_change_pct']:+.2f}%\\n"
+                f"💰 گردش معاملات ۲۴ساعته: {quote_volume:,.0f} USDT\\n"
+                f"📍 قیمت بسته‌شدن: {signal['close']:.10g}\\n\\n"
                 "👀 هشدار اولیه است؛ به‌تنهایی تأیید پامپ یا توصیه ورود نیست."
             )
             send_message(message)
@@ -2509,10 +2527,9 @@ def scan_gateio_spot_liquidity(state, max_symbols=60):
             print(f"Gate.io spot liquidity alert sent: {symbol}; turnover={signal['volume_ratio']:.2f}x")
             time.sleep(0.2)
         except Exception as error:
-            print(f"Gate.io spot {symbol} scan failed: {type(error).__name__}: {error}")
+            print(f"Telegram send failed for spot liquidity {symbol}: {type(error).__name__}: {error}")
 
     print(f"Gate.io spot liquidity scan: candidates={len(candidates)}, checked={checked}, alerts={sent}")
-
 
 def detect_liquidity_buildup(candles_1m, candles_5m):
     """
