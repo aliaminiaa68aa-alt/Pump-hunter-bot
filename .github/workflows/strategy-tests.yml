@@ -1,0 +1,29 @@
+name: Strategy Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - feature/pre-pump-liquidity-detection
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile-check bot syntax
+        run: python -m py_compile Bot.py
+      - name: Run strategy regression tests
+        run: python -m unittest discover -s tests -v
