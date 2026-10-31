@@ -2248,10 +2248,15 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     print(f"LEG SPIKE highest volume/market-cap candidates: {top_volume}")
 
 
-def detect_spot_pump_entry(candles_5m, candles_15m):
-    """Return a risk-defined spot breakout only after closed-candle price/turnover confirmation."""
-    if len(candles_5m) < 22 or len(candles_15m) < 20:
+def detect_spot_pump_entry(candles_5m, candles_15m, diagnostics=None):
+    """Return a risk-defined spot breakout; optionally count the first failed gate."""
+    def reject(reason):
+        if diagnostics is not None:
+            diagnostics[reason] = diagnostics.get(reason, 0) + 1
         return None
+
+    if len(candles_5m) < 22 or len(candles_15m) < 20:
+        return reject("insufficient_candles")
     try:
         current = candles_5m[-1]
         prior = candles_5m[-13:-1]
@@ -2263,18 +2268,22 @@ def detect_spot_pump_entry(candles_5m, candles_15m):
         avg_turnover = sum(turnovers) / len(turnovers)
         current_turnover = float(current.get("sum", 0) or 0)
         if min(op, close, low, prior_high, avg_turnover, current_turnover) <= 0 or high <= low:
-            return None
+            return reject("invalid_candle_data")
 
         change_pct = (close / op - 1) * 100
         volume_ratio = current_turnover / avg_turnover
         close_position = (close - low) / (high - low)
         breakout_distance_pct = (close / prior_high - 1) * 100
         if not (close > op and close > prior_high):
-            return None
-        if not (0.5 <= change_pct <= 4.5 and volume_ratio >= 2.2):
-            return None
-        if close_position < 0.65 or not (0 <= breakout_distance_pct <= 2.5):
-            return None
+            return reject("no_bullish_breakout")
+        if not (0.5 <= change_pct <= 4.5):
+            return reject("candle_move_out_of_range")
+        if volume_ratio < 2.2:
+            return reject("low_turnover_ratio")
+        if close_position < 0.65:
+            return reject("weak_close_position")
+        if not (0 <= breakout_distance_pct <= 2.5):
+            return reject("breakout_distance_out_of_range")
 
         closes_15m = [float(row["c"]) for row in candles_15m[-20:]]
         last15 = candles_15m[-1]
@@ -2286,15 +2295,17 @@ def detect_spot_pump_entry(candles_5m, candles_15m):
         alpha = 2 / (len(closes_15m) + 1)
         for price in closes_15m[1:]:
             ema = alpha * price + (1 - alpha) * ema
-        if last15_close <= ema or last15_close < previous15_close:
-            return None
+        if last15_close <= ema:
+            return reject("below_15m_ema20")
+        if last15_close < previous15_close:
+            return reject("falling_15m_close")
         if last15_open <= 0 or (last15_close / last15_open - 1) * 100 < -1.0:
-            return None
+            return reject("weak_15m_candle")
 
         stop = min(low, prior_high * 0.997)
         risk_pct = (close - stop) / close * 100
         if not (0.4 <= risk_pct <= 3.0) or stop >= close:
-            return None
+            return reject("risk_distance_out_of_range")
         risk = close - stop
         return {
             "candle_time": str(current.get("t", "")),
@@ -2311,8 +2322,7 @@ def detect_spot_pump_entry(candles_5m, candles_15m):
             "breakout_distance_pct": breakout_distance_pct,
         }
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
-        return None
-
+        return reject("invalid_candle_data")
 
 def _fetch_spot_entry_setup(symbol):
     """Fetch closed spot candles and evaluate one market; suitable for bounded parallel scans."""
