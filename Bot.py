@@ -1271,7 +1271,10 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
         contract[:-5] for contract in candidates
         if contract in live_contracts and is_crypto_contract(contract)
     ]
-    cap_symbols = list(dict.fromkeys(cap_symbols + tracked_symbols))
+    # Resolve persisted Stage-1 setups first in fallback providers: CMC and
+    # exact-symbol searches have per-scan limits, so turnover-ranked newcomers
+    # must not consume those slots before a tracked setup gets market-cap data.
+    cap_symbols = list(dict.fromkeys(tracked_symbols + cap_symbols))
     caps, ambiguous = get_market_caps(state, cap_symbols)
     market_volumes = state.get("market_cap_cache", {}).get("volumes", {})
     sent = state["fib_alerts"]
