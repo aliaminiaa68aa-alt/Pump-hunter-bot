@@ -80,8 +80,8 @@ class PrePumpEntryTests(unittest.TestCase):
 
     def test_diagnostics_prioritize_missing_breakout_over_low_volume(self):
         one_minute, five_minute = self.make_valid_setup()
-        one_minute[-1]["c"] = "100.10"
-        one_minute[-1]["h"] = "100.20"
+        five_minute[-1]["c"] = "100.10"
+        five_minute[-1]["h"] = "100.20"
         five_minute[-1]["sum"] = "10"
         diagnostics = {}
         result = Bot.detect_prepump_entry(one_minute, five_minute, diagnostics)
