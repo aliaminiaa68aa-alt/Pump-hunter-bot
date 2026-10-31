@@ -160,10 +160,7 @@ class PrePumpEntryTests(unittest.TestCase):
             "price_change_3m_pct": 0.2,
         }
         tickers = [{"contract": "AIN_USDT", "volume_24h_quote": "1000000"}]
-        with patch.object(Bot, "closed_candles", return_value=candles), \\
-             patch.object(Bot, "detect_liquidity_buildup", return_value=radar), \\
-             patch.object(Bot, "detect_recent_prepump_entry", return_value=None), \\
-             patch.object(Bot, "send_message") as send_message:
+        with patch.object(Bot, "closed_candles", return_value=candles), patch.object(Bot, "detect_liquidity_buildup", return_value=radar), patch.object(Bot, "detect_recent_prepump_entry", return_value=None), patch.object(Bot, "send_message") as send_message:
             Bot.scan_prepump_entries(tickers, {}, confirmed_entries=True, max_symbols=60)
         send_message.assert_not_called()
 
