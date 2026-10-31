@@ -2512,12 +2512,12 @@ def scan_gateio_spot_liquidity(state, max_symbols=60):
                 continue
 
             message = (
-                "💧 GATE.IO SPOT | هشدار ورود نقدینگی اولیه\\n"
-                f"🪙 {symbol.replace('_', '/')}\\n"
-                f"📊 گردش معاملات کندل ۱۵دقیقه: {signal['volume_ratio']:.2f} برابر میانگین ۱۲ کندل قبلی\\n"
-                f"📈 تغییر قیمت کندل بسته‌شده: {signal['price_change_pct']:+.2f}%\\n"
-                f"💰 گردش معاملات ۲۴ساعته: {quote_volume:,.0f} USDT\\n"
-                f"📍 قیمت بسته‌شدن: {signal['close']:.10g}\\n\\n"
+                "💧 GATE.IO SPOT | هشدار ورود نقدینگی اولیه\n"
+                f"🪙 {symbol.replace('_', '/')}\n"
+                f"📊 گردش معاملات کندل ۱۵دقیقه: {signal['volume_ratio']:.2f} برابر میانگین ۱۲ کندل قبلی\n"
+                f"📈 تغییر قیمت کندل بسته‌شده: {signal['price_change_pct']:+.2f}%\n"
+                f"💰 گردش معاملات ۲۴ساعته: {quote_volume:,.0f} USDT\n"
+                f"📍 قیمت بسته‌شدن: {signal['close']:.10g}\n\n"
                 "👀 هشدار اولیه است؛ به‌تنهایی تأیید پامپ یا توصیه ورود نیست."
             )
             send_message(message)
