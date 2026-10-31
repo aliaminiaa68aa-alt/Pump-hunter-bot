@@ -205,5 +205,31 @@ class PrePumpEntryTests(unittest.TestCase):
         send_message.assert_not_called()
 
 
+    def test_reports_same_candle_duplicate_suppression(self):
+        setup = {"candle_time": "100"}
+        diagnostics = {}
+        reason = Bot.prepump_suppression_reason(
+            {"candle_time": "100", "sent_at": 1}, setup, now=2000, diagnostics=diagnostics
+        )
+        self.assertEqual(reason, "duplicate_candle_suppressed")
+        self.assertEqual(diagnostics.get("duplicate_candle_suppressed"), 1)
+
+    def test_reports_recent_setup_cooldown_suppression(self):
+        setup = {"candle_time": "200"}
+        diagnostics = {}
+        reason = Bot.prepump_suppression_reason(
+            {"candle_time": "100", "sent_at": 1500}, setup, now=2000, diagnostics=diagnostics
+        )
+        self.assertEqual(reason, "cooldown_suppressed")
+        self.assertEqual(diagnostics.get("cooldown_suppressed"), 1)
+
+    def test_allows_new_setup_after_cooldown(self):
+        setup = {"candle_time": "200"}
+        reason = Bot.prepump_suppression_reason(
+            {"candle_time": "100", "sent_at": 100}, setup, now=3000
+        )
+        self.assertIsNone(reason)
+
+
 if __name__ == "__main__":
     unittest.main()
