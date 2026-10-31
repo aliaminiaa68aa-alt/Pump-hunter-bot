@@ -2458,6 +2458,24 @@ def refresh_prepump_entry(setup, latest_close, diagnostics=None, max_chase_pct=0
     except (TypeError, ValueError, KeyError, ZeroDivisionError):
         return reject("invalid_refresh_data")
 
+
+def prepump_suppression_reason(previous, setup, now, cooldown_seconds=1800, diagnostics=None):
+    """Explain whether a valid PRE-PUMP setup is a duplicate or within cooldown."""
+    if isinstance(previous, str):
+        previous = {"candle_time": previous, "sent_at": 0}
+    previous = previous or {}
+    if str(previous.get("candle_time", "")) == str(setup.get("candle_time", "")):
+        reason = "duplicate_candle_suppressed"
+    else:
+        try:
+            sent_at = int(previous.get("sent_at", 0) or 0)
+        except (TypeError, ValueError):
+            sent_at = 0
+        reason = "cooldown_suppressed" if sent_at and now - sent_at < cooldown_seconds else None
+    if reason and diagnostics is not None:
+        diagnostics[reason] = diagnostics.get(reason, 0) + 1
+    return reason
+
 def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60):
     """Independently scan liquid contracts for risk-defined 1m breakout entries."""
     if not confirmed_entries:
@@ -2517,10 +2535,9 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
             if not setup:
                 continue
             previous = sent_state.get(contract, {})
-            if isinstance(previous, str):
-                previous = {"candle_time": previous, "sent_at": 0}
-            if (str(previous.get("candle_time", "")) == setup["candle_time"]
-                    or now - int(previous.get("sent_at", 0) or 0) < 1800):
+            suppression = prepump_suppression_reason(previous, setup, now, diagnostics=rejection_counts)
+            if suppression:
+                print(f"PRE-PUMP {contract}: valid setup suppressed ({suppression})")
                 continue
 
             message = (
