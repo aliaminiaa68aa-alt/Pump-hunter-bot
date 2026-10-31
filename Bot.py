@@ -2480,7 +2480,6 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
     now = int(time.time())
     checked = signals = 0
     rejection_counts = {}
-    radar_alerts_to_send = []
 
     for turnover, contract in ranked:
         try:
@@ -2498,23 +2497,13 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
                 radar_age = now - int(previous_radar.get("sent_at", 0) or 0)
                 same_radar_candle = str(previous_radar.get("candle_time", "")) == radar["candle_time"]
                 if not same_radar_candle and radar_age >= 2700:
-                    radar_message = (
-                        "💧 رادار نقدینگی | نامزد احتمالی حرکت\n"
-                        "━━━━━━━━━━━━━━━━━━\n"
-                        f"🪙 ارز: {contract.replace('_', '/')}\n"
-                        f"⭐ امتیاز نشانه‌ها: {radar['score']}/5\n"
-                        f"📊 گردش ۱دقیقه نسبت به خط پایه: {radar['turnover_1m_ratio']:.2f}x\n"
-                        f"💧 گردش ۵دقیقه نسبت به خط پایه: {radar['turnover_5m_ratio']:.2f}x\n"
-                        f"📦 دامنهٔ ۶ کندل ۵دقیقه: {radar['compression_pct']:.2f}%\n"
-                        f"📈 تغییر قیمت ۳دقیقه: {radar['price_change_3m_pct']:+.2f}%\n"
-                        "👀 فقط رصد اولیه است؛ ورود نیست و هنوز باید جهت جریان سفارش/OI و شکست قیمت تأیید شود."
-                    )
-                    radar_alerts_to_send.append((contract, radar))
+                    # Internal-only watch: only confirmed entries with Entry/SL/TP go to Telegram.
                     print(
-                        f"LIQUIDITY RADAR candidate: {contract}; score={radar['score']}/5; "
+                        f"LIQUIDITY RADAR internal candidate: {contract}; score={radar['score']}/5; "
                         f"relvol1m={radar['turnover_1m_ratio']:.2f}x; "
                         f"relvol5m={radar['turnover_5m_ratio']:.2f}x"
                     )
+                    radar_state[contract] = {"candle_time": radar["candle_time"], "sent_at": now}
 
             setup = detect_recent_prepump_entry(candles_1m, candles_5m, lookback=5, diagnostics=rejection_counts)
             if not setup:
@@ -2561,51 +2550,6 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
             time.sleep(0.15)
         except Exception as error:
             print(f"PRE-PUMP {contract} scan failed: {type(error).__name__}: {error}")
-    # A global digest cooldown prevents a fresh Telegram message every five-minute scan.
-    radar_digest_state = state.setdefault("liquidity_radar_digest", {})
-    last_digest_sent = int(radar_digest_state.get("sent_at", 0) or 0)
-    digest_cooldown_seconds = 600
-    # Batch only strict, high-quality candidates; keep collecting during cooldown.
-    if radar_alerts_to_send and now - last_digest_sent >= digest_cooldown_seconds:
-        radar_alerts_to_send.sort(
-            key=lambda item: (
-                item[1]["score"],
-                item[1]["turnover_1m_ratio"],
-                item[1]["turnover_5m_ratio"],
-            ),
-            reverse=True,
-        )
-        # Telegram messages have a length limit; send at most 5 best candidates.
-        batch = radar_alerts_to_send[:5]
-        lines = [
-            "💧 رادار نقدینگی | فهرست نامزدهای احتمالی حرکت",
-            "━━━━━━━━━━━━━━━━━━",
-            f"🔎 تعداد نامزدهای تازه در این اسکن: {len(radar_alerts_to_send)}",
-            "",
-        ]
-        for contract, radar in batch:
-            lines.extend([
-                f"🪙 {contract.replace('_', '/')}",
-                f"⭐ نشانه‌ها: {radar['score']}/5 | گردش ۱دقیقه: {radar['turnover_1m_ratio']:.2f}x | گردش ۵دقیقه: {radar['turnover_5m_ratio']:.2f}x",
-                f"📦 دامنه: {radar['compression_pct']:.2f}% | تغییر قیمت ۳دقیقه: {radar['price_change_3m_pct']:+.2f}%",
-                "",
-            ])
-        lines.append("👀 رصد اولیه است، سیگنال ورود نیست؛ جهت جریان سفارش/OI و شکست قیمت باید تأیید شوند.")
-        send_message("\n".join(lines))
-        for contract, radar in batch:
-            radar_state[contract] = {"candle_time": radar["candle_time"], "sent_at": now}
-        radar_digest_state["sent_at"] = now
-        print(
-            f"LIQUIDITY RADAR high-quality digest sent: included={len(batch)}, "
-            f"qualified_candidates={len(radar_alerts_to_send)}, cooldown={digest_cooldown_seconds}s"
-        )
-    elif radar_alerts_to_send:
-        print(
-            f"LIQUIDITY RADAR digest held by global cooldown: "
-            f"qualified_candidates={len(radar_alerts_to_send)}, "
-            f"seconds_remaining={max(0, digest_cooldown_seconds - (now - last_digest_sent))}"
-        )
-
     reasons = ", ".join(f"{key}={value}" for key, value in sorted(rejection_counts.items()))
     print(f"PRE-PUMP entry scan: candidates={len(ranked)}, checked={checked}, final_signals={signals}; rejections: {reasons or 'none'}")
 
