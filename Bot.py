@@ -101,15 +101,25 @@ def closed_candles(contract, interval, limit):
 
 
 def btc_market_filter():
-    """Only pause final entries during an unusually sharp BTC 15m sell-off."""
-    candles = closed_candles("BTC_USDT", "15m", 4)
-    if len(candles) < 2:
-        print("BTC risk filter: insufficient 15m candle data; allowing scan")
-        return True, None
-    candle = candles[-1]
-    open_price = float(candle["o"])
-    close_price = float(candle["c"])
-    change = (close_price / open_price - 1) * 100 if open_price else 0.0
+    """Pause final entries on a severe BTC 15m sell-off or unavailable/invalid BTC data."""
+    try:
+        candles = closed_candles("BTC_USDT", "15m", 4)
+        if len(candles) < 2:
+            print("BTC risk filter: insufficient closed 15m candles; pausing final entries for safety")
+            return False, None
+        candle = candles[-1]
+        open_price = float(candle["o"])
+        close_price = float(candle["c"])
+        if open_price <= 0 or close_price <= 0:
+            raise ValueError("invalid BTC 15m candle prices")
+        change = (close_price / open_price - 1) * 100
+    except Exception as error:
+        print(
+            f"BTC risk filter: BTC 15m data unavailable/invalid "
+            f"({type(error).__name__}); pausing final entries for safety"
+        )
+        return False, None
+
     print(f"BTC 15m closed-candle change: {change:+.2f}%")
     # A routine BTC pullback must not veto an independently confirmed altcoin setup.
     # A closed 15m BTC candle at -2.0% or lower pauses final-entry alerts.
