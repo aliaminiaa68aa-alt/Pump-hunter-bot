@@ -166,11 +166,6 @@ class CoinalyzeClient:
         ohlcv_hist = self._history("ohlcv-history", market_symbol, start, end)
 
         oi_change_pct = None
-        if len(oi_hist) >= 3:
-            old = float(oi_hist[-3].get("c", 0) or 0)
-            new = float(oi_hist[-1].get("c", 0) or 0)
-            if old > 0:
-                oi_change_pct = (new / old - 1.0) * 100.0
 
         last_lsr = lsr_hist[-1] if lsr_hist else {}
         last_liq = liquidation_hist[-1] if liquidation_hist else {}
@@ -191,12 +186,22 @@ class CoinalyzeClient:
         aligned = [
             row for row in closed_ohlcv if int(row["t"]) in oi_by_time
         ]
+        # Confirm OI and taker flow against the same latest CLOSED 15m candle.
+        aligned_metrics = aligned[-3:]
+        cadence_ok = (
+            len(aligned_metrics) == 3
+            and all(
+                int(b["t"]) - int(a["t"]) == 15 * 60
+                for a, b in zip(aligned_metrics, aligned_metrics[1:])
+            )
+        )
+        if cadence_ok:
+            old_oi = float(oi_by_time[int(aligned_metrics[0]["t"])].get("c", 0) or 0)
+            new_oi = float(oi_by_time[int(aligned_metrics[-1]["t"])].get("c", 0) or 0)
+            if old_oi > 0 and new_oi > 0:
+                oi_change_pct = (new_oi / old_oi - 1.0) * 100.0
         if len(closed_ohlcv) >= 22 and len(aligned) >= 3:
             aligned = aligned[-3:]
-            cadence_ok = all(
-                int(b["t"]) - int(a["t"]) == 15 * 60
-                for a, b in zip(aligned, aligned[1:])
-            )
             if cadence_ok:
                 parsed_candles = []
                 valid_candles = True
@@ -241,8 +246,9 @@ class CoinalyzeClient:
                         ),
                     }
 
-        total_volume = float(last_ohlcv.get("v", 0) or 0)
-        buy_volume = float(last_ohlcv.get("bv", 0) or 0)
+        latest_closed_ohlcv = closed_ohlcv[-1] if closed_ohlcv else {}
+        total_volume = float(latest_closed_ohlcv.get("v", 0) or 0)
+        buy_volume = float(latest_closed_ohlcv.get("bv", 0) or 0)
         taker_buy_ratio = buy_volume / total_volume if total_volume > 0 else None
 
         return {
