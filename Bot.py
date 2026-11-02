@@ -3424,7 +3424,7 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                     else:
                         watch_derivatives = public_derivatives_check(contract)
                         watch_source = watch_derivatives.get("source", "Bybit public 5m")
-                    if pre_pump_oi_gate(watch_derivatives):
+                    if pre_pump_oi_gate(watch_derivatives, min_oi_change=0.15):
                         watch_state = state.setdefault("oi_prepump_watch", {})
                         previous_watch = watch_state.get(contract, {})
                         if not isinstance(previous_watch, dict) or previous_watch.get("candle_time") != watch["candle_time"]:
