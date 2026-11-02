@@ -192,6 +192,65 @@ def _atr(candles: List[dict], period: int = 14) -> float:
     return sum(true_ranges) / len(true_ranges)
 
 
+def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
+    """Explain why a closed-candle snapshot did not qualify; never changes signal rules."""
+    candles = snapshot.get("candles") or []
+    oi_values = snapshot.get("oi_values") or []
+    if len(candles) < 22:
+        return [f"کندل بسته‌شده کافی نیست ({len(candles)}/22)"]
+    if len(oi_values) < 3:
+        return [f"نمونه OI کافی نیست ({len(oi_values)}/3)"]
+    last = candles[-1]
+    oi_timestamp = snapshot.get("oi_timestamp")
+    if oi_timestamp is None:
+        return ["زمان نمونه OI موجود نیست"]
+    cutoff = int(last["close_time"]) + 1
+    if oi_timestamp > cutoff:
+        return ["نمونه OI مربوط به آینده است"]
+    if cutoff - int(oi_timestamp) > 15 * 60 * 1000:
+        return ["نمونه OI قدیمی است"]
+    previous = candles[-2]
+    baseline = candles[-21:-1]
+    avg_volume = sum(float(x["quote_volume"]) for x in baseline) / len(baseline)
+    if avg_volume <= 0 or float(last["close"]) <= 0:
+        return ["حجم مبنا یا قیمت معتبر نیست"]
+    last_volume = float(last["quote_volume"])
+    volume_ratio = last_volume / avg_volume
+    taker_ratio = (float(last["taker_buy_quote"]) / last_volume) if last_volume > 0 else 0.5
+    oi_change = (float(oi_values[-1]) / float(oi_values[-3]) - 1.0) * 100
+    price_change = (float(last["close"]) / float(previous["close"]) - 1.0) * 100
+    prior = candles[-6:-1]
+    prior_high = max(float(x["high"]) for x in prior)
+    prior_low = min(float(x["low"]) for x in prior)
+    failed = []
+    if oi_change < 0.35:
+        failed.append(f"رشد OI کم است ({oi_change:+.2f}%؛ حداقل 0.35%)")
+    long_fail = []
+    short_fail = []
+    if price_change < 0.15:
+        long_fail.append(f"تغییر قیمت لانگ کافی نیست ({price_change:+.2f}%)")
+    if price_change > -0.15:
+        short_fail.append(f"تغییر قیمت شورت کافی نیست ({price_change:+.2f}%)")
+    if taker_ratio < 0.53:
+        long_fail.append(f"خرید تهاجمی پایین است ({taker_ratio:.1%}؛ حداقل 53%)")
+    if taker_ratio > 0.47:
+        short_fail.append(f"فروش تهاجمی کافی نیست ({taker_ratio:.1%}؛ حداکثر 47%)")
+    if volume_ratio < 1.15:
+        failed.append(f"حجم پایین است ({volume_ratio:.2f}x؛ حداقل 1.15x)")
+    if not (float(last["close"]) > prior_high and float(last["close"]) > float(last["open"])):
+        long_fail.append("شکست سقف ۵ کندل قبلی برای LONG تأیید نشد")
+    if not (float(last["close"]) < prior_low and float(last["close"]) < float(last["open"])):
+        short_fail.append("شکست کف ۵ کندل قبلی برای SHORT تأیید نشد")
+    candidates = []
+    if long_fail:
+        candidates.append("LONG: " + "، ".join(long_fail))
+    if short_fail:
+        candidates.append("SHORT: " + "، ".join(short_fail))
+    if failed:
+        candidates.insert(0, "، ".join(failed))
+    return candidates or ["شرایط ورود کامل نیست"]
+
+
 def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
     """Return a final signal only after closed-candle, OI, flow and breakout checks."""
     candles = snapshot["candles"]
