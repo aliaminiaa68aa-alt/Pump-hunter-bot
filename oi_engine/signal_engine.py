@@ -97,6 +97,16 @@ def get_active_symbols() -> List[str]:
     return [symbol for _, symbol in ranked]
 
 
+def validate_oi_cadence(rows: List[dict]) -> None:
+    """Reject missing or irregular 15m OI samples."""
+    if len(rows) < 3:
+        raise MarketDataError("Not enough OI history")
+    timestamps = [int(row.get("timestamp", 0)) for row in rows[-3:]]
+    if any(current - previous != 15 * 60 * 1000
+           for previous, current in zip(timestamps, timestamps[1:])):
+        raise MarketDataError("OI samples do not follow exact 15m cadence")
+
+
 def fetch_snapshot(symbol: str) -> Dict[str, Any]:
     """Fetch closed 15m candles, OI history and current funding."""
     candles = _get("/fapi/v1/klines", {
@@ -147,6 +157,7 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
     if last_close_time - latest_oi_timestamp > 15 * 60 * 1000:
         raise MarketDataError("OI sample is stale relative to closed candle")
     aligned_rows = aligned_rows[-3:]
+    validate_oi_cadence(aligned_rows)
     oi_values = [
         _float(x.get("sumOpenInterestValue"), "OI value")
         for x in aligned_rows
