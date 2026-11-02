@@ -3234,15 +3234,15 @@ def detect_oi_prepump_watch(candles_1m, candles_5m, diagnostics=None):
 
         # The watch must be genuinely pre-breakout, quiet in price, compressed,
         # and supported by abnormal turnover. It cannot emit an entry by itself.
-        if not (0.0 <= distance_to_breakout_pct <= 0.75):
+        if not (0.0 <= distance_to_breakout_pct <= 1.50):
             return reject("not_near_resistance")
-        if not (0.0 <= change_pct <= 0.80):
+        if not (-0.50 <= change_pct <= 1.50):
             return reject("price_change_out_of_range")
-        if compression_pct > 3.0:
+        if compression_pct > 4.50:
             return reject("compression_too_wide")
-        if ratio_1m < 1.50:
+        if ratio_1m < 1.30:
             return reject("low_1m_watch_turnover")
-        if ratio_5m < 1.50:
+        if ratio_5m < 1.30:
             return reject("low_5m_watch_turnover")
         return {
             "candle_time": str(current.get("t", "")),
@@ -3379,9 +3379,9 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
     """
     # Track previous OI PRE-PUMP signals even when new entries are paused by BTC risk.
     update_oi_prepump_outcomes(state)
-    if not confirmed_entries:
-        print("OI PRE-PUMP paused by BTC risk filter")
-        return
+    allow_final_entries = bool(confirmed_entries)
+    if not allow_final_entries:
+        print("OI PRE-PUMP: BTC risk filter pauses final entries; pre-pump watch alerts remain active")
     ranked = []
     for ticker in tickers:
         contract = ticker.get("contract", "")
@@ -3436,6 +3436,37 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                                 "oi_change4h": watch_derivatives.get("oi_change4h"),
                                 "source": watch_source,
                             }
+                            watch_alerts = state.setdefault("oi_prepump_watch_alerts", {})
+                            previous_alert = watch_alerts.get(contract, {})
+                            if not isinstance(previous_alert, dict):
+                                previous_alert = {"candle_time": str(previous_alert), "sent_at": 0}
+                            alert_age = now - int(previous_alert.get("sent_at", 0) or 0)
+                            same_alert_candle = str(previous_alert.get("candle_time", "")) == str(watch["candle_time"])
+                            if not same_alert_candle and alert_age >= 45 * 60:
+                                watch_message = (
+                                    "👀 OI EARLY WATCH | هشدار قبل از پامپ — هنوز سیگنال ورود نیست\n"
+                                    "━━━━━━━━━━━━━━━━━━\n"
+                                    f"🪙 ارز: {contract.replace('_', '/')}\n"
+                                    f"💰 قیمت بسته‌شدن ۵دقیقه: {float(candles_5m[-1]['c']):.10g}\n"
+                                    f"📈 رشد OI پنج‌دقیقه: {float(watch_derivatives['oi_change']):+.3f}% ({watch_source})\n"
+                                    f"💸 Funding: {float(watch_derivatives['funding_rate'])*100:+.4f}%\n"
+                                    f"📊 حجم نسبی ۱دقیقه: {watch['turnover_ratio_1m']:.2f}x | ۵دقیقه: {watch['turnover_ratio_5m']:.2f}x\n"
+                                    f"🚧 فاصله تا مقاومت: {watch['distance_to_breakout_pct']:.2f}% | فشردگی: {watch['compression_pct']:.2f}%\n"
+                                    f"📍 مقاومت نزدیک: {watch['breakout_level']:.10g}\n"
+                                    f"📉 تغییر کندل ۵دقیقه: {watch['price_change_pct']:+.2f}%\n\n"
+                                    "⚠️ پول/پوزیشن جدید و افزایش حجم دیده شده؛ احتمال حرکت وجود دارد اما جهت OI قطعی نیست. "
+                                    "فعلاً فقط زیر نظر بگیر؛ ورود فقط با هشدار تأییدشده جداگانه."
+                                )
+                                send_message(watch_message)
+                                watch_alerts[contract] = {
+                                    "candle_time": str(watch["candle_time"]),
+                                    "sent_at": now,
+                                }
+                                print(
+                                    f"OI EARLY WATCH alert sent: {contract}; "
+                                    f"OI5m={float(watch_derivatives['oi_change']):+.3f}%; "
+                                    f"distance={watch['distance_to_breakout_pct']:.2f}%"
+                                )
                             print(
                                 f"OI PRE-PUMP watch {contract}: OI-confirmed pre-breakout candidate; "
                                 f"source={watch_source}, OI5m={float(watch_derivatives['oi_change']):+.3f}%, "
@@ -3444,7 +3475,7 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                                 f"turnover1m={watch['turnover_ratio_1m']:.2f}x, "
                                 f"compression={watch['compression_pct']:.2f}%, "
                                 f"distance_to_breakout={watch['distance_to_breakout_pct']:.2f}%, "
-                                f"price_change={watch['price_change_pct']:+.2f}%; no entry sent"
+                                f"price_change={watch['price_change_pct']:+.2f}%; watch alert only"
                             )
                     else:
                         print(
@@ -3454,6 +3485,8 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                             f"funding={watch_derivatives.get('funding_rate')}, "
                             f"reason={watch_derivatives.get('reason', 'OI/funding thresholds not met')}"
                         )
+                continue
+            if not allow_final_entries:
                 continue
             latest_close = float(candles_5m[-1]["c"])
             setup = refresh_prepump_entry(setup, latest_close, rejects)
