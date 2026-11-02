@@ -65,3 +65,28 @@ jobs:
               raise SystemExit("BTCUSDT OI history was unavailable")
           print("Coinalyze live BTCUSDT metrics smoke test passed")
           PY
+
+      - name: Verify Telegram bot identity and polling compatibility
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+          token = os.environ.get("BOT_TOKEN", "").strip()
+          if not token:
+              raise SystemExit("BOT_TOKEN secret is missing")
+          base = f"https://api.telegram.org/bot{token}"
+          me = requests.get(base + "/getMe", timeout=15)
+          me.raise_for_status()
+          me_data = me.json()
+          if not me_data.get("ok"):
+              raise SystemExit("Telegram rejected BOT_TOKEN")
+          info = requests.get(base + "/getWebhookInfo", timeout=15)
+          info.raise_for_status()
+          webhook = info.json().get("result", {}).get("url", "")
+          print("Telegram inbox bot:", "@" + me_data["result"]["username"])
+          if webhook:
+              raise SystemExit("A Telegram webhook is configured; getUpdates polling is unavailable. It was not removed.")
+          print("Telegram getUpdates polling is available")
+          PY
