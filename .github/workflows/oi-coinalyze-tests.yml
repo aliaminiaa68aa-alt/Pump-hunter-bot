@@ -1,0 +1,92 @@
+name: OI Coinalyze integration tests
+
+on:
+  push:
+    branches: [oi-coinalyze-watchlist]
+    paths:
+      - "oi_engine/coinalyze_client.py"
+      - "tests/test_oi_coinalyze_client.py"
+      - ".github/workflows/oi-coinalyze-tests.yml"
+  pull_request:
+    paths:
+      - "oi_engine/coinalyze_client.py"
+      - "tests/test_oi_coinalyze_client.py"
+      - ".github/workflows/oi-coinalyze-tests.yml"
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check requests
+      - run: python -m unittest discover -s tests -p "test_oi_coinalyze_client.py" -v
+
+      - name: Verify configured Coinalyze API secret
+        env:
+          COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+          key = os.environ.get("COINALYZE_API_KEY", "").strip()
+          if not key:
+              raise SystemExit("COINALYZE_API_KEY secret is missing")
+          response = requests.get(
+              "https://api.coinalyze.net/v1/future-markets",
+              headers={"api_key": key, "User-Agent": "OI-Coinalyze-Watchlist/1.0"},
+              timeout=20,
+          )
+          if response.status_code in (401, 403):
+              raise SystemExit("Coinalyze rejected COINALYZE_API_KEY")
+          response.raise_for_status()
+          markets = response.json()
+          if not isinstance(markets, list) or not markets:
+              raise SystemExit("Coinalyze returned no future markets")
+          print(f"Coinalyze authentication OK; future markets available: {len(markets)}")
+          PY
+
+      - name: Smoke-test live BTCUSDT derivatives metrics
+        env:
+          COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
+        run: |
+          python - <<'PY'
+          from oi_engine.coinalyze_client import CoinalyzeClient
+          metrics = CoinalyzeClient().fetch_metrics("BTCUSDT")
+          print("Coinalyze live market:", metrics["market_symbol"])
+          print("Available series:", metrics["data_quality"])
+          if metrics["current_open_interest_usd"] is None:
+              raise SystemExit("BTCUSDT current OI was unavailable")
+          if metrics["funding_rate"] is None:
+              raise SystemExit("BTCUSDT current funding was unavailable")
+          if metrics["oi_change_15m_window_pct"] is None:
+              raise SystemExit("BTCUSDT OI history was unavailable")
+          print("Coinalyze live BTCUSDT metrics smoke test passed")
+          PY
+
+      - name: Verify Telegram bot identity and polling compatibility
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+          token = os.environ.get("BOT_TOKEN", "").strip()
+          if not token:
+              raise SystemExit("BOT_TOKEN secret is missing")
+          base = f"https://api.telegram.org/bot{token}"
+          me = requests.get(base + "/getMe", timeout=15)
+          me.raise_for_status()
+          me_data = me.json()
+          if not me_data.get("ok"):
+              raise SystemExit("Telegram rejected BOT_TOKEN")
+          info = requests.get(base + "/getWebhookInfo", timeout=15)
+          info.raise_for_status()
+          webhook = info.json().get("result", {}).get("url", "")
+          print("Telegram inbox bot:", "@" + me_data["result"]["username"])
+          if webhook:
+              raise SystemExit("A Telegram webhook is configured; getUpdates polling is unavailable. It was not removed.")
+          print("Telegram getUpdates polling is available")
+          PY
