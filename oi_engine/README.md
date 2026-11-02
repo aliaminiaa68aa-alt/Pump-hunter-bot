@@ -54,3 +54,14 @@ is excluded. Binance's OI history endpoint is capped at 500 samples in this
 implementation, so this is only a short recent sample and must not be presented
 as a robust long-term win rate. Run multiple symbols and longer, independently
 collected data before drawing conclusions.
+
+
+### Regional API availability
+
+The historical backtest workflow is manual-only. The GitHub-hosted runner
+returned HTTP 451 from Binance USD-M Futures for all tested symbols, which is
+a Binance restricted-location response rather than a strategy result. No
+win-rate or performance conclusion can be drawn from that run. Run the command
+from a network where Binance USD-M public market data is legally available,
+or use an authorized historical export. Do not route requests through an
+unofficial third-party mirror to bypass geographic restrictions.
