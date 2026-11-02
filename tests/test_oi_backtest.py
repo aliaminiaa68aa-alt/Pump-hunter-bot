@@ -32,6 +32,15 @@ class BacktestTests(unittest.TestCase):
         ]
         self.assertIsNone(align_oi(candle, rows)[0])
 
+    def test_oi_alignment_rejects_irregular_short_intervals(self):
+        candle = [{"close_time": 2699999}]
+        rows = [
+            {"timestamp": 0, "sumOpenInterestValue": "100"},
+            {"timestamp": 600000, "sumOpenInterestValue": "101"},
+            {"timestamp": 1200000, "sumOpenInterestValue": "102"},
+        ]
+        self.assertIsNone(align_oi(candle, rows)[0])
+
     def test_stop_wins_when_stop_and_target_touch_same_bar(self):
         signal = SimpleNamespace(
             symbol="XUSDT", side="LONG", entry=100.0, stop_loss=98.0,
