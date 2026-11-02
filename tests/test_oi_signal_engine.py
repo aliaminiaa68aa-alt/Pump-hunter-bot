@@ -48,6 +48,7 @@ class SignalEngineTests(unittest.TestCase):
         snapshot = make_snapshot("LONG")
         snapshot["oi_values"] = [100.0, 100.0, 100.1]
         snapshot["candles"][-1]["quote_volume"] = 105000.0
+        snapshot["candles"][-1]["taker_buy_quote"] = 55000.0
         reasons = diagnose_snapshot(snapshot)
         self.assertTrue(any("رشد OI کم است" in reason for reason in reasons))
         self.assertTrue(any("حجم پایین است" in reason for reason in reasons))
