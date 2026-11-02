@@ -445,9 +445,9 @@ def coinalyze_request(path, params=None):
             break
         retry_after = response.headers.get("Retry-After", "")
         try:
-            delay = min(max(float(retry_after), 1.0), 3.0)
+            delay = min(max(float(retry_after), 1.0), 10.0)
         except (TypeError, ValueError):
-            delay = 1.5
+            delay = 3.0
         print(f"Coinalyze rate limit on {path}; retrying once after {delay:.1f}s")
         time.sleep(delay)
     response.raise_for_status()
@@ -1686,7 +1686,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     # Coinalyze's practical endpoint quota was hit when checking 8 symbols
     # in one scan (HTTP 429 on OI history). Keep the per-scan budget conservative;
     # tracked Stage-1 candidates are already ranked ahead of general symbols.
-    max_coinalyze_checks_per_scan = 5
+    max_coinalyze_checks_per_scan = 3
     def _turnover_rank(item):
         try:
             return float(item.get("volume_24h_quote") or item.get("volume_24h_usd") or 0)
