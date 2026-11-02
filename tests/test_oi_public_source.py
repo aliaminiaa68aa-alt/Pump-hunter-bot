@@ -32,7 +32,7 @@ class PublicTelegramSourceTests(unittest.TestCase):
         self.assertIn("TESTUSDT", watchlist)
         self.assertEqual(watchlist["TESTUSDT"]["source"], "telegram_public_preview")
 
-    def test_full_watchlist_does_not_skip_unprocessed_post(self):
+    def test_alert_is_added_even_when_watchlist_already_has_four_symbols(self):
         posts = [{
             "message_id": 20, "date": 1000, "text": "NEWCOINUSDT +2%",
             "channel": "oi_detector",
@@ -40,8 +40,10 @@ class PublicTelegramSourceTests(unittest.TestCase):
         watchlist = {f"COIN{i}USDT": {} for i in range(4)}
         with patch("oi_engine.telegram_public_source.fetch_public_channel_posts", return_value=posts):
             cursor, added = poll_public_channel_alerts("oi_detector", 19, watchlist, now=1000)
-        self.assertEqual(cursor, 19)
-        self.assertEqual(added, 0)
+        self.assertEqual(cursor, 20)
+        self.assertEqual(added, 1)
+        self.assertIn("NEWCOINUSDT", watchlist)
+        self.assertEqual(len(watchlist), 5)
 
     def test_unsupported_market_is_skipped_and_cursor_advances(self):
         posts = [{
