@@ -44,7 +44,7 @@ python -m oi_engine.backtest --symbol BTCUSDT
 Optional execution-cost assumptions can be changed with `--fee-bps` and
 `--slippage-bps` (each is basis points per side). The JSON report includes
 trade count, win rate, profit factor, expectancy/average R, max drawdown in R,
-LONG/SHORT counts, and individual trade outcomes.
+separate LONG and SHORT win rates, profit factors, expectancy and drawdowns, plus individual trade outcomes.
 
 The backtest uses only closed 15m candles and OI samples timestamped no later
 than each signal candle. Entries are modeled at the next candle open (not the
