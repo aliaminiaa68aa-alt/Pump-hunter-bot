@@ -16,11 +16,9 @@ Stop loss uses 1.25 ATR (with a 0.2% minimum distance); targets are 1R and 2R. T
 
 ## Alert-driven OI + Coinalyze watchlist
 
-The current development branch also includes an alert-driven monitoring path. It does not create its own early alerts or scan random symbols: it accepts a symbol only from a message forwarded from the original Open Interest source into the configured Telegram bot inbox. It then watches that symbol and requires both the closed-15m OI engine signal and independent Coinalyze OI/taker-flow confirmation before sending a final LONG/SHORT alert. Missing Coinalyze metrics never count as confirmation.
+The live Telegram signal workflow reads **only** recent posts from the public Telegram preview for `@oi_detector`. It does not ingest forwarded messages, direct Telegram inbox alerts, or alerts from the legacy Pump Hunter strategy. Only supported perpetual symbols are admitted to the watchlist. It then watches each symbol and requires both the closed-15m OI engine signal and independent Coinalyze OI/taker-flow confirmation before sending a final LONG/SHORT alert. Missing Coinalyze metrics never count as confirmation.
 
-The watchlist is persistent across scheduled GitHub Actions runs, capped at four symbols to respect the Coinalyze 40-request/minute API limit, and entries expire after 24 hours unless refreshed. Forwarded messages older than six hours are ignored. Send `/status` or `/watchlist` to the bot for a status summary.
-
-Telegram polling uses `getUpdates`; if the bot already has a webhook configured, polling will fail visibly and the runner will not delete the webhook automatically. A Telegram bot cannot read another bot's private messages, so the original alert must be forwarded into this bot's private chat.
+The watchlist is persistent across scheduled GitHub Actions runs, capped at four symbols to respect the Coinalyze API limit, and entries expire after 24 hours unless refreshed. Public posts are polled every five minutes; duplicate signal alerts for the same symbol, direction, and candle are suppressed. A fresh state-cache namespace is used so old forwarded/legacy watchlist entries are not carried into this public-only pipeline.
 
 ## Telegram setup
 
