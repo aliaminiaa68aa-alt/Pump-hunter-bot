@@ -25,8 +25,15 @@ class WatchlistTests(unittest.TestCase):
     def test_short_needs_sell_flow(self):
         self.assertTrue(coinalyze_confirms(signal("SHORT"),metrics(taker=.40)))
         self.assertFalse(coinalyze_confirms(signal("SHORT"),metrics(taker=.55)))
-    def test_missing_data_fails_closed(self):
-        self.assertFalse(coinalyze_confirms(signal(),metrics(complete=False)))
+    def test_optional_coinalyze_metrics_do_not_veto_signal(self):
+        partial = {"oi_change_15m_window_pct": 0.4, "taker_buy_ratio": 0.60,
+                   "data_quality": {"complete": False}}
+        self.assertTrue(coinalyze_confirms(signal(), partial))
+
+    def test_missing_or_invalid_core_confirmation_fails_closed(self):
+        self.assertFalse(coinalyze_confirms(signal(), {"oi_change_15m_window_pct": None, "taker_buy_ratio": 0.6}))
+        self.assertFalse(coinalyze_confirms(signal(), {"oi_change_15m_window_pct": 0.4, "taker_buy_ratio": float("nan")}))
+        self.assertFalse(coinalyze_confirms(signal(), {"oi_change_15m_window_pct": 0.4, "taker_buy_ratio": 1.2}))
 
     def test_binance_451_uses_coinalyze_market_snapshot(self):
         snapshot = {"symbol": "ABCUSDT", "candles": [], "oi_values": [1, 2, 3]}
