@@ -38,6 +38,12 @@ class LegSpikeThresholdTests(unittest.TestCase):
         self.assertTrue(passed)
         self.assertIn("ranking", reason)
 
+    def test_final_entry_keeps_4h_oi_as_validated_context_not_directional_gate(self):
+        self.assertTrue(Bot.leg_spike_final_oi_context_available(-5.87))
+        self.assertTrue(Bot.leg_spike_final_oi_context_available(0.0))
+        self.assertFalse(Bot.leg_spike_final_oi_context_available(None))
+        self.assertFalse(Bot.leg_spike_final_oi_context_available(float("nan")))
+
     def test_leg_spike_rejects_non_positive_short_term_oi(self):
         self.assertFalse(Bot.leg_spike_oi_growth_gate(0.0, 2.0)[0])
         self.assertFalse(Bot.leg_spike_oi_growth_gate(-0.02, -1.0)[0])
