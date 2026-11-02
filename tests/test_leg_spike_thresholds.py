@@ -33,6 +33,19 @@ class LegSpikeThresholdTests(unittest.TestCase):
         self.assertEqual(Bot.format_oi_change(None), "ناموجود")
         self.assertEqual(Bot.format_oi_change(3.25), "+3.25%")
 
+    def test_leg_spike_accepts_positive_short_term_oi_when_4h_is_negative(self):
+        passed, reason = Bot.leg_spike_oi_growth_gate(0.069, -9.16)
+        self.assertTrue(passed)
+        self.assertIn("ranking", reason)
+
+    def test_leg_spike_rejects_non_positive_short_term_oi(self):
+        self.assertFalse(Bot.leg_spike_oi_growth_gate(0.0, 2.0)[0])
+        self.assertFalse(Bot.leg_spike_oi_growth_gate(-0.02, -1.0)[0])
+
+    def test_leg_spike_requires_both_oi_windows_to_be_available(self):
+        self.assertFalse(Bot.leg_spike_oi_growth_gate(0.1, None)[0])
+        self.assertFalse(Bot.leg_spike_oi_growth_gate(None, 1.0)[0])
+
     def test_oi_surge_24h_threshold_is_inclusive(self):
         self.assertEqual(
             Bot.oi_surge_tier({"valid": True, "oi_change24h": 30.0, "oi_change4h": None}),
