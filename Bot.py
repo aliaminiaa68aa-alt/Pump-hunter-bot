@@ -3506,6 +3506,114 @@ def update_early_watch_outcomes(state, now=None):
             avg_down = sum(float(r.get("max_adverse_pct", 0)) for r in rows) / len(rows)
             print(f"EARLY WATCH {strategy}: completed={len(rows)}, avg_MFE={avg_up:.2f}%, avg_MAE={avg_down:.2f}%")
 
+def scan_oi_surge_watch(tickers, state, max_symbols=12):
+    """
+    Independent continuation-pump monitor.
+    Finds already-moving liquid contracts with exceptional 4h/24h OI growth.
+    Sends a conditional breakout/retest plan only; it never calls this a final entry.
+    """
+    ranked = []
+    for ticker in tickers:
+        contract = ticker.get("contract", "")
+        if not is_crypto_contract(contract):
+            continue
+        try:
+            turnover = float(ticker.get("volume_24h_quote") or ticker.get("volume_24h_usd") or 0)
+            change = float(ticker.get("change_percentage") or 0)
+        except (TypeError, ValueError):
+            continue
+        if turnover >= 2_000_000 and change >= 4.0:
+            ranked.append((turnover * min(change, 30.0), turnover, contract))
+    ranked.sort(reverse=True)
+    ranked = ranked[:max_symbols]
+
+    alert_state = state.setdefault("oi_surge_watch_alerts", {})
+    checked = qualified = sent = 0
+    rejects = {}
+    now = int(time.time())
+    for _, turnover, contract in ranked:
+        try:
+            checked += 1
+            derivatives = coinalyze_derivatives_check(contract, state)
+            if not derivatives.get("valid"):
+                rejects["derivatives_unavailable"] = rejects.get("derivatives_unavailable", 0) + 1
+                continue
+            tier = oi_surge_tier(derivatives)
+            if not tier:
+                rejects["oi_surge_below_threshold"] = rejects.get("oi_surge_below_threshold", 0) + 1
+                continue
+            funding = float(derivatives.get("funding_rate"))
+            if funding > 0.0005:
+                rejects["funding_too_crowded"] = rejects.get("funding_too_crowded", 0) + 1
+                continue
+
+            candles = closed_candles(contract, "15m", 20)
+            if len(candles) < 10:
+                rejects["insufficient_15m_candles"] = rejects.get("insufficient_15m_candles", 0) + 1
+                continue
+            current = candles[-1]
+            close = float(current["c"])
+            resistance = max(float(row["h"]) for row in candles[-9:-1])
+            support = min(float(row["l"]) for row in candles[-6:-1])
+            if min(close, resistance, support) <= 0 or resistance <= support:
+                rejects["invalid_price_structure"] = rejects.get("invalid_price_structure", 0) + 1
+                continue
+            entry = resistance
+            risk = entry - support
+            risk_pct = risk / entry * 100.0
+            if risk <= 0 or risk_pct > 6.0:
+                rejects["risk_too_wide"] = rejects.get("risk_too_wide", 0) + 1
+                continue
+            tp1 = entry + 2.0 * risk
+            tp2 = entry + 3.0 * risk
+            qualified += 1
+
+            previous = alert_state.get(contract, {})
+            if not isinstance(previous, dict):
+                previous = {"sent_at": int(previous or 0), "candle_time": ""}
+            candle_time = str(current.get("t", ""))
+            if previous.get("candle_time") == candle_time or now - int(previous.get("sent_at", 0) or 0) < 45 * 60:
+                continue
+
+            if close >= resistance:
+                trigger_text = "شکست دیده شده؛ فقط پولبک و حفظ محدوده مقاومت را بررسی کن"
+            else:
+                trigger_text = "هنوز شکست نشده؛ فقط بعد از بسته‌شدن کندل ۱۵دقیقه بالای مقاومت بررسی کن"
+            oi4 = format_oi_change(derivatives.get("oi_change4h"))
+            oi24 = format_oi_change(derivatives.get("oi_change24h"))
+            oi5 = format_oi_change(derivatives.get("oi_change"))
+            message = (
+                "🔥 OI SURGE | رصد ادامه حرکت — هنوز سیگنال ورود قطعی نیست\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                f"🪙 ارز: {contract.replace('_', '/')}\n"
+                f"📈 تغییر قیمت ۲۴ساعته: +{float(next((t.get('change_percentage', 0) for t in tickers if t.get('contract') == contract), 0)):.2f}%\n"
+                f"📊 رشد OI: پنج‌دقیقه {oi5} | چهار‌ساعته {oi4} | روزانه {oi24}\n"
+                f"🚀 قدرت جهش OI: {tier} | Funding: {funding*100:+.4f}%\n"
+                f"💵 گردش ۲۴ساعته: {turnover:,.0f} USDT\n"
+                f"💰 قیمت بسته‌شده ۱۵دقیقه: {close:.10g}\n"
+                f"🧱 مقاومت/محدوده فعال‌سازی: {entry:.10g}\n"
+                f"🛑 حدضرر سناریو: {support:.10g} | ریسک تقریبی: {risk_pct:.2f}%\n"
+                f"🎯 هدف ۱ (2R): {tp1:.10g}\n"
+                f"🎯 هدف ۲ (3R): {tp2:.10g}\n\n"
+                f"⏳ وضعیت: {trigger_text}. ورود فقط بعد از تأیید پولبک؛ قیمت را تعقیب نکن. "
+                "این هشدار جای تأیید نسبت لانگ/شورت و فیلترهای سیگنال نهایی را نمی‌گیرد."
+            )
+            send_message(message)
+            alert_state[contract] = {"sent_at": now, "candle_time": candle_time, "tier": tier}
+            sent += 1
+            print(
+                f"OI SURGE watch sent: {contract}; tier={tier}; "
+                f"OI5m={oi5}; OI4h={oi4}; OI24h={oi24}; "
+                f"entry={entry:.10g}; stop={support:.10g}; TP1={tp1:.10g}; TP2={tp2:.10g}"
+            )
+        except Exception as error:
+            print(f"OI SURGE watch {contract} failed: {type(error).__name__}: {error}")
+    print(
+        f"OI SURGE diagnostics: checked={checked}, qualified={qualified}, "
+        f"sent={sent}, rejections={rejects}"
+    )
+
+
 def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=50):
     """
     Separate OI-led pre-pump entry engine.
@@ -3775,6 +3883,9 @@ def scan():
 
     # OI-led pre-pump strategy: separate entry engine using rising 5m OI and volume.
     scan_oi_prepump_entries(tickers, state, confirmed_entries=btc_ok)
+
+    # Independent continuation-pump monitor for strong multi-timeframe OI expansion.
+    scan_oi_surge_watch(tickers, state)
 
     # Dedicated high-selectivity strategy; does not alter PRE-PUMP or LEG SPIKE rules.
     scan_high_potential_pumps(tickers, state, confirmed_entries=btc_ok)
