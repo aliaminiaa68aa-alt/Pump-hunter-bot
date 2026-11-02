@@ -104,6 +104,9 @@ def main() -> None:
     added = 0
     public_channel = os.getenv("OI_PUBLIC_CHANNEL", "oi_detector").strip()
     public_last_id = int(watch_state.get("public_channel_last_id", 0))
+    # Free expired slots before ingesting new public alerts; otherwise stale symbols
+    # can occupy all four slots and block fresh candidates for another polling cycle.
+    watchlist = prune_watchlist(watchlist)
     try:
         public_last_id, public_added = poll_public_channel_alerts(
             public_channel, public_last_id, watchlist,
@@ -114,7 +117,6 @@ def main() -> None:
     except requests.RequestException as exc:
         # Keep the previous cursor and continue scanning existing watchlist symbols.
         print(f"WARNING: public Telegram source fetch failed: {exc}")
-    watchlist = prune_watchlist(watchlist)
     confirmed, watchlist = scan_watchlist(watchlist, client=client)
 
     sent = 0
