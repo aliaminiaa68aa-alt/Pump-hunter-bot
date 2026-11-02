@@ -1,8 +1,8 @@
 """Historical, no-lookahead backtest for the standalone OI signal engine.
 
-Binance's public openInterestHist endpoint is limited to recent history and
-at most 500 samples per request. This tool reports the actual returned range;
-it never labels a short sample as a long-term validation.
+Binance's public openInterestHist endpoint retains only the latest month and
+returns at most 500 samples per request. This tool pages through that available
+window and reports the actual returned range; it never labels it long-term validation.
 """
 from __future__ import annotations
 
@@ -497,8 +497,8 @@ def run_backtest(symbol: str, fee_bps: float = DEFAULT_FEE_BPS,
     report = run_backtest_data(symbol, candles, oi_rows, fee_bps, slippage_bps)
     report["data_source"] = "Binance USD-M Futures public API"
     report["limitations"].extend([
-        "Binance OI history endpoint returns at most 500 recent samples in this implementation.",
-        "This is a short recent sample, not a robust multi-market regime test.",
+        "Binance OI statistics retain only the latest month; this run pages through that available window.",
+        "One month is still a limited sample, not robust multi-regime validation.",
     ])
     return report
 
