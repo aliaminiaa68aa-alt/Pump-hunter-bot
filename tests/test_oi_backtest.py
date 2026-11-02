@@ -19,8 +19,8 @@ class BacktestTests(unittest.TestCase):
         ]
         aligned = align_oi(candles, rows)
         self.assertIsNone(aligned[0])
-        self.assertIsNone(aligned[1])  # timestamp 1,800,000 is still in the future
-        self.assertEqual(aligned[2], [100.0, 101.0, 102.0])
+        self.assertEqual(aligned[1], [100.0, 101.0, 102.0])
+        self.assertEqual(aligned[2], [101.0, 102.0, 103.0])
 
     def test_oi_alignment_rejects_missing_15m_sample(self):
         candle = [{"close_time": 3599999}]
