@@ -2,7 +2,7 @@ name: OI Coinalyze integration tests
 
 on:
   push:
-    branches: [oi-coinalyze-watchlist]
+    branches: [main, oi-coinalyze-watchlist]
     paths:
       - "oi_engine/coinalyze_client.py"
       - "tests/test_oi_coinalyze_client.py"
