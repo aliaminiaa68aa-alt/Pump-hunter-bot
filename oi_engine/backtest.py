@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import csv
-from dataclasses import replace
+from copy import copy
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -95,8 +95,12 @@ def reprice_signal_for_next_open(signal: Any, next_open: float) -> Any:
         stop, tp1, tp2 = entry + risk, entry - risk, entry - 2.0 * risk
     else:
         raise MarketDataError(f"Unsupported signal side: {signal.side}")
-    return replace(signal, entry=entry, stop_loss=stop,
-                   take_profit_1=tp1, take_profit_2=tp2)
+    repriced = copy(signal)
+    repriced.entry = entry
+    repriced.stop_loss = stop
+    repriced.take_profit_1 = tp1
+    repriced.take_profit_2 = tp2
+    return repriced
 
 
 def simulate_trade(signal: Any, future_candles: List[dict],
