@@ -15,7 +15,7 @@ from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
-MAX_WATCHLIST_SYMBOLS = 4  # 4 symbols x 8 metric calls + one market map stays below 40/min
+MAX_WATCHLIST_SYMBOLS = 4  # Scan four queued symbols per run to respect the Coinalyze rate limit
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
 
 
@@ -83,6 +83,20 @@ def _has_supported_perpetual(client: CoinalyzeClient, symbol: str) -> bool:
         raise
 
 
+def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIST_SYMBOLS):
+    """Select a rotating batch while retaining every alert in the full watchlist."""
+    symbols = list(watchlist)
+    if not symbols:
+        return {}, ""
+    try:
+        start = (symbols.index(last_scanned_symbol) + 1) % len(symbols)
+    except ValueError:
+        start = 0
+    count = min(max(1, int(limit)), len(symbols))
+    selected = [symbols[(start + offset) % len(symbols)] for offset in range(count)]
+    return {symbol: watchlist[symbol] for symbol in selected}, selected[-1]
+
+
 def main() -> None:
     token = os.getenv("BOT_TOKEN")
     chat_id = os.getenv("CHAT_ID")
@@ -117,7 +131,13 @@ def main() -> None:
     except requests.RequestException as exc:
         # Keep the previous cursor and continue scanning existing watchlist symbols.
         print(f"WARNING: public Telegram source fetch failed: {exc}")
-    confirmed, watchlist = scan_watchlist(watchlist, client=client)
+    # Keep the complete alert queue, but scan only a rotating batch so API usage
+    # stays bounded. Every retained symbol gets its turn on subsequent runs.
+    batch, next_scan_cursor = select_watchlist_batch(
+        watchlist, str(watch_state.get("scan_cursor", ""))
+    )
+    confirmed, scanned_batch = scan_watchlist(batch, client=client)
+    watchlist.update(scanned_batch)
 
     sent = 0
     for signal, metrics in confirmed:
@@ -137,13 +157,14 @@ def main() -> None:
     save_watchlist_state({
         "public_channel_last_id": public_last_id,
         "symbols": watchlist,
+        "scan_cursor": next_scan_cursor or str(watch_state.get("scan_cursor", "")),
         "updated_at": int(time.time()),
     })
     print(
         f"Alert-driven OI scan complete: watchlist={len(watchlist)}, "
         f"new_public_channel_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}"
     )
-    for symbol, record in watchlist.items():
+    for symbol, record in scanned_batch.items():
         print(f"Watchlist {symbol}: {record.get('status')} - {record.get('reason', '')} [source={record.get('data_source', 'unknown')}]")
 
 
