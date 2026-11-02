@@ -113,19 +113,19 @@ class TelegramRunnerTests(unittest.TestCase):
         watchlist = {f"COIN{i}USDT": {"status": "در حال رصد"} for i in range(7)}
         first, cursor = telegram_runner.select_watchlist_batch(watchlist)
         second, next_cursor = telegram_runner.select_watchlist_batch(watchlist, cursor)
-        self.assertEqual(list(first), ["COIN0USDT", "COIN1USDT", "COIN2USDT", "COIN3USDT"])
-        self.assertEqual(list(second), ["COIN4USDT", "COIN5USDT", "COIN6USDT", "COIN0USDT"])
-        self.assertEqual(cursor, "COIN3USDT")
-        self.assertEqual(next_cursor, "COIN0USDT")
+        self.assertEqual(list(first), ["COIN0USDT", "COIN1USDT", "COIN2USDT", "COIN3USDT", "COIN4USDT"])
+        self.assertEqual(list(second), ["COIN5USDT", "COIN6USDT", "COIN0USDT", "COIN1USDT", "COIN2USDT"])
+        self.assertEqual(cursor, "COIN4USDT")
+        self.assertEqual(next_cursor, "COIN2USDT")
         self.assertEqual(len(watchlist), 7)
 
-    def test_twenty_symbols_are_all_scanned_once_across_five_batches(self):
+    def test_twenty_symbols_are_all_scanned_once_across_four_batches(self):
         watchlist = {f"COIN{i:02d}USDT": {"status": "در حال رصد"} for i in range(20)}
         cursor = ""
         visited = []
-        for _ in range(5):
+        for _ in range(4):
             batch, cursor = telegram_runner.select_watchlist_batch(watchlist, cursor)
-            self.assertEqual(len(batch), 4)
+            self.assertEqual(len(batch), 5)
             visited.extend(batch)
         self.assertEqual(len(visited), 20)
         self.assertEqual(len(set(visited)), 20)
