@@ -1500,6 +1500,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         "🟡━━━━━━━━━━━━━━━━━━🟡"
                     )
                     send_message(liquidity_message)
+                    register_early_watch_outcome(state, contract, "LIQUIDITY_INFLOW", liquidity_signal["close"])
                     liquidity_state[contract] = {"candle_time": candle_key, "sent_at": int(time.time())}
                     counts["early_warnings_sent"] += 1
                     print(
@@ -1669,6 +1670,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 "⚠️ این فقط هشدار حرکت اولیه است، نه نقطه ورود. هشدار بعدی رسیدن/شکست سقف را اعلام می‌کند؛ ورود را خودت با بررسی نمودار انتخاب کن. فیبوناچی به‌تنهایی سیگنال ورود نمی‌دهد."
             )
             send_message(early_message)
+            register_early_watch_outcome(state, contract, "LEG_SPIKE_STAGE1", candles[-1]["c"])
             early_sent[contract] = early_key
             recent_early[contract] = int(time.time())
             counts["early_warnings_sent"] += 1
@@ -3373,6 +3375,75 @@ def update_oi_prepump_outcomes(state, now=None):
         )
 
 
+
+def register_early_watch_outcome(state, contract, strategy, entry, created_at=None):
+    """Register a price-only observation for an early alert; not a trade or win-rate record."""
+    try:
+        price = float(entry)
+        if price <= 0:
+            return
+        now = int(time.time()) if created_at is None else int(created_at)
+        records = state.setdefault("early_watch_outcomes", [])
+        records.append({
+            "contract": contract, "strategy": strategy, "created_at": now,
+            "entry": price, "last_candle_time": now - (now % 60),
+            "max_favorable_pct": 0.0, "max_adverse_pct": 0.0,
+            "checkpoints": {}, "completed": False,
+        })
+        if len(records) > 300:
+            del records[:-300]
+    except (TypeError, ValueError):
+        print(f"Early-watch outcome registration skipped for {contract}: invalid reference price")
+
+
+def update_early_watch_outcomes(state, now=None):
+    """Track 1h/4h/24h price excursions after early warnings using closed 1m futures candles."""
+    now = int(time.time()) if now is None else int(now)
+    records = state.setdefault("early_watch_outcomes", [])
+    if not isinstance(records, list) or not records:
+        return
+    active = {}
+    for record in records:
+        if isinstance(record, dict) and not record.get("completed") and record.get("contract"):
+            active.setdefault(record["contract"], []).append(record)
+    for contract, group in active.items():
+        try:
+            candles = closed_candles(contract, "1m", 31)
+            for record in group:
+                entry = float(record["entry"])
+                created = int(record["created_at"])
+                last_time = int(record.get("last_candle_time", 0) or 0)
+                checkpoints = record.setdefault("checkpoints", {})
+                for candle in candles:
+                    candle_time = int(candle.get("t", 0) or 0)
+                    if candle_time <= last_time or candle_time < created:
+                        continue
+                    high, low, close = float(candle["h"]), float(candle["l"]), float(candle["c"])
+                    if min(high, low, close) <= 0:
+                        continue
+                    record["max_favorable_pct"] = max(float(record.get("max_favorable_pct", 0)), (high / entry - 1) * 100)
+                    record["max_adverse_pct"] = min(float(record.get("max_adverse_pct", 0)), (low / entry - 1) * 100)
+                    elapsed = candle_time - created
+                    for label, seconds in (("1h", 3600), ("4h", 14400), ("24h", 86400)):
+                        if elapsed >= seconds and label not in checkpoints:
+                            checkpoints[label] = {"close": close, "change_pct": (close / entry - 1) * 100, "candle_time": candle_time}
+                    last_time = candle_time
+                record["last_candle_time"] = last_time
+                if now - created >= 24 * 3600:
+                    record["completed"] = True
+                    record["completed_at"] = now
+        except Exception as error:
+            print(f"Early-watch outcome tracking failed for {contract}: {type(error).__name__}: {error}")
+    tracked = sum(1 for row in records if isinstance(row, dict) and not row.get("completed"))
+    completed = sum(1 for row in records if isinstance(row, dict) and row.get("completed"))
+    print(f"EARLY WATCH outcomes: tracked={tracked}, completed_24h={completed}, total={len(records)}")
+    for strategy in ("LIQUIDITY_INFLOW", "LEG_SPIKE_STAGE1"):
+        rows = [r for r in records if isinstance(r, dict) and r.get("strategy") == strategy and r.get("completed")]
+        if rows:
+            avg_up = sum(float(r.get("max_favorable_pct", 0)) for r in rows) / len(rows)
+            avg_down = sum(float(r.get("max_adverse_pct", 0)) for r in rows) / len(rows)
+            print(f"EARLY WATCH {strategy}: completed={len(rows)}, avg_MFE={avg_up:.2f}%, avg_MAE={avg_down:.2f}%")
+
 def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=50):
     """
     Separate OI-led pre-pump entry engine.
@@ -3617,6 +3688,7 @@ def scan():
     print(f"Gate.io liquid contracts checked: {len(coins)}")
 
     state = load_alert_state()
+    update_early_watch_outcomes(state)
     alerts_state = state["alerts"]
     candidates = state["candidates"]
     early_alerts_state = state["early_alerts"]
