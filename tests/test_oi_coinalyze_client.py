@@ -73,7 +73,9 @@ class CoinalyzeClientTests(unittest.TestCase):
         oi = [{"t": start + i * 900, "c": 100000 + i * 100}
               for i in range(24)]
 
+        requested_endpoints = []
         def fake_get(endpoint, params=None):
+            requested_endpoints.append(endpoint)
             if endpoint == "open-interest":
                 return [{"symbol": "BTCUSDT_PERP.A", "value": 1000000}]
             if endpoint == "funding-rate":
@@ -93,6 +95,7 @@ class CoinalyzeClientTests(unittest.TestCase):
         result = client.fetch_metrics("BTCUSDT", now=202000)
         snapshot = result["market_snapshot"]
         self.assertIsNotNone(snapshot)
+        self.assertNotIn("funding-rate-history", requested_endpoints)
         self.assertEqual(len(snapshot["candles"]), 24)
         self.assertEqual(len(snapshot["oi_values"]), 3)
         last = snapshot["candles"][-1]
