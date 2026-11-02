@@ -3238,7 +3238,7 @@ def detect_oi_prepump_watch(candles_1m, candles_5m, diagnostics=None):
             return reject("not_near_resistance")
         if not (-0.50 <= change_pct <= 1.50):
             return reject("price_change_out_of_range")
-        if compression_pct > 4.50:
+        if compression_pct > 4.00:
             return reject("compression_too_wide")
         if ratio_1m < 1.30:
             return reject("low_1m_watch_turnover")
