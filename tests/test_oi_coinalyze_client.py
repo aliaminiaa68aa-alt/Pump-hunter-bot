@@ -95,8 +95,11 @@ class CoinalyzeClientTests(unittest.TestCase):
         self.assertIsNotNone(snapshot)
         self.assertEqual(len(snapshot["candles"]), 24)
         self.assertEqual(len(snapshot["oi_values"]), 3)
-        self.assertAlmostEqual(snapshot["candles"][-1]["taker_buy_quote"] /
-                               snapshot["candles"][-1]["quote_volume"], 0.6)
+        last = snapshot["candles"][-1]
+        expected_typical_price = (last["open"] + last["high"] + last["low"] + last["close"]) / 4
+        self.assertAlmostEqual(last["quote_volume"], last["volume"] * expected_typical_price)
+        self.assertAlmostEqual(last["taker_buy_quote"], 600 * expected_typical_price)
+        self.assertAlmostEqual(last["taker_buy_quote"] / last["quote_volume"], 0.6)
 
     def test_fetch_metrics_calculates_closed_candle_oi_and_buy_ratio(self):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
