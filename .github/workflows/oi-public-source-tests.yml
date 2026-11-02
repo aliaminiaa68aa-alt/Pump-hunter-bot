@@ -1,0 +1,32 @@
+name: Public Telegram OI source tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "oi_engine/telegram_public_source.py"
+      - "oi_engine/alert_ingest.py"
+      - "tests/test_oi_public_source.py"
+      - ".github/workflows/oi-public-source-tests.yml"
+
+jobs:
+  public-source-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Run public Telegram source tests
+        run: python -m unittest tests.test_oi_public_source -v
+      - name: Smoke-test public channel preview
+        run: |
+          python - <<'PY'
+          from oi_engine.telegram_public_source import fetch_public_channel_posts
+          posts = fetch_public_channel_posts("oi_detector")
+          print("Public channel posts parsed:", len(posts))
+          if not posts:
+              raise SystemExit("No public Telegram posts were parsed")
+          print("Latest parsed post:", posts[-1]["message_id"], posts[-1]["text"][:180])
+          PY
