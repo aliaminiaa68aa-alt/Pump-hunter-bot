@@ -45,6 +45,18 @@ class PublicTelegramSourceTests(unittest.TestCase):
         self.assertIn("NEWCOINUSDT", watchlist)
         self.assertEqual(len(watchlist), 5)
 
+    def test_unparsed_post_is_logged_with_message_id_and_cursor_advances(self):
+        posts = [{
+            "message_id": 22, "date": 1000, "text": "OI alert without a recognizable symbol",
+            "channel": "oi_detector",
+        }]
+        with patch("oi_engine.telegram_public_source.fetch_public_channel_posts", return_value=posts), \
+             patch("builtins.print") as log:
+            cursor, added = poll_public_channel_alerts("oi_detector", 21, {}, now=1000)
+        self.assertEqual(cursor, 22)
+        self.assertEqual(added, 0)
+        self.assertIn("message_id=22", " ".join(str(call) for call in log.call_args_list))
+
     def test_unsupported_market_is_skipped_and_cursor_advances(self):
         posts = [{
             "message_id": 21, "date": 1000,
