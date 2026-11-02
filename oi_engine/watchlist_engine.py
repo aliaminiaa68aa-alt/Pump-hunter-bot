@@ -1,6 +1,7 @@
 """Alert-driven watchlist scanner with independent Coinalyze confirmation."""
 from __future__ import annotations
 import time
+import math
 import requests
 from typing import Any, Dict, List, Tuple
 
@@ -10,17 +11,25 @@ from oi_engine.signal_engine import MarketDataError, Signal, evaluate_snapshot, 
 
 def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
     """Fail closed unless Coinalyze OI and taker flow independently align."""
-    quality = metrics.get("data_quality") or {}
     oi_change = metrics.get("oi_change_15m_window_pct")
     taker_ratio = metrics.get("taker_buy_ratio")
-    if not quality.get("complete") or oi_change is None or taker_ratio is None:
+    if oi_change is None or taker_ratio is None:
         return False
-    if float(oi_change) < 0.15:
+    try:
+        oi_change = float(oi_change)
+        taker_ratio = float(taker_ratio)
+    except (TypeError, ValueError):
         return False
+    if not math.isfinite(oi_change) or not math.isfinite(taker_ratio):
+        return False
+    if oi_change < 0.15 or not 0.0 <= taker_ratio <= 1.0:
+        return False
+    # Funding, long/short ratio and liquidation history are supplementary context.
+    # Missing optional endpoints must not veto an otherwise valid OI + taker-flow confirmation.
     if signal.side == "LONG":
-        return float(taker_ratio) >= 0.52
+        return taker_ratio >= 0.52
     if signal.side == "SHORT":
-        return float(taker_ratio) <= 0.48
+        return taker_ratio <= 0.48
     return False
 
 
