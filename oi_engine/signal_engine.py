@@ -63,18 +63,38 @@ def _float(value: Any, field: str) -> float:
 
 
 def get_active_symbols() -> List[str]:
-    """Return active USDT-margined perpetual symbols with trading status."""
+    """Return liquid active USDT perpetuals, ranked by 24h quote turnover."""
     info = _get("/fapi/v1/exchangeInfo")
-    symbols = []
+    excluded = {
+        "USDCUSDT", "BTCDOMUSDT", "DEFIUSDT",
+        "1000SHIBUSDT", "1000PEPEUSDT", "1000BONKUSDT",
+    }
+    active = set()
     for item in info.get("symbols", []):
+        symbol = item.get("symbol", "")
         if (
             item.get("status") == "TRADING"
             and item.get("contractType") == "PERPETUAL"
             and item.get("quoteAsset") == "USDT"
-            and item.get("symbol", "").endswith("USDT")
+            and symbol.endswith("USDT")
+            and symbol not in excluded
         ):
-            symbols.append(item["symbol"])
-    return symbols
+            active.add(symbol)
+
+    tickers = _get("/fapi/v1/ticker/24hr")
+    ranked = []
+    for ticker in tickers:
+        symbol = ticker.get("symbol")
+        if symbol not in active:
+            continue
+        try:
+            turnover = _float(ticker.get("quoteVolume"), "24h quote volume")
+        except MarketDataError:
+            continue
+        if turnover > 0:
+            ranked.append((turnover, symbol))
+    ranked.sort(reverse=True)
+    return [symbol for _, symbol in ranked]
 
 
 def fetch_snapshot(symbol: str) -> Dict[str, Any]:
