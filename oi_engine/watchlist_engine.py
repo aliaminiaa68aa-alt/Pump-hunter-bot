@@ -38,15 +38,23 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         return "ناموجود" if value is None else f"{float(value):.5%}"
     ratio = metrics.get("long_short_ratio")
     long_liq, short_liq = metrics.get("long_liquidations"), metrics.get("short_liquidations")
+    funding = metrics.get("funding_rate")
+    funding_warning = ""
+    try:
+        if funding is not None and math.isfinite(float(funding)) and abs(float(funding)) >= 0.01:
+            funding_warning = "\\n⚠️ Funding گزارش‌شده بسیار غیرعادی است؛ واحد و مبنای زمانی آن را قبل از هر تصمیم بررسی کن."
+    except (TypeError, ValueError):
+        funding_warning = "\\n⚠️ مقدار Funding معتبر نیست؛ در تصمیم ورود به آن اتکا نکن."
     return (
         format_signal(signal) + "\n\nتأیید مرحله دوم Coinalyze"
         + f"\nتغییر OI: {metrics['oi_change_15m_window_pct']:+.2f}%"
         + f"\nنسبت خرید تهاجمی: {metrics['taker_buy_ratio']:.1%}"
-        + f"\nFunding: {pct(metrics.get('funding_rate'))}"
-        + f"\nFunding پیش‌بینی‌شده: {pct(metrics.get('predicted_funding_rate'))}"
+        + f"\nFunding (Coinalyze): {pct(funding)}"
+        + f"\nFunding پیش‌بینی‌شده (Coinalyze): {pct(metrics.get('predicted_funding_rate'))}"
         + f"\nنسبت حساب‌های Long/Short: {'ناموجود' if ratio is None else f'{float(ratio):.3f}'}"
         + f"\nلیکویید Long: {'ناموجود' if long_liq is None else f'{float(long_liq):,.0f}'}"
         + f"\nلیکویید Short: {'ناموجود' if short_liq is None else f'{float(short_liq):,.0f}'}"
+        + funding_warning
     )
 
 
