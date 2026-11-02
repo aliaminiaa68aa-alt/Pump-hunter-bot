@@ -41,6 +41,7 @@ class CoinalyzeClient:
         self.clock = clock
         self.sleeper = sleeper
         self.request_times = deque()
+        self._future_markets_cache: Optional[List[dict]] = None
 
     def _throttle(self) -> None:
         now = self.clock()
@@ -77,9 +78,12 @@ class CoinalyzeClient:
         raise CoinalyzeError(f"Coinalyze rate limit persisted for {endpoint}")
 
     def get_future_markets(self) -> List[dict]:
+        if self._future_markets_cache is not None:
+            return self._future_markets_cache
         payload = self._get("future-markets")
         if not isinstance(payload, list):
             raise CoinalyzeError("Unexpected Coinalyze future-markets response")
+        self._future_markets_cache = payload
         return payload
 
     def resolve_market(self, binance_symbol: str) -> str:
