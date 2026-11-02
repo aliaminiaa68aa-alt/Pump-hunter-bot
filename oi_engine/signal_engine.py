@@ -217,7 +217,7 @@ def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
     last_volume = float(last["quote_volume"])
     volume_ratio = last_volume / avg_volume
     taker_ratio = (float(last["taker_buy_quote"]) / last_volume) if last_volume > 0 else 0.5
-    oi_change = (float(oi_values[-1]) / float(oi_values[-3]) - 1.0) * 100
+    oi_change = (float(oi_values[-1]) / float(oi_values[-2]) - 1.0) * 100
     price_change = (float(last["close"]) / float(previous["close"]) - 1.0) * 100
     prior = candles[-6:-1]
     prior_high = max(float(x["high"]) for x in prior)
@@ -278,7 +278,7 @@ def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
         last["taker_buy_quote"] / last["quote_volume"]
         if last["quote_volume"] > 0 else 0.5
     )
-    oi_change = (oi_values[-1] / oi_values[-3] - 1.0) * 100
+    oi_change = (oi_values[-1] / oi_values[-2] - 1.0) * 100
     price_change = (last["close"] / previous["close"] - 1.0) * 100
     atr = _atr(candles)
     if atr <= 0 or last["close"] <= 0:
