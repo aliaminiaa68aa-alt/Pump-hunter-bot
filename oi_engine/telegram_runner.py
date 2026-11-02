@@ -15,8 +15,9 @@ from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
-MAX_WATCHLIST_SYMBOLS = 50
+MAX_WATCHLIST_SYMBOLS = 4  # 4 symbols x 8 metric calls + one market map stays below 40/min
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
+MAX_FORWARDED_ALERT_AGE_SECONDS = 6 * 60 * 60
 
 
 def _load_json(path: Path, default: Any) -> Any:
@@ -64,7 +65,7 @@ def send_telegram(token: str, chat_id: str, message: str) -> None:
 
 
 def poll_forwarded_alerts(token: str, offset: int, watchlist: Dict[str, Any],
-                          now: int | None = None) -> Tuple[int, int]:
+                          now: int | None = None) -> Tuple[int, int, bool]:
     """Poll messages explicitly forwarded by the user to this bot."""
     response = requests.get(
         f"https://api.telegram.org/bot{token}/getUpdates",
@@ -83,20 +84,27 @@ def poll_forwarded_alerts(token: str, offset: int, watchlist: Dict[str, Any],
     timestamp = int(now if now is not None else time.time())
     next_offset = offset
     added = 0
+    status_requested = False
     for update in payload.get("result", []):
         update_id = int(update.get("update_id", -1))
         next_offset = max(next_offset, update_id + 1)
+        message = update.get("message") or {}
+        message_text = message.get("text") or ""
+        if isinstance(message_text, str) and message_text.strip().split("@")[0] in ("/status", "/watchlist"):
+            status_requested = True
         symbol = parse_forwarded_oi_alert(update)
         if not symbol:
             continue
-        message = update.get("message") or {}
+        alert_time = int(message.get("date", timestamp))
+        if timestamp - alert_time > MAX_FORWARDED_ALERT_AGE_SECONDS or alert_time > timestamp + 60:
+            continue
         if symbol not in watchlist and len(watchlist) >= MAX_WATCHLIST_SYMBOLS:
             continue
         existing = watchlist.get(symbol, {})
         watchlist[symbol] = {
             **existing,
-            "first_seen": existing.get("first_seen", timestamp),
-            "last_alert": timestamp,
+            "first_seen": existing.get("first_seen", alert_time),
+            "last_alert": alert_time,
             "source": "forwarded_telegram_oi_alert",
             "source_update_id": update_id,
             "source_chat_id": (message.get("chat") or {}).get("id"),
@@ -105,7 +113,7 @@ def poll_forwarded_alerts(token: str, offset: int, watchlist: Dict[str, Any],
             "reason": "هشدار اولیه Open Interest دریافت شد؛ منتظر تأیید هستیم",
         }
         added += 1
-    return next_offset, added
+    return next_offset, added, status_requested
 
 
 def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[str, Any]:
@@ -133,7 +141,7 @@ def main() -> None:
     if not isinstance(watchlist, dict):
         watchlist = {}
 
-    offset, added = poll_forwarded_alerts(token, offset, watchlist)
+    offset, added, status_requested = poll_forwarded_alerts(token, offset, watchlist)
     watchlist = prune_watchlist(watchlist)
     client = CoinalyzeClient(api_key=api_key)
     confirmed, watchlist = scan_watchlist(watchlist, client=client)
@@ -152,6 +160,15 @@ def main() -> None:
     if len(state) > 500:
         state = dict(sorted(state.items(), key=lambda item: item[1])[-500:])
         save_state(state)
+
+    if status_requested:
+        if watchlist:
+            lines = ["📋 وضعیت واچ‌لیست OI"]
+            for symbol, record in sorted(watchlist.items()):
+                lines.append(f"{symbol}: {record.get('status', 'در حال رصد')}")
+            send_telegram(token, chat_id, "\n".join(lines))
+        else:
+            send_telegram(token, chat_id, "واچ‌لیست خالی است. هشدار اولیه Open Interest را از کانال اصلی به این ربات فوروارد کن.")
 
     save_watchlist_state({
         "telegram_update_offset": offset,
