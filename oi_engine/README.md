@@ -61,6 +61,26 @@ collected data before drawing conclusions.
 
 
 
+### Export recent history to CSV
+
+On a machine/network where Binance USD-M public market-data endpoints are legally
+available, export the latest supported sample without API credentials:
+
+```bash
+python -m oi_engine.export_history --symbol BTCUSDT --output-dir ./oi-data
+python -m oi_engine.backtest --symbol BTCUSDT \
+  --candles-csv ./oi-data/btcusdt_candles.csv \
+  --oi-csv ./oi-data/btcusdt_oi.csv \
+  --output ./oi-data/btcusdt_report.json
+```
+
+The exporter writes the exact candle and OI CSV schemas accepted by the
+backtest. It uses public endpoints only and does not bypass HTTP 451 or other
+regional restrictions. Binance currently caps OI history at 500 samples per
+request (about five days at 15m intervals); this is useful for a smoke test,
+not robust long-term validation. Collect a longer authorized history before
+making claims about win rate or profitability.
+
 ### Authorized CSV history import
 
 If the hosted runner cannot access Binance, the backtest can use an authorized
