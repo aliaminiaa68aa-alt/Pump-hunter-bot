@@ -232,6 +232,23 @@ def find_recent_impulse(candles):
     return found
 
 
+def find_closed_bos_break(candles, start_idx):
+    """Find the first bullish close above the previous three-candle high."""
+    start = max(3, int(start_idx))
+    for idx in range(start, len(candles)):
+        candle = candles[idx]
+        open_price = float(candle["o"])
+        close_price = float(candle["c"])
+        previous_high = max(float(item["h"]) for item in candles[idx - 3:idx])
+        if close_price > open_price and close_price > previous_high:
+            return {
+                "bos_level": previous_high,
+                "bos_time": str(candle.get("t", idx)),
+                "bos_close": close_price,
+            }
+    return None
+
+
 def check_derivatives_data(tickers):
     """Log a lightweight health check for the public funding and OI fields."""
     btc_ticker = next((item for item in tickers if item.get("contract") == "BTC_USDT"), {})
@@ -4238,20 +4255,21 @@ def scan():
             candidate["pullback_low"] = min(float(candidate.get("pullback_low", candidate["impulse_low"])),
                                               lowest_after_impulse)
 
-            # Detect and remember a closed-candle break above the previous 3-candle high.
-            previous_three = candles[-4:-1]
-            if candidate.get("bos_level") is None and len(previous_three) == 3 and latest_close > latest_open:
-                short_term_high = max(float(item["h"]) for item in previous_three)
-                if latest_close > short_term_high:
+            # Search every closed candle after the impulse, not only the latest candle.
+            # This prevents missing a valid BOS that happened between scheduled scans.
+            if candidate.get("bos_level") is None:
+                bos = find_closed_bos_break(candles, impulse_idx + 1)
+                if bos:
+                    short_term_high = float(bos["bos_level"])
                     candidate["bos_level"] = short_term_high
-                    candidate["bos_time"] = str(latest.get("t", ""))
+                    candidate["bos_time"] = bos["bos_time"]
                     setup_alerts = state.setdefault("regular_setup_alerts", {})
                     if setup_alerts.get(contract) != candidate["impulse_time"]:
                         setup_message = (
                             "🟦 HYPE/BOS | استراتژی اصلی\n"
                             f"🟡 شکست ساختار ۵دقیقه‌ای: {contract.replace('_', '/')} (Gate.io Perpetual)\n"
                             f"سطح شکست: {short_term_high}\n"
-                            f"قیمت کندل بسته‌شده: {latest_close}\n\n"
+                            f"قیمت کندل شکست: {bos['bos_close']}\n\n"
                             "این مرحله از هشدار اولیه قوی‌تر است، اما هنوز تأیید ورود نیست. ربات منتظر کندل ۱۵دقیقه‌ای، روند ۱ساعته و بررسی OI/Funding می‌ماند."
                         )
                         setup_alerts[contract] = candidate["impulse_time"]
