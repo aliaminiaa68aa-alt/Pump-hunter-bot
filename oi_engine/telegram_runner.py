@@ -210,7 +210,7 @@ def main() -> None:
         f"new_channel_or_forwarded_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}"
     )
     for symbol, record in watchlist.items():
-        print(f"Watchlist {symbol}: {record.get('status')} - {record.get('reason', '')}")
+        print(f"Watchlist {symbol}: {record.get('status')} - {record.get('reason', '')} [source={record.get('data_source', 'unknown')}]")
 
 
 if __name__ == "__main__":
