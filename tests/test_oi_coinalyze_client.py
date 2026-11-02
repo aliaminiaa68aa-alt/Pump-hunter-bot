@@ -60,6 +60,44 @@ class CoinalyzeClientTests(unittest.TestCase):
         self.assertEqual(session.headers["api_key"], "secret-value")
         self.assertNotIn("secret-value", repr(session.get.call_args))
 
+
+    def test_fetch_metrics_builds_closed_15m_market_snapshot(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"
+        start = 180000
+        candles = [
+            {"t": start + i * 900, "o": 100+i, "h": 102+i, "l": 99+i,
+             "c": 101+i, "v": 1000, "bv": 600}
+            for i in range(24)
+        ]
+        oi = [{"t": start + i * 900, "c": 100000 + i * 100}
+              for i in range(24)]
+
+        def fake_get(endpoint, params=None):
+            if endpoint == "open-interest":
+                return [{"symbol": "BTCUSDT_PERP.A", "value": 1000000}]
+            if endpoint == "funding-rate":
+                return [{"symbol": "BTCUSDT_PERP.A", "value": 0.0001}]
+            if endpoint == "predicted-funding-rate":
+                return [{"symbol": "BTCUSDT_PERP.A", "value": 0.0002}]
+            history = {
+                "open-interest-history": oi,
+                "funding-rate-history": [{"t": start, "c": 0.0001}],
+                "long-short-ratio-history": [{"t": start, "r": 1.2, "l": 0.55, "s": 0.45}],
+                "liquidation-history": [{"t": start, "l": 1200, "s": 900}],
+                "ohlcv-history": candles,
+            }
+            return [{"symbol": "BTCUSDT_PERP.A", "history": history[endpoint]}]
+
+        client._get = fake_get
+        result = client.fetch_metrics("BTCUSDT", now=202000)
+        snapshot = result["market_snapshot"]
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(len(snapshot["candles"]), 24)
+        self.assertEqual(len(snapshot["oi_values"]), 3)
+        self.assertAlmostEqual(snapshot["candles"][-1]["taker_buy_quote"] /
+                               snapshot["candles"][-1]["quote_volume"], 0.6)
+
     def test_fetch_metrics_calculates_oi_and_buy_ratio(self):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
         client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"
