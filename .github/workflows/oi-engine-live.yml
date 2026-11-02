@@ -46,4 +46,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .oi_state
-          key: oi-state-${{ github.run_id }}
+          key: oi-public-only-v2-${{ github.run_id }}
