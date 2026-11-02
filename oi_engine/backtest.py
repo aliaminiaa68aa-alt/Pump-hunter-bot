@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import csv
+from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -78,6 +79,24 @@ def align_oi(candles: List[dict], oi_rows: List[dict]) -> List[Optional[List[flo
             continue
         result.append(values if all(value > 0 for value in values) else None)
     return result
+
+
+def reprice_signal_for_next_open(signal: Any, next_open: float) -> Any:
+    """Move entry to the first executable bar open and preserve the planned R distance."""
+    entry = _float(next_open, "next candle open")
+    if entry <= 0:
+        raise MarketDataError("Next candle open must be positive")
+    risk = abs(float(signal.entry) - float(signal.stop_loss))
+    if risk <= 0:
+        raise MarketDataError("Signal risk distance must be positive")
+    if signal.side == "LONG":
+        stop, tp1, tp2 = entry - risk, entry + risk, entry + 2.0 * risk
+    elif signal.side == "SHORT":
+        stop, tp1, tp2 = entry + risk, entry - risk, entry - 2.0 * risk
+    else:
+        raise MarketDataError(f"Unsupported signal side: {signal.side}")
+    return replace(signal, entry=entry, stop_loss=stop,
+                   take_profit_1=tp1, take_profit_2=tp2)
 
 
 def simulate_trade(signal: Any, future_candles: List[dict],
@@ -334,9 +353,14 @@ def run_backtest_data(symbol: str, candles: List[dict], oi_rows: List[dict],
         signal = evaluate_snapshot(snapshot)
         if signal is None:
             continue
-        trade = simulate_trade(signal, candles[index + 1:], fee_bps, slippage_bps)
+        executable_signal = reprice_signal_for_next_open(signal, candles[index + 1]["open"])
+        trade = simulate_trade(executable_signal, candles[index + 1:], fee_bps, slippage_bps)
         if trade is None:
             continue
+        trade["signal_close_entry"] = signal.entry
+        trade["entry_gap_pct"] = round(
+            (executable_signal.entry / signal.entry - 1.0) * 100.0, 4
+        )
         trades.append(trade)
         next_available_index = index + min(MAX_HOLD_CANDLES, len(candles) - index - 1) + 1
 
@@ -349,12 +373,13 @@ def run_backtest_data(symbol: str, candles: List[dict], oi_rows: List[dict],
         "history_end_ms": candles[-1]["close_time"] if candles else None,
         "fee_bps_per_side": fee_bps,
         "slippage_bps_per_side": slippage_bps,
-        "exit_model": "50% TP1 + 50% TP2; fixed stop; stop-first on same-candle ambiguity",
+        "exit_model": "Entry at next candle open; 50% TP1 + 50% TP2; fixed stop; stop-first on same-candle ambiguity",
         "funding_included": False,
         "metrics": summarize(trades),
         "trades_detail": trades,
         "limitations": [
             "Only closed 15m candles and OI samples timestamped no later than each signal candle are used.",
+            "Entries are modeled at the next candle open, not the signal candle close; SL/TP distances are preserved from the signal plan.",
             "Funding is excluded from this backtest.",
             "Fees and slippage are configurable approximations; actual fills differ.",
         ],
