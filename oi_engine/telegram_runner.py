@@ -131,6 +131,17 @@ def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[s
     }
 
 
+def _has_supported_perpetual(client: CoinalyzeClient, symbol: str) -> bool:
+    """Return False only for a genuine missing Binance perpetual mapping."""
+    from oi_engine.coinalyze_client import CoinalyzeError
+    try:
+        return bool(client.resolve_market(symbol))
+    except CoinalyzeError as exc:
+        if str(exc).startswith("No Binance USDT perpetual mapping"):
+            return False
+        raise
+
+
 def main() -> None:
     token = os.getenv("BOT_TOKEN")
     chat_id = os.getenv("CHAT_ID")
@@ -154,7 +165,7 @@ def main() -> None:
     try:
         public_last_id, public_added = poll_public_channel_alerts(
             public_channel, public_last_id, watchlist,
-            symbol_validator=lambda symbol: bool(client.resolve_market(symbol))
+            symbol_validator=lambda symbol: _has_supported_perpetual(client, symbol)
         )
         added += public_added
         print(f"Public Telegram source @{public_channel}: new_alerts={public_added}")
