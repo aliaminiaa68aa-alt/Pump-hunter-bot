@@ -17,7 +17,7 @@ class OIPrePumpWatchTests(unittest.TestCase):
                 base - (0.25 if compressed else 2.0), base + 0.02, 100.0
             ))
         # Keep recent resistance just above price to test pre-breakout detection.
-        resistance = 100.20 if near_resistance else 101.50
+        resistance = 100.20 if near_resistance else 102.50
         for row in candles_5m[-6:-1]:
             row["h"] = str(resistance)
         candles_5m[-1] = candle(
