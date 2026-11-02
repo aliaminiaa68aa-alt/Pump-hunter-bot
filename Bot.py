@@ -885,7 +885,8 @@ def leg_spike_long_short_filter(contract):
 
 # Fibonacci pullback strategy configuration.
 # Minimum 24h aggregate spot volume / market cap ratio.
-FIB_MIN_VOLUME_TO_MARKET_CAP = 2.00
+FIB_MIN_VOLUME_TO_MARKET_CAP = 1.80
+FIB_FULL_VOLUME_TO_MARKET_CAP = 2.00  # >=2x passes volume tier; 1.8-2x needs every other LEG SPIKE gate.
 # Accept negative funding and near-zero positive funding up to +0.01%.
 # Funding values are stored internally as decimal fractions.
 FIB_MAX_FUNDING_RATE = 0.0001
@@ -1889,10 +1890,12 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             volume_samples.append((volume_mc, contract, total_market_volume, market_cap, funding))
 
             if volume_mc < FIB_MIN_VOLUME_TO_MARKET_CAP:
-                if contract in early_pattern_details: early_filter_status[contract] = f"Volume/MC rejected ({volume_mc:.3f}x)"
+                if contract in early_pattern_details: early_filter_status[contract] = f"Volume/MC rejected ({volume_mc:.3f}x; minimum 1.80x)"
                 continue
             counts["volume_pass"] += 1
-            if contract in early_pattern_details: early_filter_status[contract] = "Volume/MC passed; checking OI"
+            volume_tier = "FULL (>=2.00x)" if volume_mc >= FIB_FULL_VOLUME_TO_MARKET_CAP else "CONDITIONAL (1.80-2.00x)"
+            print(f"{contract}: LEG SPIKE volume tier {volume_tier}; volume/MC={volume_mc:.3f}x; all derivatives/price gates remain mandatory")
+            if contract in early_pattern_details: early_filter_status[contract] = f"Volume/MC {volume_tier}; checking OI and all confirmation gates"
 
             # Coinalyze is the primary OI/funding source when configured. Do not
             # reject a candidate using Gate.io OI before checking the requested aggregate.
