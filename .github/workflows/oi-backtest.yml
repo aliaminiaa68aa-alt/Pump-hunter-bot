@@ -1,12 +1,6 @@
 name: OI historical backtest
 
 on:
-  push:
-    branches: [oi-signal-engine]
-    paths:
-      - "oi_engine/backtest.py"
-      - "oi_engine/signal_engine.py"
-      - ".github/workflows/oi-backtest.yml"
   workflow_dispatch:
 
 jobs:
