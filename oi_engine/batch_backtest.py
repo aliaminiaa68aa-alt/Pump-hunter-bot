@@ -66,6 +66,10 @@ def run_batch_backtest(
     # Trades are appended symbol-by-symbol, not in a shared chronological
     # portfolio sequence. A drawdown over that artificial order is invalid.
     pooled_metrics["max_drawdown_r"] = None
+    # Side-specific pooled trades are also grouped symbol-by-symbol, not by
+    # one shared chronological portfolio sequence; their drawdowns are invalid too.
+    for side_metrics in pooled_metrics.get("by_side", {}).values():
+        side_metrics["max_drawdown_r"] = None
 
     return {
         "timeframe": "15m",
