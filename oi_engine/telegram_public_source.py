@@ -102,6 +102,12 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
             f"Public Telegram poll: page_posts={len(posts)} unseen_posts={len(unseen)} "
             f"cursor_before={last_message_id} page_range={posts[0]['message_id']}-{posts[-1]['message_id']}"
         )
+        if last_message_id and posts[0]["message_id"] > last_message_id + 1:
+            print(
+                f"WARNING: public Telegram preview gap detected: "
+                f"cursor={last_message_id}, oldest_visible={posts[0]['message_id']}; "
+                "some older posts may have fallen outside the preview page"
+            )
     else:
         newest = posts[-1]["message_id"] if posts else 0
         print(
