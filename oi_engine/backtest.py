@@ -191,12 +191,28 @@ def download_history(symbol: str) -> tuple[List[dict], List[dict]]:
     k_response = session.get(base + "/fapi/v1/klines",
                              params={"symbol": symbol, "interval": "15m", "limit": 500},
                              timeout=20)
-    k_response.raise_for_status()
+    try:
+        k_response.raise_for_status()
+    except requests.HTTPError as exc:
+        if k_response.status_code == 451:
+            raise MarketDataError(
+                "Binance USD-M Futures returned HTTP 451 (restricted location). "
+                "No historical data was downloaded; run from a network where this "
+                "market-data service is legally available, or provide an authorized data export."
+            ) from exc
+        raise
     k_rows = k_response.json()
     oi_response = session.get(base + "/futures/data/openInterestHist",
                               params={"symbol": symbol, "period": "15m", "limit": 500},
                               timeout=20)
-    oi_response.raise_for_status()
+    try:
+        oi_response.raise_for_status()
+    except requests.HTTPError as exc:
+        if oi_response.status_code == 451:
+            raise MarketDataError(
+                "Binance USD-M Futures OI history returned HTTP 451 (restricted location)."
+            ) from exc
+        raise
     oi_rows = oi_response.json()
     if not isinstance(k_rows, list) or not isinstance(oi_rows, list):
         raise MarketDataError("Unexpected Binance history response")
@@ -277,7 +293,10 @@ def main() -> None:
     parser.add_argument("--slippage-bps", type=float, default=DEFAULT_SLIPPAGE_BPS)
     parser.add_argument("--output", default="oi_backtest_report.json")
     args = parser.parse_args()
-    report = run_backtest(args.symbol, args.fee_bps, args.slippage_bps)
+    try:
+        report = run_backtest(args.symbol, args.fee_bps, args.slippage_bps)
+    except MarketDataError as exc:
+        parser.exit(2, f"Backtest unavailable: {exc}\\n")
     with open(args.output, "w", encoding="utf-8") as handle:
         json.dump(report, handle, ensure_ascii=False, indent=2)
     print(json.dumps({key: value for key, value in report.items() if key != "trades_detail"},
