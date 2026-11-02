@@ -129,8 +129,11 @@ python -m oi_engine.batch_backtest \
   --output ./oi-data/batch_backtest_report.json
 ```
 
-The report includes per-symbol metrics and a pooled equal-risk R-multiple
-summary. The pooled summary is **not** a portfolio equity curve: it does not
-model simultaneous positions, shared capital, or portfolio-level exposure.
+The report includes per-symbol metrics, a per-symbol sample-size assessment,
+and a pooled equal-risk R-multiple summary. Samples under 30 trades are marked
+exploratory; 30-99 are preliminary; 100+ are still not a substitute for
+out-of-sample validation. The pooled summary is **not** a portfolio equity
+curve: it does not model simultaneous positions, shared capital, or
+portfolio-level exposure, so pooled drawdown is intentionally omitted.
 Symbols with missing or invalid CSV pairs are listed under
 `symbols_failed`; other symbols continue independently.
