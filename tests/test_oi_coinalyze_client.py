@@ -107,11 +107,12 @@ class CoinalyzeClientTests(unittest.TestCase):
         start = 180000
         candles = [
             {"t": start + i * 900, "o": 100, "h": 102, "l": 99,
-             "c": 101, "v": 100, "bv": 60}
+             "c": 101, "v": 100, "bv": 90 if i == 23 else 60}
             for i in range(24)
         ]
-        oi = [{"t": start + i * 900, "c": (100 if i == 21 else 101 if i == 22 else 103 if i == 23 else 90 + i)}
-              for i in range(24)]
+        # Latest price candle has no matching OI sample yet.
+        oi = [{"t": start + i * 900, "c": (100 if i == 21 else 101 if i == 22 else 90 + i)}
+              for i in range(23)]
 
         def fake_get(endpoint, params=None):
             if endpoint == "open-interest":
@@ -131,8 +132,11 @@ class CoinalyzeClientTests(unittest.TestCase):
 
         client._get = fake_get
         result = client.fetch_metrics("BTCUSDT", now=start + 24 * 900)
-        self.assertAlmostEqual(result["oi_change_15m_window_pct"], 3.0)
+        self.assertAlmostEqual(result["oi_change_15m_window_pct"], 1.0)
         self.assertAlmostEqual(result["taker_buy_ratio"], 0.6)
+        snapshot = result["market_snapshot"]
+        self.assertEqual(snapshot["candles"][-1]["open_time"], (start + 22 * 900) * 1000)
+        self.assertEqual(snapshot["oi_timestamp"], (start + 23 * 900) * 1000 - 1)
         self.assertEqual(result["long_short_ratio"], 1.2)
         self.assertEqual(result["long_liquidations"], 1200.0)
         self.assertTrue(result["data_quality"]["complete"])
