@@ -897,9 +897,29 @@ def leg_spike_long_short_filter(contract):
 
 
 # Fibonacci pullback strategy configuration.
-# Minimum 24h aggregate spot volume / market cap ratio.
-FIB_MIN_VOLUME_TO_MARKET_CAP = 1.80
-FIB_FULL_VOLUME_TO_MARKET_CAP = 2.00  # >=2x passes volume tier; 1.8-2x needs every other LEG SPIKE gate.
+# Volume/market-cap is a quality/ranking metric, not a standalone entry veto.
+# Missing/invalid market-cap or volume data still fails closed above.
+FIB_MIN_VOLUME_TO_MARKET_CAP = 0.0
+FIB_FULL_VOLUME_TO_MARKET_CAP = 2.00
+
+
+def leg_spike_volume_tier(volume_mc):
+    """Classify aggregate 24h volume / market-cap without vetoing valid lower tiers."""
+    try:
+        ratio = float(volume_mc)
+    except (TypeError, ValueError):
+        return "UNAVAILABLE"
+    if not math.isfinite(ratio) or ratio <= 0:
+        return "INVALID"
+    if ratio >= FIB_FULL_VOLUME_TO_MARKET_CAP:
+        return "FULL"
+    if ratio >= 1.0:
+        return "STRONG"
+    if ratio >= 0.5:
+        return "MODERATE"
+    return "LOW"
+
+
 # Accept negative funding and near-zero positive funding up to +0.01%.
 # Funding values are stored internally as decimal fractions.
 FIB_MAX_FUNDING_RATE = 0.0001
@@ -1933,13 +1953,13 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             volume_mc = total_market_volume / market_cap
             volume_samples.append((volume_mc, contract, total_market_volume, market_cap, funding))
 
-            if volume_mc < FIB_MIN_VOLUME_TO_MARKET_CAP:
-                if contract in early_pattern_details: early_filter_status[contract] = f"Volume/MC rejected ({volume_mc:.3f}x; minimum 1.80x)"
+            volume_tier = leg_spike_volume_tier(volume_mc)
+            if volume_tier in ("INVALID", "UNAVAILABLE"):
+                if contract in early_pattern_details: early_filter_status[contract] = "Volume/MC invalid"
                 continue
             counts["volume_pass"] += 1
-            volume_tier = "FULL (>=2.00x)" if volume_mc >= FIB_FULL_VOLUME_TO_MARKET_CAP else "CONDITIONAL (1.80-2.00x)"
-            print(f"{contract}: LEG SPIKE volume tier {volume_tier}; volume/MC={volume_mc:.3f}x; all derivatives/price gates remain mandatory")
-            if contract in early_pattern_details: early_filter_status[contract] = f"Volume/MC {volume_tier}; checking OI and all confirmation gates"
+            print(f"{contract}: LEG SPIKE volume quality={volume_tier}; volume/MC={volume_mc:.3f}x; derivatives/price gates remain mandatory")
+            if contract in early_pattern_details: early_filter_status[contract] = f"Volume/MC quality {volume_tier}; checking OI and all confirmation gates"
 
             # Coinalyze is the primary OI/funding source when configured. Do not
             # reject a candidate using Gate.io OI before checking the requested aggregate.
@@ -2191,7 +2211,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                             f"🛑 حد ضرر: {stop_price:.10g} (۱٪ زیر کف جاروب؛ ریسک {risk_pct:.2f}٪)\n"
                             f"🎯 تارگت: سقف موج {target_price:.10g}\n"
                             f"⚖️ ریسک به بازده تا سقف موج: ۱:{risk_reward:.2f} (حداقل مجاز ۱:۲)\n"
-                            f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x ({'عبور کامل' if volume_mc >= FIB_FULL_VOLUME_TO_MARKET_CAP else 'عبور مشروط؛ همه فیلترهای دیگر پاس شده'}) | ارزش OI: ${live_oi:,.0f} | رشد OI چهار‌ساعته: {metrics['oi_change4h']:+.2f}%\n"
+                            f"📊 کیفیت حجم/مارکت‌کپ: {volume_mc:.2f}x ({leg_spike_volume_tier(volume_mc)}) | ارزش OI: ${live_oi:,.0f} | رشد OI چهار‌ساعته: {metrics['oi_change4h']:+.2f}%\n"
                             f"💸 Funding: {live_funding * 100:+.4f}% | {ratio_text}\n"
                             "✅ ورود فقط پس از سوئیپ نقدینگی و بسته‌شدن کندل ۱۵دقیقه بالای سطح بازیابی فیبو صادر می‌شود.\n"
                             "⚠️ سیگنال الگوریتمی است و برگشت را تضمین نمی‌کند؛ ریسک معامله را محدود نگه دار.\n"
@@ -2287,7 +2307,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         f"نسبت لانگ CoinAlayze: ۱ساعت {metrics['long1h']:.1f}% | روزانه {metrics['long1d']:.1f}%\n"
                         f"{daily_warning}\n"
                         f"{spike_metric_text(metrics)}\n"
-                        f"حجم/مارکت‌کپ: {volume_mc:.2f}x ({'عبور کامل' if volume_mc >= FIB_FULL_VOLUME_TO_MARKET_CAP else 'عبور مشروط؛ همه فیلترهای دیگر پاس شده'})\n"
+                        f"کیفیت حجم/مارکت‌کپ: {volume_mc:.2f}x ({leg_spike_volume_tier(volume_mc)})\n"
                         f"Funding مؤثر برای فیلتر: {alert_funding * 100:+.4f}% | OI مؤثر: ${alert_oi:,.0f}\n"
                         f"نسبت سود به ریسک تا سقف: {reward / risk:.2f}:1\n"
                         "⚠️ همه فیلترهای داده‌ای موجود و معتبرند؛ هشدار الگوریتمی است و ورود تضمینی نیست."
