@@ -42,9 +42,9 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     funding_warning = ""
     try:
         if funding is not None and math.isfinite(float(funding)) and abs(float(funding)) >= 0.01:
-            funding_warning = "\\n⚠️ Funding گزارش‌شده بسیار غیرعادی است؛ واحد و مبنای زمانی آن را قبل از هر تصمیم بررسی کن."
+            funding_warning = "\n⚠️ Funding گزارش‌شده بسیار غیرعادی است؛ واحد و مبنای زمانی آن را قبل از هر تصمیم بررسی کن."
     except (TypeError, ValueError):
-        funding_warning = "\\n⚠️ مقدار Funding معتبر نیست؛ در تصمیم ورود به آن اتکا نکن."
+        funding_warning = "\n⚠️ مقدار Funding معتبر نیست؛ در تصمیم ورود به آن اتکا نکن."
     return (
         format_signal(signal) + "\n\nتأیید مرحله دوم Coinalyze"
         + f"\nتغییر OI: {metrics['oi_change_15m_window_pct']:+.2f}%"
