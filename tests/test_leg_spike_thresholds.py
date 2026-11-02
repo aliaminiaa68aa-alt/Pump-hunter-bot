@@ -33,6 +33,18 @@ class LegSpikeThresholdTests(unittest.TestCase):
         self.assertEqual(Bot.format_oi_change(None), "ناموجود")
         self.assertEqual(Bot.format_oi_change(3.25), "+3.25%")
 
+    def test_oi_surge_24h_threshold_is_inclusive(self):
+        self.assertEqual(
+            Bot.oi_surge_tier({"valid": True, "oi_change24h": 30.0, "oi_change4h": None}),
+            "24H",
+        )
+
+    def test_oi_surge_4h_threshold_is_inclusive(self):
+        self.assertEqual(
+            Bot.oi_surge_tier({"valid": True, "oi_change24h": None, "oi_change4h": 8.0}),
+            "4H",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
