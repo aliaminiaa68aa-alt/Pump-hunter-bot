@@ -275,43 +275,80 @@ def summarize(trades: List[dict]) -> dict:
 
 
 def download_history(symbol: str) -> tuple[List[dict], List[dict]]:
+    """Download the maximum recent OI history available, paging within Binance's
+    documented one-month retention window. Klines are paged separately because
+    their endpoint has a larger per-request limit.
+    """
+    import time
+
     session = requests.Session()
     session.headers.update({"User-Agent": "OI-Signal-Backtest/1.0"})
     base = BASE_URL
-    k_response = session.get(base + "/fapi/v1/klines",
-                             params={"symbol": symbol, "interval": "15m", "limit": 500},
-                             timeout=20)
-    try:
-        k_response.raise_for_status()
-    except requests.HTTPError as exc:
-        if k_response.status_code == 451:
-            raise MarketDataError(
-                "Binance USD-M Futures returned HTTP 451 (restricted location). "
-                "No historical data was downloaded; run from a network where this "
-                "market-data service is legally available, or provide an authorized data export."
-            ) from exc
-        raise
-    k_rows = k_response.json()
-    oi_response = session.get(base + "/futures/data/openInterestHist",
-                              params={"symbol": symbol, "period": "15m", "limit": 500},
-                              timeout=20)
-    try:
-        oi_response.raise_for_status()
-    except requests.HTTPError as exc:
-        if oi_response.status_code == 451:
-            raise MarketDataError(
-                "Binance USD-M Futures OI history returned HTTP 451 (restricted location)."
-            ) from exc
-        raise
-    oi_rows = oi_response.json()
-    if not isinstance(k_rows, list) or not isinstance(oi_rows, list):
-        raise MarketDataError("Unexpected Binance history response")
-    candles = parse_klines(k_rows)
+    interval_ms = INTERVAL_MS
+    now_ms = int(time.time() * 1000)
+    # Binance documents only the latest one month for OI statistics. Stay
+    # inside that retention window rather than repeatedly requesting older data.
+    start_time = now_ms - 29 * 24 * 60 * 60 * 1000
+    start_time -= start_time % interval_ms
+
+    def get_page(path: str, params: dict) -> list:
+        response = session.get(base + path, params=params, timeout=20)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            if response.status_code == 451:
+                raise MarketDataError(
+                    "Binance USD-M Futures returned HTTP 451 (restricted location). "
+                    "No historical data was downloaded; run from a network where this "
+                    "market-data service is legally available, or provide an authorized data export."
+                ) from exc
+            raise
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise MarketDataError("Unexpected Binance history response")
+        return payload
+
+    # Klines support up to 1500 rows per request.
+    raw_klines = []
+    cursor = start_time
+    for _ in range(4):
+        page = get_page("/fapi/v1/klines", {
+            "symbol": symbol, "interval": "15m", "limit": 1500,
+            "startTime": cursor, "endTime": now_ms,
+        })
+        if not page:
+            break
+        raw_klines.extend(page)
+        next_cursor = int(page[-1][0]) + interval_ms
+        if next_cursor <= cursor or len(page) < 1500:
+            break
+        cursor = next_cursor
+
+    # OI statistics support at most 500 rows per request and retain one month.
+    raw_oi = []
+    cursor = start_time
+    for _ in range(8):
+        page = get_page("/futures/data/openInterestHist", {
+            "symbol": symbol, "period": "15m", "limit": 500,
+            "startTime": cursor, "endTime": now_ms,
+        })
+        if not page:
+            break
+        raw_oi.extend(page)
+        next_cursor = int(page[-1].get("timestamp", 0)) + 1
+        if next_cursor <= cursor or len(page) < 500:
+            break
+        cursor = next_cursor
+
+    # Defensive de-duplication at page boundaries.
+    unique_klines = {int(row[0]): row for row in raw_klines}
+    unique_oi = {int(row["timestamp"]): row for row in raw_oi}
+    candles = parse_klines([unique_klines[key] for key in sorted(unique_klines)])
     # Drop the currently-forming kline; only closed candles may generate signals.
-    if candles:
-        import time
-        now_ms = int(time.time() * 1000)
-        candles = [candle for candle in candles if candle["close_time"] < now_ms]
+    candles = [candle for candle in candles if candle["close_time"] < now_ms]
+    oi_rows = [unique_oi[key] for key in sorted(unique_oi)]
+    if not candles or not oi_rows:
+        raise MarketDataError("Binance returned no usable recent candle/OI history")
     return candles, oi_rows
 
 
