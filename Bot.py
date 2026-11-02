@@ -533,7 +533,7 @@ def coinalyze_derivatives_check(contract, state):
         )
         oi4_rows = coinalyze_request(
             "/open-interest-history",
-            {"symbols": symbols, "interval": "1hour", "from": now - 5 * 3600, "to": now, "convert_to_usd": "true"},
+            {"symbols": symbols, "interval": "1hour", "from": now - 25 * 3600, "to": now, "convert_to_usd": "true"},
         )
         funding_rows = coinalyze_request("/funding-rate", {"symbols": symbols})
 
@@ -571,20 +571,30 @@ def coinalyze_derivatives_check(contract, state):
 
         oi_change = (new_total / old_total - 1.0) * 100.0
         oi4_old_total = oi4_new_total = 0.0
+        oi24_old_total = oi24_new_total = 0.0
         oi4_exchanges = 0
+        oi24_exchanges = 0
         oi4_by_symbol = {str(row.get("symbol", "")): row for row in oi4_rows}
         for symbol in seen:
             history4 = sorted(oi4_by_symbol.get(symbol, {}).get("history", []), key=lambda point: int(point.get("t", 0)))
             recent4 = [point for point in history4 if int(point.get("t", 0)) >= now - 4 * 3600]
-            if len(recent4) < 2:
-                continue
-            old4 = float(recent4[0].get("c", 0) or 0)
-            new4 = float(recent4[-1].get("c", 0) or 0)
-            if old4 > 0 and new4 > 0:
-                oi4_old_total += old4
-                oi4_new_total += new4
-                oi4_exchanges += 1
+            recent24 = [point for point in history4 if int(point.get("t", 0)) >= now - 24 * 3600]
+            if len(recent4) >= 2:
+                old4 = float(recent4[0].get("c", 0) or 0)
+                new4 = float(recent4[-1].get("c", 0) or 0)
+                if old4 > 0 and new4 > 0:
+                    oi4_old_total += old4
+                    oi4_new_total += new4
+                    oi4_exchanges += 1
+            if len(recent24) >= 2:
+                old24 = float(recent24[0].get("c", 0) or 0)
+                new24 = float(recent24[-1].get("c", 0) or 0)
+                if old24 > 0 and new24 > 0:
+                    oi24_old_total += old24
+                    oi24_new_total += new24
+                    oi24_exchanges += 1
         oi_change4h = ((oi4_new_total / oi4_old_total - 1.0) * 100.0) if oi4_exchanges >= 2 and oi4_old_total > 0 else None
+        oi_change24h = ((oi24_new_total / oi24_old_total - 1.0) * 100.0) if oi24_exchanges >= 2 and oi24_old_total > 0 else None
         # Coinalyze returns funding values in percentage units (e.g. -0.0243 means
         # -0.0243%, not -2.43%). Normalize to a decimal fraction internally so the
         # rest of this bot can keep using fraction-based rates (0.0001 = 0.01%).
@@ -611,13 +621,15 @@ def coinalyze_derivatives_check(contract, state):
             f"funding={len(funding_values)}[{','.join(funding_exchanges)}] "
             f"aggregate_OI_change={oi_change:+.3f}% "
             f"aggregate_OI_change_4h={(f'{oi_change4h:+.3f}%' if oi_change4h is not None else 'unavailable')} "
-            f"OI_4h_exchanges={oi4_exchanges} "
+            f"aggregate_OI_change_24h={(f'{oi_change24h:+.3f}%' if oi_change24h is not None else 'unavailable')} "
+            f"OI_4h_exchanges={oi4_exchanges} OI_24h_exchanges={oi24_exchanges} "
             f"aggregate_OI_USD={new_total:.0f} average_funding={funding_avg*100:+.4f}% "
             f"funding_raw_values=[{','.join(funding_raw_diagnostics)}]"
         )
         result = {
             "configured": True, "valid": True,
-            "oi_change": oi_change, "oi_change4h": oi_change4h, "funding_rate": funding_avg,
+            "oi_change": oi_change, "oi_change4h": oi_change4h, "oi_change24h": oi_change24h,
+            "funding_rate": funding_avg,
             "oi_usd": new_total,
             "oi_exchanges": oi_exchanges, "funding_exchanges": funding_exchanges,
             "symbol": base + "USDT",
@@ -3222,6 +3234,22 @@ def pre_pump_oi_gate(derivatives, min_oi_change=0.30, max_funding=0.0005):
         return False
 
 
+def oi_surge_tier(derivatives):
+    """Classify unusually strong multi-timeframe OI expansion for watch alerts only."""
+    if not isinstance(derivatives, dict) or not derivatives.get("valid"):
+        return None
+    try:
+        change_24h = derivatives.get("oi_change24h")
+        change_4h = derivatives.get("oi_change4h")
+        if change_24h is not None and float(change_24h) >= 30.0:
+            return "24H"
+        if change_4h is not None and float(change_4h) >= 8.0:
+            return "4H"
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
 def detect_oi_prepump_watch(candles_1m, candles_5m, diagnostics=None):
     """
     Find a quiet, high-turnover compression close to resistance BEFORE breakout.
@@ -3524,6 +3552,7 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                         watch_derivatives = public_derivatives_check(contract)
                         watch_source = watch_derivatives.get("source", "Bybit public 5m")
                     if pre_pump_oi_gate(watch_derivatives, min_oi_change=0.15):
+                        surge_tier = oi_surge_tier(watch_derivatives)
                         watch_state = state.setdefault("oi_prepump_watch", {})
                         previous_watch = watch_state.get(contract, {})
                         if not isinstance(previous_watch, dict) or previous_watch.get("candle_time") != watch["candle_time"]:
@@ -3543,12 +3572,17 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                             same_alert_candle = str(previous_alert.get("candle_time", "")) == str(watch["candle_time"])
                             if not same_alert_candle and alert_age >= 45 * 60:
                                 watch_message = (
-                                    "👀 OI EARLY WATCH | هشدار قبل از پامپ — هنوز سیگنال ورود نیست\n"
-                                    "━━━━━━━━━━━━━━━━━━\n"
+                                    ("🔥 OI SURGE WATCH | جهش چندبازه‌ای OI — هنوز سیگنال ورود نیست\n"
+                                     if surge_tier else
+                                     "👀 OI EARLY WATCH | هشدار قبل از پامپ — هنوز سیگنال ورود نیست\n")
+                                    + "━━━━━━━━━━━━━━━━━━\n"
                                     f"🪙 ارز: {contract.replace('_', '/')}\n"
                                     f"💰 قیمت بسته‌شدن ۵دقیقه: {float(candles_5m[-1]['c']):.10g}\n"
                                     f"📈 رشد OI پنج‌دقیقه: {float(watch_derivatives['oi_change']):+.3f}% ({watch_source})\n"
-                                    f"💸 Funding: {float(watch_derivatives['funding_rate'])*100:+.4f}%\n"
+                                    f"📊 رشد OI چهار‌ساعته: {float(watch_derivatives['oi_change4h']):+.2f}%\n"
+                                    f"📈 رشد OI بیست‌وچهارساعته: {float(watch_derivatives['oi_change24h']):+.2f}%\n"
+                                    + (f"🚀 طبقه جهش OI: {surge_tier}\n" if surge_tier else "")
+                                    + f"💸 Funding: {float(watch_derivatives['funding_rate'])*100:+.4f}%\n"
                                     f"📊 حجم نسبی ۱دقیقه: {watch['turnover_ratio_1m']:.2f}x | ۵دقیقه: {watch['turnover_ratio_5m']:.2f}x\n"
                                     f"🚧 فاصله تا مقاومت: {watch['distance_to_breakout_pct']:.2f}% | فشردگی: {watch['compression_pct']:.2f}%\n"
                                     f"📍 مقاومت نزدیک: {watch['breakout_level']:.10g}\n"
@@ -3564,7 +3598,8 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                                 print(
                                     f"OI EARLY WATCH alert sent: {contract}; "
                                     f"OI5m={float(watch_derivatives['oi_change']):+.3f}%; "
-                                    f"distance={watch['distance_to_breakout_pct']:.2f}%"
+                                    f"OI4h={watch_derivatives.get('oi_change4h')}; OI24h={watch_derivatives.get('oi_change24h')}; "
+                                    f"tier={surge_tier or 'standard'}; distance={watch['distance_to_breakout_pct']:.2f}%"
                                 )
                             print(
                                 f"OI PRE-PUMP watch {contract}: OI-confirmed pre-breakout candidate; "
