@@ -3502,8 +3502,8 @@ def apply_trade_outcome_candles(record, candles, now=None):
             hit_stop = low <= stop
             touched = [name for name, level in targets.items() if high >= level]
         else:
-            favorable = (entry / low - 1) * 100
-            adverse = (entry / high - 1) * 100
+            favorable = (entry - low) / entry * 100
+            adverse = (entry - high) / entry * 100
             hit_stop = high >= stop
             touched = [name for name, level in targets.items() if low <= level]
         record["max_favorable_pct"] = max(float(record.get("max_favorable_pct", 0.0)), favorable)
