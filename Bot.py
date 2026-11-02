@@ -1499,13 +1499,14 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         "👀 حجم غیرعادی در کنار قیمت فشرده دیده شده؛ این فقط رصد قبل از حرکت احتمالی است، نه اثبات پامپ و نه سیگنال ورود. منتظر شکست معتبر سقف و تأیید ساختار بمان.\n"
                         "🟡━━━━━━━━━━━━━━━━━━🟡"
                     )
-                    # Keep the pre-pump observation internal; Telegram is reserved for entry/SL/TP signals.
+                    send_message(liquidity_message)
                     liquidity_state[contract] = {"candle_time": candle_key, "sent_at": int(time.time())}
+                    counts["early_warnings_sent"] += 1
                     print(
-                        f"{contract}: pre-pump liquidity condition tracked internally; "
+                        f"{contract}: pre-pump liquidity Telegram watch sent; "
                         f"turnover={liquidity_signal['volume_ratio']:.2f}x, "
                         f"compression={liquidity_signal['compression_pct']:.2f}%, "
-                        f"price={liquidity_signal['price_change_pct']:+.2f}%; waiting for entry confirmation"
+                        f"price={liquidity_signal['price_change_pct']:+.2f}%"
                     )
                 elif ticker_turnover < 500000:
                     print(f"{contract}: liquidity burst ignored; 24h turnover below 500k USDT")
@@ -1599,9 +1600,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                             "⚠️ این هشدار فقط رسیدن/شکست سقف را اعلام می‌کند؛ نقطه ورود، حدضرر و تارگت را خودت تعیین کن.\n"
                             "🟢━━━━━━━━━━━━━━━━━━🟢"
                         )
-                        # Do not send a top-break-only alert; wait for confirmed entry with entry/SL/TP.
+                        send_message(top_message)
                         top_state[contract] = top_key_stage1
-                        print(f"{contract}: preliminary LEG SPIKE top-break alert suppressed at {confirmed_top:.10g}; waiting for confirmed entry")
+                        print(f"{contract}: LEG SPIKE top-break watch sent at {confirmed_top:.10g}; entry still requires separate confirmation")
             except (TypeError, ValueError, KeyError, IndexError) as error:
                 print(f"{contract}: Stage-1 top monitor skipped: {error}")
 
@@ -1667,10 +1668,11 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 f"Funding: {funding_text} | حجم/مارکت‌کپ: {vol_mc_text}\n"
                 "⚠️ این فقط هشدار حرکت اولیه است، نه نقطه ورود. هشدار بعدی رسیدن/شکست سقف را اعلام می‌کند؛ ورود را خودت با بررسی نمودار انتخاب کن. فیبوناچی به‌تنهایی سیگنال ورود نمی‌دهد."
             )
-            # No preliminary LEG SPIKE Telegram alert: only the confirmed entry message may be sent.
+            send_message(early_message)
             early_sent[contract] = early_key
             recent_early[contract] = int(time.time())
-            print(f"LEG SPIKE preliminary warning suppressed: {contract}; waiting for confirmed entry with entry/SL/TP")
+            counts["early_warnings_sent"] += 1
+            print(f"LEG SPIKE Stage-1 early Telegram warning sent: {contract}; entry is not confirmed")
         except Exception as error:
             counts["early_candle_errors"] += 1
             print(f"{contract}: LEG SPIKE early scan failed: {type(error).__name__}: {error}")
