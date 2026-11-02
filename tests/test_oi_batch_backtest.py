@@ -50,6 +50,16 @@ class BatchBacktestTests(unittest.TestCase):
         self.assertIn("BTCUSD", report["symbols_failed"])
         self.assertEqual(report["symbols_succeeded"], [])
 
+    def test_rejects_negative_or_non_finite_cost_assumptions(self):
+        for fee, slippage in [(-1, 2), (5, -0.1), (float("inf"), 2), (5, float("nan"))]:
+            with self.subTest(fee=fee, slippage=slippage):
+                with self.assertRaises(ValueError):
+                    run_batch_backtest(["BTCUSDT"], fee_bps=fee, slippage_bps=slippage)
+
+    def test_rejects_duplicate_symbols_to_prevent_double_counting(self):
+        with self.assertRaisesRegex(ValueError, "Duplicate symbols"):
+            run_batch_backtest(["BTCUSDT", "btcusdt"])
+
 
 if __name__ == "__main__":
     unittest.main()
