@@ -52,7 +52,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
 
 def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient | None = None,
                    now: int | None = None) -> Tuple[List[Tuple[Signal, Dict[str, Any]]], Dict[str, Dict[str, Any]]]:
-    """Scan only symbols introduced by forwarded alerts and persist per-symbol status."""
+    """Scan only symbols admitted by the public-channel watchlist and persist per-symbol status."""
     client = client or CoinalyzeClient()
     timestamp = int(now if now is not None else time.time())
     confirmed: List[Tuple[Signal, Dict[str, Any]]] = []
