@@ -1,6 +1,7 @@
 """Alert-driven watchlist scanner with independent Coinalyze confirmation."""
 from __future__ import annotations
 import time
+import requests
 from typing import Any, Dict, List, Tuple
 
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
@@ -50,12 +51,28 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
     for symbol, record in updated.items():
         record["last_checked"] = timestamp
         try:
-            signal = evaluate_snapshot(fetch_snapshot(symbol))
+            metrics = None
+            try:
+                snapshot = fetch_snapshot(symbol)
+            except requests.HTTPError as exc:
+                if exc.response is None or exc.response.status_code != 451:
+                    raise
+                metrics = client.fetch_metrics(symbol, now=timestamp)
+                snapshot = metrics.pop("market_snapshot", None)
+                if not snapshot:
+                    raise MarketDataError(
+                        "Binance returned HTTP 451 and Coinalyze did not provide "
+                        "enough aligned 15m OHLCV/OI history for a safe fallback"
+                    )
+                record["data_source"] = "Coinalyze 15m fallback (Binance HTTP 451)"
+            signal = evaluate_snapshot(snapshot)
             if signal is None:
                 record["status"] = "در حال رصد"
                 record["reason"] = "شرایط ورود در کندل بسته‌شده تأیید نشد"
                 continue
-            metrics = client.fetch_metrics(symbol, now=timestamp)
+            if metrics is None:
+                metrics = client.fetch_metrics(symbol, now=timestamp)
+                metrics.pop("market_snapshot", None)
             record["coinalyze"] = metrics
             if not coinalyze_confirms(signal, metrics):
                 record["status"] = "نزدیک شرایط ورود"
