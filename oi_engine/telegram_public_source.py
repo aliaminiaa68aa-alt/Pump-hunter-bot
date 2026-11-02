@@ -91,13 +91,15 @@ def fetch_public_channel_posts(channel=PUBLIC_CHANNEL, timeout=20):
     return sorted(posts, key=lambda post: post["message_id"])
 
 def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None):
+    """Ingest unseen recent posts without skipping backlog when the watchlist is full."""
     timestamp = int(now if now is not None else time.time())
     posts = fetch_public_channel_posts(channel)
     unseen = [post for post in posts if post["message_id"] > last_message_id]
-    next_id = max([last_message_id] + [post["message_id"] for post in posts])
+    next_id = last_message_id
     added = 0
     for post in unseen:
         if timestamp - post["date"] > 6 * 60 * 60 or post["date"] > timestamp + 60:
+            next_id = post["message_id"]
             continue
         update = {"channel_post": {
             "text": post["text"], "date": post["date"], "message_id": post["message_id"],
@@ -105,9 +107,10 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None):
         }}
         symbol = parse_forwarded_oi_alert(update)
         if not symbol:
+            next_id = post["message_id"]
             continue
         if symbol not in watchlist and len(watchlist) >= 4:
-            continue
+            break
         existing = watchlist.get(symbol, {})
         watchlist[symbol] = {
             **existing,
@@ -121,4 +124,5 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None):
             "reason": "هشدار عمومی Open Interest دریافت شد؛ منتظر تأیید Coinalyze هستیم",
         }
         added += 1
+        next_id = post["message_id"]
     return next_id, added
