@@ -6,7 +6,7 @@ from oi_engine.backtest import align_oi, simulate_trade, summarize
 
 class BacktestTests(unittest.TestCase):
     def test_oi_alignment_never_uses_future_sample(self):
-        candles = [{"close_time": 899999}, {"close_time": 1799999}]
+        candles = [{"close_time": 899999}, {"close_time": 1799999}, {"close_time": 2699999}]
         rows = [
             {"timestamp": 0, "sumOpenInterestValue": "100"},
             {"timestamp": 900000, "sumOpenInterestValue": "101"},
@@ -15,7 +15,8 @@ class BacktestTests(unittest.TestCase):
         ]
         aligned = align_oi(candles, rows)
         self.assertIsNone(aligned[0])
-        self.assertEqual(aligned[1], [100.0, 101.0, 102.0] if False else None)
+        self.assertIsNone(aligned[1])  # timestamp 1,800,000 is still in the future
+        self.assertEqual(aligned[2], [100.0, 101.0, 102.0])
 
     def test_stop_wins_when_stop_and_target_touch_same_bar(self):
         signal = SimpleNamespace(
