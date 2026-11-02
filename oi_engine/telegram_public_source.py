@@ -97,7 +97,22 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
     unseen = [post for post in posts if post["message_id"] > last_message_id]
     next_id = last_message_id
     added = 0
+    if unseen:
+        print(
+            f"Public Telegram poll: page_posts={len(posts)} unseen_posts={len(unseen)} "
+            f"cursor_before={last_message_id} page_range={posts[0]['message_id']}-{posts[-1]['message_id']}"
+        )
+    else:
+        newest = posts[-1]["message_id"] if posts else 0
+        print(
+            f"Public Telegram poll: page_posts={len(posts)} unseen_posts=0 "
+            f"cursor_before={last_message_id} newest_visible={newest}"
+        )
     for post in unseen:
+        print(
+            f"Public Telegram unseen post: message_id={post['message_id']} "
+            f"text={post['text'][:220]!r}"
+        )
         if timestamp - post["date"] > 6 * 60 * 60 or post["date"] > timestamp + 60:
             print(
                 f"Public Telegram post skipped by age/time: message_id={post['message_id']} "
