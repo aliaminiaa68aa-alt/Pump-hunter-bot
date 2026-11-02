@@ -67,7 +67,7 @@ On a machine/network where Binance USD-M public market-data endpoints are legall
 available, export the latest supported sample without API credentials:
 
 ```bash
-python -m oi_engine.export_history --symbol BTCUSDT --output-dir ./oi-data
+python -m oi_engine.export_history --symbols BTCUSDT ETHUSDT SOLUSDT BNBUSDT XRPUSDT --output-dir ./oi-data
 python -m oi_engine.backtest --symbol BTCUSDT \
   --candles-csv ./oi-data/btcusdt_candles.csv \
   --oi-csv ./oi-data/btcusdt_oi.csv \
