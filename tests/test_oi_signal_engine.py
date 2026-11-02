@@ -91,6 +91,29 @@ class SignalEngineTests(unittest.TestCase):
         reasons = diagnose_snapshot(snapshot)
         self.assertTrue(any("رشد OI کم است" in reason for reason in reasons))
 
+    def test_rejects_taker_buy_ratio_above_one(self):
+        snapshot = make_snapshot("LONG")
+        snapshot["candles"][-1]["taker_buy_quote"] = (
+            snapshot["candles"][-1]["quote_volume"] * 1.2
+        )
+        self.assertIsNone(evaluate_snapshot(snapshot))
+        self.assertTrue(any("جریان خرید نامعتبر" in reason
+                            for reason in diagnose_snapshot(snapshot)))
+
+    def test_rejects_negative_taker_buy_volume(self):
+        snapshot = make_snapshot("SHORT")
+        snapshot["candles"][-1]["taker_buy_quote"] = -1.0
+        self.assertIsNone(evaluate_snapshot(snapshot))
+        self.assertTrue(any("جریان خرید نامعتبر" in reason
+                            for reason in diagnose_snapshot(snapshot)))
+
+    def test_rejects_zero_last_candle_quote_volume(self):
+        snapshot = make_snapshot("LONG")
+        snapshot["candles"][-1]["quote_volume"] = 0.0
+        self.assertIsNone(evaluate_snapshot(snapshot))
+        self.assertTrue(any("جریان خرید نامعتبر" in reason
+                            for reason in diagnose_snapshot(snapshot)))
+
     def test_no_signal_without_oi_growth(self):
         snapshot = make_snapshot("LONG")
         snapshot["oi_values"] = [100.0, 100.0, 100.0]
