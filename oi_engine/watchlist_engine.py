@@ -6,7 +6,7 @@ import requests
 from typing import Any, Dict, List, Tuple
 
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
-from oi_engine.signal_engine import MarketDataError, Signal, evaluate_snapshot, fetch_snapshot, format_signal
+from oi_engine.signal_engine import MarketDataError, Signal, diagnose_snapshot, evaluate_snapshot, fetch_snapshot, format_signal
 
 
 def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
@@ -78,7 +78,8 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             signal = evaluate_snapshot(snapshot)
             if signal is None:
                 record["status"] = "در حال رصد"
-                record["reason"] = "شرایط ورود در کندل بسته‌شده تأیید نشد"
+                reasons = diagnose_snapshot(snapshot)
+                record["reason"] = "رد شرایط: " + " | ".join(reasons[:3])
                 continue
             if metrics is None:
                 metrics = client.fetch_metrics(symbol, now=timestamp)
@@ -86,7 +87,15 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["coinalyze"] = metrics
             if not coinalyze_confirms(signal, metrics):
                 record["status"] = "نزدیک شرایط ورود"
-                record["reason"] = "تأیید مستقل Coinalyze کامل یا هم‌جهت نیست"
+                oi_value = metrics.get("oi_change_15m_window_pct")
+                flow_value = metrics.get("taker_buy_ratio")
+                record["reason"] = (
+                    f"Coinalyze رد کرد: OI={oi_value if oi_value is not None else 'ناموجود'}%، "
+                    f"نسبت خرید={flow_value if flow_value is not None else 'ناموجود'}؛ "
+                    + ("برای LONG حداقل OI برابر 0.15% و خرید تهاجمی 52% لازم است"
+                       if signal.side == "LONG" else
+                       "برای SHORT حداقل OI برابر 0.15% و نسبت خرید حداکثر 48% لازم است")
+                )
                 continue
             record["status"] = f"تأیید {signal.side}"
             record["reason"] = "تأیید موتور 15m و Coinalyze"
