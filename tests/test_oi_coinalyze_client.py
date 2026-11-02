@@ -1,0 +1,82 @@
+import unittest
+from unittest.mock import Mock
+
+from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
+
+
+class FakeResponse:
+    def __init__(self, payload, status_code=200, headers=None):
+        self._payload = payload
+        self.status_code = status_code
+        self.headers = headers or {}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self._payload
+
+
+class CoinalyzeClientTests(unittest.TestCase):
+    def test_requires_secret(self):
+        with self.assertRaisesRegex(CoinalyzeError, "COINALYZE_API_KEY"):
+            CoinalyzeClient(api_key="")
+
+    def test_resolves_binance_perpetual(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.get_future_markets = lambda: [
+            {"symbol": "BTCUSDT_PERP.A", "exchange": "BINANCE",
+             "base_asset": "BTC", "quote_asset": "USDT",
+             "is_perpetual": True, "margined": "STABLE"}
+        ]
+        self.assertEqual(client.resolve_market("BTCUSDT"), "BTCUSDT_PERP.A")
+
+    def test_rejects_unmapped_symbol(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.get_future_markets = lambda: []
+        with self.assertRaisesRegex(CoinalyzeError, "No Binance USDT perpetual mapping"):
+            client.resolve_market("UNKNOWNUSDT")
+
+    def test_api_key_is_sent_in_header(self):
+        session = Mock()
+        session.headers = {}
+        session.get.return_value = FakeResponse([{"name": "BINANCE", "code": "BINANCE"}])
+        client = CoinalyzeClient(api_key="secret-value", session=session, sleeper=lambda _: None)
+        client._get("exchanges")
+        self.assertEqual(session.headers["api_key"], "secret-value")
+        self.assertNotIn("secret-value", repr(session.get.call_args))
+
+    def test_fetch_metrics_calculates_oi_and_buy_ratio(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"
+
+        def fake_get(endpoint, params=None):
+            if endpoint == "open-interest":
+                return [{"symbol": "BTCUSDT_PERP.A", "value": 1000000}]
+            if endpoint == "funding-rate":
+                return [{"symbol": "BTCUSDT_PERP.A", "value": 0.0001}]
+            if endpoint == "predicted-funding-rate":
+                return [{"symbol": "BTCUSDT_PERP.A", "value": 0.0002}]
+            history = {
+                "open-interest-history": [
+                    {"t": 1, "c": 100}, {"t": 2, "c": 101}, {"t": 3, "c": 103}
+                ],
+                "funding-rate-history": [{"t": 3, "c": 0.0001}],
+                "long-short-ratio-history": [{"t": 3, "r": 1.2, "l": 0.55, "s": 0.45}],
+                "liquidation-history": [{"t": 3, "l": 1200, "s": 900}],
+                "ohlcv-history": [{"t": 3, "v": 100, "bv": 60}],
+            }
+            return [{"symbol": "BTCUSDT_PERP.A", "history": history[endpoint]}]
+
+        client._get = fake_get
+        result = client.fetch_metrics("BTCUSDT", now=1000)
+        self.assertAlmostEqual(result["oi_change_15m_window_pct"], 3.0)
+        self.assertAlmostEqual(result["taker_buy_ratio"], 0.6)
+        self.assertEqual(result["long_short_ratio"], 1.2)
+        self.assertEqual(result["long_liquidations"], 1200.0)
+        self.assertTrue(result["data_quality"]["complete"])
+
+
+if __name__ == "__main__":
+    unittest.main()
