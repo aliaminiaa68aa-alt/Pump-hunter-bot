@@ -109,9 +109,10 @@ def simulate_trade(signal: Any, future_candles: List[dict],
                    max_hold: int = MAX_HOLD_CANDLES) -> Optional[dict]:
     """50% exits at TP1 and 50% at TP2; stop is not moved after TP1.
 
-    If stop and target are both touched in one candle, stop is assumed first.
-    Remaining position is closed at the time limit. Returns net R after a
-    configurable round-trip fee/slippage allowance, or None if no future bar.
+    Opening gaps are processed before each candle's high/low: stop gaps fill
+    at the worse opening price, while target gaps receive opening-price
+    improvement. If stop and target are both touched intrabar, stop is
+    assumed first because OHLC data cannot reveal the path.
     """
     if not future_candles:
         return None
@@ -127,9 +128,51 @@ def simulate_trade(signal: Any, future_candles: List[dict],
     first_target_hit = False
     gross_r = 0.0
     exit_reason = "time"
-    exit_price = future_candles[min(len(future_candles), max_hold) - 1]["close"]
+    observed = future_candles[:max_hold]
+    if not observed:
+        return None
+    exit_price = observed[-1]["close"]
 
-    for candle in future_candles[:max_hold]:
+    for candle in observed:
+        opening = candle.get("open")
+        if opening is not None:
+            opening = float(opening)
+            if side == "LONG":
+                stop_gap = opening <= stop
+                tp1_gap = opening >= tp1
+                tp2_gap = opening >= tp2
+            else:
+                stop_gap = opening >= stop
+                tp1_gap = opening <= tp1
+                tp2_gap = opening <= tp2
+
+            # A stop crossed between candles cannot realistically fill at the
+            # old stop price; use the opening price, including adverse gap size.
+            if stop_gap:
+                if first_target_hit:
+                    gross_r += 0.5 * (-1.0 if side == "LONG" else -1.0)
+                    exit_reason = "gap_stop_after_tp1"
+                else:
+                    gross_r = -abs(opening - entry) / risk
+                    exit_reason = "gap_stop"
+                exit_price = opening
+                break
+
+            direction = 1.0 if side == "LONG" else -1.0
+            if tp2_gap:
+                opening_r = direction * (opening - entry) / risk
+                if first_target_hit:
+                    gross_r += 0.5 * opening_r
+                else:
+                    gross_r = opening_r
+                exit_reason = "gap_tp2"
+                exit_price = opening
+                break
+            if tp1_gap and not first_target_hit:
+                # Resting limit receives price improvement on a favorable gap.
+                gross_r += 0.5 * direction * (opening - entry) / risk
+                first_target_hit = True
+
         if side == "LONG":
             stop_hit = candle["low"] <= stop
             tp1_hit = candle["high"] >= tp1
@@ -139,12 +182,10 @@ def simulate_trade(signal: Any, future_candles: List[dict],
             tp1_hit = candle["low"] <= tp1
             tp2_hit = candle["low"] <= tp2
 
-        # Conservative ordering when OHLC cannot reveal which level came first.
+        # Conservative ordering when OHLC cannot reveal which intrabar level came first.
         if stop_hit:
             if first_target_hit:
-                # TP1's +0.5R was booked when first reached; only book
-                # the remaining half stopped at -1R here.
-                gross_r += 0.5 * -1.0
+                gross_r += -0.5
             else:
                 gross_r = -1.0
             exit_reason = "stop_after_tp1" if first_target_hit else "stop"
@@ -165,12 +206,10 @@ def simulate_trade(signal: Any, future_candles: List[dict],
 
         exit_price = candle["close"]
     else:
-        # Time exit: mark remaining half at the last observed close.
+        # Time exit: mark the remaining position at the last observed close.
         direction = 1.0 if side == "LONG" else -1.0
-        if first_target_hit:
-            gross_r += 0.5 * direction * (exit_price - entry) / risk
-        else:
-            gross_r = direction * (exit_price - entry) / risk
+        remaining_fraction = 0.5 if first_target_hit else 1.0
+        gross_r += remaining_fraction * direction * (exit_price - entry) / risk
 
     # Approximate entry + exit trading costs on full notional.
     cost_r = (entry * 2.0 * (fee_bps + slippage_bps) / 10000.0) / risk
@@ -182,6 +221,7 @@ def simulate_trade(signal: Any, future_candles: List[dict],
         "stop_loss": stop,
         "tp1": tp1,
         "tp2": tp2,
+        "exit_price": round(exit_price, 10),
         "gross_r": round(gross_r, 4),
         "cost_r": round(cost_r, 4),
         "net_r": round(net_r, 4),
