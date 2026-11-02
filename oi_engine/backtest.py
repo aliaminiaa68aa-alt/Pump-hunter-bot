@@ -59,6 +59,15 @@ def align_oi(candles: List[dict], oi_rows: List[dict]) -> List[Optional[List[flo
         if len(last_three) < 3:
             result.append(None)
             continue
+        # OI inputs must be a genuine 15m sequence, not three stale samples
+        # separated by missing intervals.
+        oi_times = [int(row.get("timestamp", 0)) for row in last_three]
+        if any(
+            current <= previous or current - previous > INTERVAL_MS
+            for previous, current in zip(oi_times, oi_times[1:])
+        ):
+            result.append(None)
+            continue
         try:
             values = [_float(row.get("sumOpenInterestValue"), "OI value") for row in last_three]
         except MarketDataError:
@@ -248,9 +257,21 @@ def load_csv_history(candles_path: str, oi_path: str) -> tuple[List[dict], List[
             item = {"open_time": int(row["open_time"]), "close_time": int(row["close_time"])}
             for key in ("open", "high", "low", "close", "volume", "quote_volume", "taker_buy_quote"):
                 item[key] = _float(row[key], key)
-            if item["close_time"] < item["open_time"] or item["close"] <= 0:
-                raise MarketDataError("Invalid candle timestamp or close price in CSV")
-            if item["quote_volume"] <= 0 or item["taker_buy_quote"] < 0 or item["taker_buy_quote"] > item["quote_volume"] * 1.001:
+            if (
+                item["close_time"] != item["open_time"] + INTERVAL_MS - 1
+                or item["close"] <= 0
+                or item["open"] <= 0
+                or item["high"] < max(item["open"], item["close"])
+                or item["low"] > min(item["open"], item["close"])
+                or item["high"] < item["low"]
+            ):
+                raise MarketDataError("Invalid 15m candle timestamps or OHLC prices in CSV")
+            if (
+                item["volume"] < 0
+                or item["quote_volume"] <= 0
+                or item["taker_buy_quote"] < 0
+                or item["taker_buy_quote"] > item["quote_volume"] * 1.001
+            ):
                 raise MarketDataError("Invalid quote/taker-buy volume in candles CSV")
             candles.append(item)
 
@@ -273,6 +294,11 @@ def load_csv_history(candles_path: str, oi_path: str) -> tuple[List[dict], List[
         raise MarketDataError("CSV history is too short: need at least 22 candles and 3 OI samples")
     if len({item["open_time"] for item in candles}) != len(candles):
         raise MarketDataError("Duplicate candle open_time values in CSV")
+    if any(
+        current["open_time"] - previous["open_time"] != INTERVAL_MS
+        for previous, current in zip(candles, candles[1:])
+    ):
+        raise MarketDataError("Candles CSV has missing or irregular 15m intervals")
     if len({item["timestamp"] for item in oi_rows}) != len(oi_rows):
         raise MarketDataError("Duplicate OI timestamps in CSV")
     return candles, oi_rows
