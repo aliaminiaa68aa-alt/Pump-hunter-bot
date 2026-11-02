@@ -98,9 +98,17 @@ class CoinalyzeClientTests(unittest.TestCase):
         self.assertAlmostEqual(snapshot["candles"][-1]["taker_buy_quote"] /
                                snapshot["candles"][-1]["quote_volume"], 0.6)
 
-    def test_fetch_metrics_calculates_oi_and_buy_ratio(self):
+    def test_fetch_metrics_calculates_closed_candle_oi_and_buy_ratio(self):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
         client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"
+        start = 180000
+        candles = [
+            {"t": start + i * 900, "o": 100, "h": 102, "l": 99,
+             "c": 101, "v": 100, "bv": 60}
+            for i in range(24)
+        ]
+        oi = [{"t": start + i * 900, "c": (100 if i == 21 else 101 if i == 22 else 103 if i == 23 else 90 + i)}
+              for i in range(24)]
 
         def fake_get(endpoint, params=None):
             if endpoint == "open-interest":
@@ -110,18 +118,16 @@ class CoinalyzeClientTests(unittest.TestCase):
             if endpoint == "predicted-funding-rate":
                 return [{"symbol": "BTCUSDT_PERP.A", "value": 0.0002}]
             history = {
-                "open-interest-history": [
-                    {"t": 1, "c": 100}, {"t": 2, "c": 101}, {"t": 3, "c": 103}
-                ],
-                "funding-rate-history": [{"t": 3, "c": 0.0001}],
-                "long-short-ratio-history": [{"t": 3, "r": 1.2, "l": 0.55, "s": 0.45}],
-                "liquidation-history": [{"t": 3, "l": 1200, "s": 900}],
-                "ohlcv-history": [{"t": 3, "v": 100, "bv": 60}],
+                "open-interest-history": oi,
+                "funding-rate-history": [{"t": start, "c": 0.0001}],
+                "long-short-ratio-history": [{"t": start, "r": 1.2, "l": 0.55, "s": 0.45}],
+                "liquidation-history": [{"t": start, "l": 1200, "s": 900}],
+                "ohlcv-history": candles,
             }
             return [{"symbol": "BTCUSDT_PERP.A", "history": history[endpoint]}]
 
         client._get = fake_get
-        result = client.fetch_metrics("BTCUSDT", now=1000)
+        result = client.fetch_metrics("BTCUSDT", now=start + 24 * 900)
         self.assertAlmostEqual(result["oi_change_15m_window_pct"], 3.0)
         self.assertAlmostEqual(result["taker_buy_ratio"], 0.6)
         self.assertEqual(result["long_short_ratio"], 1.2)
