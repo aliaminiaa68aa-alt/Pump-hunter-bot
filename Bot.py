@@ -889,7 +889,7 @@ FIB_MIN_VOLUME_TO_MARKET_CAP = 2.00
 # Accept negative funding and near-zero positive funding up to +0.01%.
 # Funding values are stored internally as decimal fractions.
 FIB_MAX_FUNDING_RATE = 0.0001
-FIB_MAX_OI_TO_MARKET_CAP = 0.50
+# OI/market-cap is informational only; OI growth is the actionable signal.
 # Stage-2 impulse detection: slightly more inclusive so valid developing
 # setups are tracked; Stage-3 entry confirmation remains fully gated by Fib,
 # OI, funding, and long/short checks.
@@ -1916,10 +1916,16 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     continue
                 aggregate_oi = float(coinalyze_check.get("oi_usd") or 0)
                 aggregate_funding = float(coinalyze_check["funding_rate"])
-                if aggregate_oi <= 0 or aggregate_oi / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
+                if aggregate_oi <= 0:
                     counts["oi_rejected"] += 1
                     if contract in early_pattern_details:
-                        early_filter_status[contract] = f"Coinalyze OI/MC exceeds {FIB_MAX_OI_TO_MARKET_CAP:.0%} ({aggregate_oi/market_cap:.1%})"
+                        early_filter_status[contract] = "Coinalyze aggregate OI missing or non-positive"
+                    continue
+                oi_change4h = coinalyze_check.get("oi_change4h")
+                if oi_change4h is None or oi_change4h <= 0:
+                    counts["oi_rejected"] += 1
+                    if contract in early_pattern_details:
+                        early_filter_status[contract] = "Coinalyze 4h OI growth missing or non-positive"
                     continue
                 if aggregate_funding > FIB_MAX_FUNDING_RATE:
                     if contract in early_pattern_details:
@@ -1945,9 +1951,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if value not in (None, ""):
                         oi_usd = float(value)
                         break
-                if oi_usd is None or oi_usd / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
+                if oi_usd is None or oi_usd <= 0:
                     if contract in early_pattern_details:
-                        early_filter_status[contract] = "Gate.io OI missing" if oi_usd is None else f"Gate.io OI/MC exceeds {FIB_MAX_OI_TO_MARKET_CAP:.0%} ({oi_usd/market_cap:.1%})"
+                        early_filter_status[contract] = "Gate.io OI missing or non-positive"
                     continue
             counts["oi_pass"] += 1
             if contract in early_pattern_details: early_filter_status[contract] = "OI/funding passed; checking pump"
@@ -2005,7 +2011,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             if contract in early_pattern_details:
                 early_filter_status[contract] = "OI/funding passed; monitoring top touch/break; manual entry only, no Fib entry signal"
 
-            # Stage 2: one stronger watch alert after volume/MC, OI/MC and funding pass.
+            # Stage 2: one stronger watch alert after volume/MC, positive OI growth and funding pass.
             # This strategy intentionally stops at the top-touch/break alert; the user chooses entry manually.
             setup_sent = state.setdefault("fib_setup_alerts", {})
             setup_key = str(candidate["end_time"])
@@ -2026,7 +2032,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     f"🪙 ارز: {contract.replace('_', '/')}\n"
                     f"📈 حرکت ۱۵دقیقه‌ای: {float(candidate['pump_pct']):.2f}% در {int(candidate['body_count'])} کندل\n"
                     f"💵 تغییر ۲۴ساعته: {change24_text} | 💧 حجم/مارکت‌کپ: {volume_mc:.2f}x\n"
-                    f"📊 OI/مارکت‌کپ: {oi_usd / market_cap:.1%} | OI چهار‌ساعته: {oi4_message}\n"
+                    f"📊 ارزش OI: ${oi_usd:,.0f} | OI چهار‌ساعته: {oi4_message}\n"
                     f"💸 Funding: {funding * 100:+.4f}%\n"
                     f"🎯 سقف حرکت شناسایی‌شده: {float(candidate['high']):.10g}\n"
                     "⏳ این هشدار تأیید قدرت ستاپ است؛ منتظر هشدار رسیدن/شکست سقف باشید و نقطه ورود را خودتان تعیین کنید.\n"
@@ -2081,8 +2087,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         continue
                     live_oi = metrics.get("oi_usd")
                     live_funding = metrics["funding_avg"]
-                    if live_oi is None or live_oi <= 0 or live_oi / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
-                        print(f"{contract}: LEG SPIKE entry blocked; live OI/market-cap missing or above limit")
+                    if live_oi is None or live_oi <= 0:
+                        print(f"{contract}: LEG SPIKE entry blocked; live OI missing or non-positive")
                         continue
                     ratio_text = (
                         f"لانگ ۱ساعته: {metrics['long1h']:.1f}% | "
@@ -2132,7 +2138,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                             f"🛑 حد ضرر: {stop_price:.10g} (۱٪ زیر کف جاروب؛ ریسک {risk_pct:.2f}٪)\n"
                             f"🎯 تارگت: سقف موج {target_price:.10g}\n"
                             f"⚖️ ریسک به بازده تا سقف موج: ۱:{risk_reward:.2f} (حداقل مجاز ۱:۲)\n"
-                            f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x | OI/MC: {live_oi / market_cap:.1%} | رشد OI چهار‌ساعته: {metrics['oi_change4h']:+.2f}%\n"
+                            f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x | ارزش OI: ${live_oi:,.0f} | رشد OI چهار‌ساعته: {metrics['oi_change4h']:+.2f}%\n"
                             f"💸 Funding: {live_funding * 100:+.4f}% | {ratio_text}\n"
                             "✅ ورود فقط پس از سوئیپ نقدینگی و بسته‌شدن کندل ۱۵دقیقه بالای سطح بازیابی فیبو صادر می‌شود.\n"
                             "⚠️ سیگنال الگوریتمی است و برگشت را تضمین نمی‌کند؛ ریسک معامله را محدود نگه دار.\n"
@@ -2201,8 +2207,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         continue
                     alert_oi = metrics.get("oi_usd")
                     alert_funding = metrics.get("funding_avg")
-                    if alert_oi is None or alert_oi <= 0 or alert_oi / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
-                        print(f"{contract}: LEG SPIKE rejected; OI/market cap exceeds {FIB_MAX_OI_TO_MARKET_CAP:.0%}")
+                    if alert_oi is None or alert_oi <= 0:
+                        print(f"{contract}: LEG SPIKE rejected; OI missing or non-positive")
                         continue
                     counts["ratio_pass"] += 1
                     daily_long = metrics.get("long1d")
