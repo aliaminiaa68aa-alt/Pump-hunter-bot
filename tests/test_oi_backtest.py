@@ -23,7 +23,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(aligned[2], [100.0, 101.0, 102.0])
 
     def test_oi_alignment_rejects_missing_15m_sample(self):
-        candle = [{"close_time": 2699999}]
+        candle = [{"close_time": 3599999}]
         rows = [
             {"timestamp": 0, "sumOpenInterestValue": "100"},
             {"timestamp": 900000, "sumOpenInterestValue": "101"},
