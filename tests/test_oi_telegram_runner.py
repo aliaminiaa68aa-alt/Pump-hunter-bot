@@ -119,6 +119,19 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(next_cursor, "COIN0USDT")
         self.assertEqual(len(watchlist), 7)
 
+    def test_twenty_symbols_are_all_scanned_once_across_five_batches(self):
+        watchlist = {f"COIN{i:02d}USDT": {"status": "در حال رصد"} for i in range(20)}
+        cursor = ""
+        visited = []
+        for _ in range(5):
+            batch, cursor = telegram_runner.select_watchlist_batch(watchlist, cursor)
+            self.assertEqual(len(batch), 4)
+            visited.extend(batch)
+        self.assertEqual(len(visited), 20)
+        self.assertEqual(len(set(visited)), 20)
+        self.assertEqual(set(visited), set(watchlist))
+        self.assertEqual(cursor, "COIN19USDT")
+
     def test_prunes_expired_watchlist_symbols(self):
         now = 1000000
         kept = telegram_runner.prune_watchlist({
