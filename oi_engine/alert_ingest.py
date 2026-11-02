@@ -4,8 +4,8 @@ import re
 from typing import Any, Dict, Optional
 
 SYMBOL_PATTERNS = (
-    re.compile(r"(?<![A-Z0-9])([A-Z0-9]{2,})\\s*/\\s*USDT(?![A-Z0-9])", re.I),
-    re.compile(r"(?<![A-Z0-9])([A-Z0-9]{2,})\\s*[-_]\\s*USDT(?![A-Z0-9])", re.I),
+    re.compile(r"(?<![A-Z0-9])([A-Z0-9]{2,})\s*/\s*USDT(?![A-Z0-9])", re.I),
+    re.compile(r"(?<![A-Z0-9])([A-Z0-9]{2,})\s*[-_]\s*USDT(?![A-Z0-9])", re.I),
     re.compile(r"(?<![A-Z0-9])([A-Z0-9]{2,})USDT(?![A-Z0-9])", re.I),
 )
 
@@ -20,8 +20,8 @@ def parse_forwarded_oi_alert(update: Dict[str, Any]) -> Optional[str]:
     if not isinstance(message, dict):
         return None
 
-    # A channel_post is delivered directly by Telegram to a bot that is a
-    # member/admin of that channel; it does not carry forward metadata.
+    # A channel_post is delivered directly by Telegram to a bot that has been
+    # added to the source channel; direct posts do not carry forward metadata.
     if not channel_post:
         forwarded = any(message.get(key) for key in (
             "forward_origin", "forward_from", "forward_from_chat",
