@@ -2161,6 +2161,10 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         )
                         send_message(fib_message)
                         register_combo_signal(state, contract, "SPIKE", direction="LONG")
+                        register_trade_outcome(
+                            state, contract, "LEG SPIKE", entry_price, stop_price,
+                            {"IMPULSE_HIGH": target_price}, direction="LONG",
+                        )
                         alerted_levels.add(f"{fib_end_time}:{level_name}")
                         print(
                             f"{contract}: Fib {level_name} reversal entry sent; "
@@ -3071,6 +3075,10 @@ def scan_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=60)
             register_early_watch_outcome(
                 state, contract, "PREPUMP_ENTRY", setup["entry"], created_at=now
             )
+            register_trade_outcome(
+                state, contract, "PRE-PUMP", setup["entry"], setup["stop"],
+                {"TP1_2R": setup["tp1"], "TP2_3R": setup["tp2"]}, created_at=now,
+            )
             signals += 1
             print(
                 f"PRE-PUMP entry sent: {contract}; entry={setup['entry']:.10g}; "
@@ -3436,6 +3444,140 @@ def update_oi_prepump_outcomes(state, now=None):
             f"no_level_hit={summary['no_level_hit']}"
         )
 
+
+
+
+def register_trade_outcome(state, contract, strategy, entry, stop, targets, direction="LONG", created_at=None):
+    """Register a confirmed Entry/SL/TP signal for forward-only outcome measurement."""
+    try:
+        entry, stop = float(entry), float(stop)
+        normalized_direction = str(direction).upper()
+        parsed_targets = {str(name): float(value) for name, value in targets.items()}
+        if (entry <= 0 or stop <= 0 or not parsed_targets
+                or normalized_direction not in ("LONG", "SHORT")):
+            raise ValueError("invalid trade levels")
+        if normalized_direction == "LONG":
+            if stop >= entry or any(value <= entry for value in parsed_targets.values()):
+                raise ValueError("invalid long trade levels")
+        else:
+            if stop <= entry or any(value >= entry for value in parsed_targets.values()):
+                raise ValueError("invalid short trade levels")
+        now = int(time.time()) if created_at is None else int(created_at)
+        records = state.setdefault("trade_outcomes", [])
+        records.append({
+            "contract": str(contract), "strategy": str(strategy),
+            "direction": normalized_direction, "created_at": now,
+            "last_candle_time": (now // 60) * 60,
+            "entry": entry, "stop": stop, "targets": parsed_targets,
+            "targets_hit": {name: False for name in parsed_targets},
+            "stop_hit": False, "first_result": None, "first_result_time": None,
+            "max_favorable_pct": 0.0, "max_adverse_pct": 0.0,
+            "completed": False,
+        })
+        if len(records) > 300:
+            del records[:-300]
+    except (TypeError, ValueError, AttributeError):
+        print(f"Trade outcome registration skipped for {contract}/{strategy}: invalid trade levels")
+
+
+def apply_trade_outcome_candles(record, candles, now=None):
+    """Measure only candles after registration; same-candle stop/target is conservatively ambiguous."""
+    now = int(time.time()) if now is None else int(now)
+    entry = float(record["entry"])
+    stop = float(record["stop"])
+    direction = str(record.get("direction", "LONG")).upper()
+    targets = {str(k): float(v) for k, v in record["targets"].items()}
+    hit_state = record.setdefault("targets_hit", {name: False for name in targets})
+    last_time = int(record.get("last_candle_time", 0) or 0)
+    for candle in sorted(candles, key=lambda row: int(row.get("t", 0) or 0)):
+        candle_time = int(candle.get("t", 0) or 0)
+        if candle_time <= last_time:
+            continue
+        high, low = float(candle["h"]), float(candle["l"])
+        if min(high, low) <= 0:
+            continue
+        if direction == "LONG":
+            favorable = (high / entry - 1) * 100
+            adverse = (low / entry - 1) * 100
+            hit_stop = low <= stop
+            touched = [name for name, level in targets.items() if high >= level]
+        else:
+            favorable = (entry / low - 1) * 100
+            adverse = (entry / high - 1) * 100
+            hit_stop = high >= stop
+            touched = [name for name, level in targets.items() if low <= level]
+        record["max_favorable_pct"] = max(float(record.get("max_favorable_pct", 0.0)), favorable)
+        record["max_adverse_pct"] = min(float(record.get("max_adverse_pct", 0.0)), adverse)
+        for name in touched:
+            hit_state[name] = True
+        record["stop_hit"] = bool(record.get("stop_hit")) or hit_stop
+        if record.get("first_result") is None:
+            if hit_stop and touched:
+                record["first_result"] = "ambiguous_same_candle_stop_first"
+            elif hit_stop:
+                record["first_result"] = "stop"
+            elif touched:
+                # Target keys are inserted in reward order (TP1 before TP2).
+                record["first_result"] = touched[0]
+            if record.get("first_result") is not None:
+                record["first_result_time"] = candle_time
+        last_time = candle_time
+    record["last_candle_time"] = last_time
+    if now - int(record.get("created_at", now) or now) >= 24 * 3600:
+        record["completed"] = True
+        record["completed_at"] = now
+    return record
+
+
+def summarize_trade_outcomes(records):
+    completed_by_strategy = {}
+    for row in records:
+        if not isinstance(row, dict) or not row.get("completed"):
+            continue
+        strategy = str(row.get("strategy", "UNKNOWN"))
+        summary = completed_by_strategy.setdefault(strategy, {
+            "completed": 0, "first_results": {}, "stop_hit": 0,
+            "mfe_sum": 0.0, "mae_sum": 0.0,
+        })
+        summary["completed"] += 1
+        result = row.get("first_result") or "no_level_hit"
+        summary["first_results"][result] = summary["first_results"].get(result, 0) + 1
+        summary["stop_hit"] += int(bool(row.get("stop_hit")))
+        summary["mfe_sum"] += float(row.get("max_favorable_pct", 0.0))
+        summary["mae_sum"] += float(row.get("max_adverse_pct", 0.0))
+    for summary in completed_by_strategy.values():
+        count = summary["completed"]
+        summary["avg_mfe_pct"] = summary.pop("mfe_sum") / count
+        summary["avg_mae_pct"] = summary.pop("mae_sum") / count
+    return completed_by_strategy
+
+
+def update_trade_outcomes(state, now=None):
+    """Update confirmed trade outcomes from closed 1m candles; watch-only records are excluded."""
+    now = int(time.time()) if now is None else int(now)
+    records = state.setdefault("trade_outcomes", [])
+    if not isinstance(records, list) or not records:
+        return
+    active_by_contract = {}
+    for record in records:
+        if isinstance(record, dict) and not record.get("completed") and record.get("contract"):
+            active_by_contract.setdefault(record["contract"], []).append(record)
+    for contract, group in active_by_contract.items():
+        try:
+            candles = closed_candles(contract, "1m", 35)
+            for record in group:
+                apply_trade_outcome_candles(record, candles, now=now)
+        except Exception as error:
+            print(f"Trade outcome tracking failed for {contract}: {type(error).__name__}: {error}")
+    tracked = sum(1 for row in records if isinstance(row, dict) and not row.get("completed"))
+    summary = summarize_trade_outcomes(records)
+    print(f"CONFIRMED TRADE outcomes: tracked={tracked}, completed_24h={sum(x['completed'] for x in summary.values())}, total={len(records)}")
+    for strategy, stats in sorted(summary.items()):
+        print(
+            f"CONFIRMED TRADE {strategy}: n={stats['completed']}, "
+            f"first_results={stats['first_results']}, stop_touched={stats['stop_hit']}, "
+            f"avg_MFE={stats['avg_mfe_pct']:.2f}%, avg_MAE={stats['avg_mae_pct']:.2f}%"
+        )
 
 
 def register_early_watch_outcome(state, contract, strategy, entry, created_at=None):
@@ -3930,6 +4072,7 @@ def scan():
 
     state = load_alert_state()
     update_early_watch_outcomes(state)
+    update_trade_outcomes(state)
     alerts_state = state["alerts"]
     candidates = state["candidates"]
     early_alerts_state = state["early_alerts"]
@@ -4239,6 +4382,10 @@ def scan():
             )
             send_message(message)
             register_combo_signal(state, contract, "BOS")
+            register_trade_outcome(
+                state, contract, "BOS", entry, stop,
+                {"TP1_1R": tp1, "TP2_2R": tp2}, direction="LONG",
+            )
             alerts_state[contract] = candidate["impulse_time"]
             candidates.pop(contract, None)
             alerts += 1
