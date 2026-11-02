@@ -63,7 +63,7 @@ def align_oi(candles: List[dict], oi_rows: List[dict]) -> List[Optional[List[flo
         # separated by missing intervals.
         oi_times = [int(row.get("timestamp", 0)) for row in last_three]
         if any(
-            current <= previous or current - previous > INTERVAL_MS
+            current - previous != INTERVAL_MS
             for previous, current in zip(oi_times, oi_times[1:])
         ):
             result.append(None)
