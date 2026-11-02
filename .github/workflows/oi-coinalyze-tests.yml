@@ -26,7 +26,7 @@ jobs:
 
       - name: Verify configured Coinalyze API secret
         env:
-          COINALYZE_API_KEY: \${{ secrets.COINALYZE_API_KEY }}
+          COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
         run: |
           python - <<'PY'
           import os
