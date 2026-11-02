@@ -12,10 +12,10 @@ class BacktestTests(unittest.TestCase):
     def test_oi_alignment_never_uses_future_sample(self):
         candles = [{"close_time": 899999}, {"close_time": 1799999}, {"close_time": 2699999}]
         rows = [
-            {"timestamp": 0, "sumOpenInterestValue": "100"},
-            {"timestamp": 900000, "sumOpenInterestValue": "101"},
-            {"timestamp": 1800000, "sumOpenInterestValue": "102"},
-            {"timestamp": 2700000, "sumOpenInterestValue": "103"},
+            {"timestamp": 0, "sumOpenInterest": "100"},
+            {"timestamp": 900000, "sumOpenInterest": "101"},
+            {"timestamp": 1800000, "sumOpenInterest": "102"},
+            {"timestamp": 2700000, "sumOpenInterest": "103"},
         ]
         aligned = align_oi(candles, rows)
         self.assertIsNone(aligned[0])
@@ -25,19 +25,19 @@ class BacktestTests(unittest.TestCase):
     def test_oi_alignment_rejects_missing_15m_sample(self):
         candle = [{"close_time": 3599999}]
         rows = [
-            {"timestamp": 0, "sumOpenInterestValue": "100"},
-            {"timestamp": 900000, "sumOpenInterestValue": "101"},
+            {"timestamp": 0, "sumOpenInterest": "100"},
+            {"timestamp": 900000, "sumOpenInterest": "101"},
             # Missing the 15m sample at 1,800,000.
-            {"timestamp": 2700000, "sumOpenInterestValue": "103"},
+            {"timestamp": 2700000, "sumOpenInterest": "103"},
         ]
         self.assertIsNone(align_oi(candle, rows)[0])
 
     def test_oi_alignment_rejects_irregular_short_intervals(self):
         candle = [{"close_time": 2699999}]
         rows = [
-            {"timestamp": 0, "sumOpenInterestValue": "100"},
-            {"timestamp": 600000, "sumOpenInterestValue": "101"},
-            {"timestamp": 1200000, "sumOpenInterestValue": "102"},
+            {"timestamp": 0, "sumOpenInterest": "100"},
+            {"timestamp": 600000, "sumOpenInterest": "101"},
+            {"timestamp": 1200000, "sumOpenInterest": "102"},
         ]
         self.assertIsNone(align_oi(candle, rows)[0])
 
@@ -90,10 +90,10 @@ class BacktestTests(unittest.TestCase):
                         "volume": 10, "quote_volume": 1000, "taker_buy_quote": 520,
                     })
             with oi_path.open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterestValue"])
+                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterest"])
                 writer.writeheader()
                 for index in range(22):
-                    writer.writerow({"timestamp": index * 900000, "sumOpenInterestValue": 1000 + index})
+                    writer.writerow({"timestamp": index * 900000, "sumOpenInterest": 1000 + index})
             candles, oi_rows = load_csv_history(str(candles_path), str(oi_path))
             self.assertEqual(len(candles), 22)
             self.assertEqual(len(oi_rows), 22)
@@ -118,10 +118,10 @@ class BacktestTests(unittest.TestCase):
                         "volume": 10, "quote_volume": 1000, "taker_buy_quote": 520,
                     })
             with oi_path.open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterestValue"])
+                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterest"])
                 writer.writeheader()
                 for index in range(22):
-                    writer.writerow({"timestamp": index * 900000, "sumOpenInterestValue": 1000 + index})
+                    writer.writerow({"timestamp": index * 900000, "sumOpenInterest": 1000 + index})
             with self.assertRaisesRegex(MarketDataError, "missing or irregular 15m"):
                 load_csv_history(str(candles_path), str(oi_path))
 
@@ -142,10 +142,10 @@ class BacktestTests(unittest.TestCase):
                         "volume": 10, "quote_volume": 1000, "taker_buy_quote": 520,
                     })
             with oi_path.open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterestValue"])
+                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterest"])
                 writer.writeheader()
                 for index in range(22):
-                    writer.writerow({"timestamp": index * 900000, "sumOpenInterestValue": 1000 + index})
+                    writer.writerow({"timestamp": index * 900000, "sumOpenInterest": 1000 + index})
             with self.assertRaisesRegex(MarketDataError, "OHLC"):
                 load_csv_history(str(candles_path), str(oi_path))
 
@@ -154,7 +154,7 @@ class BacktestTests(unittest.TestCase):
             candles_path = Path(directory) / "candles.csv"
             oi_path = Path(directory) / "oi.csv"
             candles_path.write_text("open_time,close_time,close\\n1,2,3\\n", encoding="utf-8")
-            oi_path.write_text("timestamp,sumOpenInterestValue\\n1,100\\n", encoding="utf-8")
+            oi_path.write_text("timestamp,sumOpenInterest\\n1,100\\n", encoding="utf-8")
             with self.assertRaises(MarketDataError):
                 load_csv_history(str(candles_path), str(oi_path))
 
@@ -175,10 +175,10 @@ class BacktestTests(unittest.TestCase):
                 writer.writeheader()
                 writer.writerows(candle_rows)
             with oi_path.open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterestValue"])
+                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterest"])
                 writer.writeheader()
                 for i in range(22):
-                    writer.writerow({"timestamp": i * 900000, "sumOpenInterestValue": 1000 + i})
+                    writer.writerow({"timestamp": i * 900000, "sumOpenInterest": 1000 + i})
             with self.assertRaisesRegex(MarketDataError, "chronological order"):
                 load_csv_history(str(candles_path), str(oi_path))
 
@@ -188,11 +188,11 @@ class BacktestTests(unittest.TestCase):
                 writer = csv.DictWriter(handle, fieldnames=candle_fields)
                 writer.writeheader()
                 writer.writerows(candle_rows)
-            oi_rows = [{"timestamp": i * 900000, "sumOpenInterestValue": 1000 + i}
+            oi_rows = [{"timestamp": i * 900000, "sumOpenInterest": 1000 + i}
                        for i in range(22)]
             oi_rows[0], oi_rows[1] = oi_rows[1], oi_rows[0]
             with oi_path.open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterestValue"])
+                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterest"])
                 writer.writeheader()
                 writer.writerows(oi_rows)
             with self.assertRaisesRegex(MarketDataError, "chronological order"):
