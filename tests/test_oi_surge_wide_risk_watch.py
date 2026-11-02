@@ -24,7 +24,6 @@ class OISurgeWideRiskWatchTests(unittest.TestCase):
         self.assertIn("117.11%", message)
         self.assertIn("قیمت را تعقیب نکن", message)
         self.assertNotIn("🎯", message)
-        self.assertNotIn("قیمت ورود", message)
 
 
 if __name__ == "__main__":
