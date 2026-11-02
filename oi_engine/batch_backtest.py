@@ -39,12 +39,25 @@ def run_batch_backtest(
         try:
             candles, oi_rows = load_csv_history(str(candles_path), str(oi_path))
             report = run_backtest_data(symbol, candles, oi_rows, fee_bps, slippage_bps)
-            reports[symbol] = {
+            symbol_report = {
                 key: value for key, value in report.items() if key != "trades_detail"
             }
+            trade_count = report["metrics"]["trades"]
+            symbol_report["sample_assessment"] = (
+                "no_signals" if trade_count == 0 else
+                "exploratory_small_sample" if trade_count < 30 else
+                "preliminary_sample" if trade_count < 100 else
+                "larger_sample_still_requires_out_of_sample_validation"
+            )
+            reports[symbol] = symbol_report
             pooled_trades.extend(report["trades_detail"])
         except (MarketDataError, OSError, ValueError, KeyError) as exc:
             failures[symbol] = str(exc)
+
+    pooled_metrics = summarize(pooled_trades)
+    # Trades are appended symbol-by-symbol, not in a shared chronological
+    # portfolio sequence. A drawdown over that artificial order is invalid.
+    pooled_metrics["max_drawdown_r"] = None
 
     return {
         "timeframe": "15m",
@@ -52,12 +65,12 @@ def run_batch_backtest(
         "symbols_succeeded": list(reports),
         "symbols_failed": failures,
         "per_symbol": reports,
-        "pooled_equal_risk_metrics": summarize(pooled_trades),
+        "pooled_equal_risk_metrics": pooled_metrics,
         "pooled_trade_count": len(pooled_trades),
         "pooled_metrics_note": (
             "Pooled results combine each symbol's R-multiple trades as if each "
             "trade risked an equal fraction independently. They are not a "
-            "portfolio equity curve and do not model simultaneous capital use."
+            "portfolio equity curve, do not model simultaneous capital use, and intentionally omit pooled drawdown."
         ),
         "funding_included": False,
         "limitations": [
