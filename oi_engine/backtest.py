@@ -288,19 +288,23 @@ def load_csv_history(candles_path: str, oi_path: str) -> tuple[List[dict], List[
                 raise MarketDataError("OI values must be positive")
             oi_rows.append({"timestamp": int(row["timestamp"]), "sumOpenInterestValue": value})
 
-    candles.sort(key=lambda item: item["open_time"])
-    oi_rows.sort(key=lambda item: item["timestamp"])
     if len(candles) < 22 or len(oi_rows) < 3:
         raise MarketDataError("CSV history is too short: need at least 22 candles and 3 OI samples")
-    if len({item["open_time"] for item in candles}) != len(candles):
+    candle_times = [item["open_time"] for item in candles]
+    if len(set(candle_times)) != len(candle_times):
         raise MarketDataError("Duplicate candle open_time values in CSV")
+    if any(current <= previous for previous, current in zip(candle_times, candle_times[1:])):
+        raise MarketDataError("Candles CSV rows must be in chronological order")
     if any(
         current["open_time"] - previous["open_time"] != INTERVAL_MS
         for previous, current in zip(candles, candles[1:])
     ):
         raise MarketDataError("Candles CSV has missing or irregular 15m intervals")
-    if len({item["timestamp"] for item in oi_rows}) != len(oi_rows):
+    oi_times = [item["timestamp"] for item in oi_rows]
+    if len(set(oi_times)) != len(oi_times):
         raise MarketDataError("Duplicate OI timestamps in CSV")
+    if any(current <= previous for previous, current in zip(oi_times, oi_times[1:])):
+        raise MarketDataError("OI CSV rows must be in chronological order")
     return candles, oi_rows
 
 
