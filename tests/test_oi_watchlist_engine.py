@@ -69,5 +69,20 @@ class WatchlistTests(unittest.TestCase):
         self.assertEqual(found,[])
         self.assertEqual(updated["ABCUSDT"]["status"],"در حال رصد")
 
+
+    def test_extreme_coinalyze_funding_is_labeled_and_warned(self):
+        extreme = metrics()
+        extreme["funding_rate"] = -0.028806
+        extreme["predicted_funding_rate"] = -0.089197
+        message = format_confirmed_signal(signal(), extreme)
+        self.assertIn("Funding (snapshot اولیه):", message)
+        self.assertIn("Funding (Coinalyze): -2.88060%", message)
+        self.assertIn("Funding پیش‌بینی‌شده (Coinalyze): -8.91970%", message)
+        self.assertIn("Funding گزارش‌شده بسیار غیرعادی است", message)
+
+    def test_normal_funding_does_not_add_extreme_warning(self):
+        message = format_confirmed_signal(signal(), metrics())
+        self.assertNotIn("Funding گزارش‌شده بسیار غیرعادی است", message)
+
 if __name__ == "__main__":
     unittest.main()
