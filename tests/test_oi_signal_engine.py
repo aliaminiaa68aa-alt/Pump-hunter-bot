@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from oi_engine.signal_engine import evaluate_snapshot
+from oi_engine.signal_engine import evaluate_snapshot, scan, MarketDataError
 
 
 def make_snapshot(side="LONG"):
@@ -67,6 +68,18 @@ class SignalEngineTests(unittest.TestCase):
         snapshot["oi_timestamp"] -= 16 * 60 * 1000
         self.assertIsNone(evaluate_snapshot(snapshot))
 
+
+    def test_scan_fails_if_every_market_request_fails(self):
+        with patch("oi_engine.signal_engine.get_active_symbols", return_value=["AAAUSDT", "BBBUSDT"]), patch("oi_engine.signal_engine.fetch_snapshot", side_effect=MarketDataError("HTTP 451")):
+            with self.assertRaisesRegex(MarketDataError, "All 2 market-data requests failed"):
+                scan(max_symbols=2)
+
+    def test_scan_keeps_valid_results_when_one_symbol_fails(self):
+        good = make_snapshot("LONG")
+        with patch("oi_engine.signal_engine.get_active_symbols", return_value=["BADUSDT", "GOODUSDT"]), patch("oi_engine.signal_engine.fetch_snapshot", side_effect=[MarketDataError("temporary"), good]), patch("oi_engine.signal_engine.time.sleep"):
+            results = scan(max_symbols=2)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].side, "LONG")
 
 if __name__ == "__main__":
     unittest.main()
