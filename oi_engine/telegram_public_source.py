@@ -91,7 +91,7 @@ def fetch_public_channel_posts(channel=PUBLIC_CHANNEL, timeout=20):
     return sorted(posts, key=lambda post: post["message_id"])
 
 def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, symbol_validator: Callable[[str], bool] | None = None):
-    """Ingest unseen recent posts without skipping backlog when the watchlist is full."""
+    """Ingest every unseen recent alert; scan capacity is managed separately by the runner."""
     timestamp = int(now if now is not None else time.time())
     posts = fetch_public_channel_posts(channel)
     unseen = [post for post in posts if post["message_id"] > last_message_id]
@@ -119,8 +119,6 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
                 # Do not permanently discard an alert if market metadata is temporarily unavailable.
                 print(f"WARNING: market validation failed for {symbol}: {type(exc).__name__}: {exc}")
                 break
-        if symbol not in watchlist and len(watchlist) >= 4:
-            break
         existing = watchlist.get(symbol, {})
         watchlist[symbol] = {
             **existing,
