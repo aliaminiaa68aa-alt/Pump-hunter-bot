@@ -24,9 +24,18 @@ jobs:
         run: |
           python - <<'PY'
           from oi_engine.telegram_public_source import fetch_public_channel_posts
+          from oi_engine.alert_ingest import parse_forwarded_oi_alert
           posts = fetch_public_channel_posts("oi_detector")
           print("Public channel posts parsed:", len(posts))
           if not posts:
               raise SystemExit("No public Telegram posts were parsed")
-          print("Latest parsed post:", posts[-1]["message_id"], posts[-1]["text"][:180])
+          matched = []
+          for post in posts[-10:]:
+              symbol = parse_forwarded_oi_alert({"channel_post": {"text": post["text"]}})
+              print("POST", post["message_id"], "SYMBOL", symbol, "TEXT", post["text"][:240])
+              if symbol:
+                  matched.append(symbol)
+          print("Recent OI symbols extracted:", matched)
+          if not matched:
+              raise SystemExit("No OI symbols extracted from the latest 10 public posts")
           PY
