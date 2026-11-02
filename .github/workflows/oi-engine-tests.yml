@@ -2,12 +2,13 @@ name: OI signal engine tests
 
 on:
   push:
-    branches: [oi-signal-engine]
+    branches: [main, oi-signal-engine]
     paths:
       - "oi_engine/**"
       - "tests/test_oi_signal_engine.py"
       - "tests/test_oi_backtest.py"
       - "tests/test_oi_batch_backtest.py"
+      - "tests/test_oi_*.py"
       - ".github/workflows/oi-engine-tests.yml"
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - "tests/test_oi_signal_engine.py"
       - "tests/test_oi_backtest.py"
       - "tests/test_oi_batch_backtest.py"
+      - "tests/test_oi_*.py"
 
 jobs:
   unit-tests:
