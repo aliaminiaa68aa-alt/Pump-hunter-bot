@@ -4,7 +4,7 @@ import re
 import time
 from datetime import datetime
 from html.parser import HTMLParser
-from typing import Any
+from typing import Any, Callable
 import requests
 from oi_engine.alert_ingest import parse_forwarded_oi_alert
 
@@ -90,7 +90,7 @@ def fetch_public_channel_posts(channel=PUBLIC_CHANNEL, timeout=20):
         })
     return sorted(posts, key=lambda post: post["message_id"])
 
-def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None):
+def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, symbol_validator: Callable[[str], bool] | None = None):
     """Ingest unseen recent posts without skipping backlog when the watchlist is full."""
     timestamp = int(now if now is not None else time.time())
     posts = fetch_public_channel_posts(channel)
@@ -109,6 +109,16 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None):
         if not symbol:
             next_id = post["message_id"]
             continue
+        if symbol_validator is not None:
+            try:
+                if not symbol_validator(symbol):
+                    print(f"Public Telegram alert ignored: no supported perpetual market for {symbol}")
+                    next_id = post["message_id"]
+                    continue
+            except Exception as exc:
+                # Do not permanently discard an alert if market metadata is temporarily unavailable.
+                print(f"WARNING: market validation failed for {symbol}: {type(exc).__name__}: {exc}")
+                break
         if symbol not in watchlist and len(watchlist) >= 4:
             break
         existing = watchlist.get(symbol, {})
