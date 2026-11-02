@@ -1,0 +1,46 @@
+name: OI historical backtest
+
+on:
+  push:
+    branches: [oi-signal-engine]
+    paths:
+      - "oi_engine/backtest.py"
+      - "oi_engine/signal_engine.py"
+      - ".github/workflows/oi-backtest.yml"
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependency
+        run: python -m pip install requests
+      - name: Run recent OI backtests
+        shell: bash
+        run: |
+          mkdir -p backtest-reports
+          failed=0
+          for symbol in BTCUSDT ETHUSDT SOLUSDT BNBUSDT XRPUSDT; do
+            echo "===== $symbol ====="
+            if python -m oi_engine.backtest --symbol "$symbol" --output "backtest-reports/${symbol}.json"; then
+              echo "BACKTEST_OK $symbol"
+            else
+              echo "BACKTEST_FAILED $symbol"
+              failed=1
+            fi
+            sleep 1
+          done
+          test "$failed" -eq 0
+      - name: Upload backtest reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oi-historical-backtest-reports
+          path: backtest-reports/*.json
+          if-no-files-found: warn
+          retention-days: 14
