@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
+from typing import Iterable
 
 from .backtest import download_history
 from .signal_engine import MarketDataError
@@ -61,26 +62,45 @@ def export_symbol(symbol: str, output_dir: str = ".") -> tuple[Path, Path]:
     print(f"Exported {normalized}: {len(candles)} closed 15m candles, {len(oi_rows)} OI samples")
     print(f"Candles CSV: {candles_path}")
     print(f"OI CSV: {oi_path}")
-    print("Note: Binance OI history is limited to at most 500 samples per request.")
-    print("Run the backtest with these two files; no API key is used.")
     return candles_path, oi_path
+
+
+def export_symbols(symbols: Iterable[str], output_dir: str = ".") -> dict[str, str]:
+    """Export several symbols independently and return per-symbol outcomes."""
+    outcomes: dict[str, str] = {}
+    for raw_symbol in symbols:
+        symbol = raw_symbol.upper().strip()
+        try:
+            export_symbol(symbol, output_dir)
+            outcomes[symbol] = "success"
+        except (MarketDataError, OSError, ValueError, KeyError) as exc:
+            outcomes[symbol] = f"failed: {exc}"
+            print(f"Export failed for {symbol}: {exc}")
+    return outcomes
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Export recent Binance USD-M 15m candles and OI history for backtesting"
     )
-    parser.add_argument("--symbol", default="BTCUSDT", help="USDT perpetual symbol (default: BTCUSDT)")
-    parser.add_argument("--output-dir", default=".", help="Directory for the two CSV files")
-    args = parser.parse_args()
-    try:
-        candles_path, oi_path = export_symbol(args.symbol, args.output_dir)
-    except (MarketDataError, OSError, ValueError, KeyError) as exc:
-        parser.exit(1, f"Export failed: {exc}\n")
-    print(
-        f'Next: python -m oi_engine.backtest --symbol {args.symbol.upper()} '
-        f'--candles-csv "{candles_path}" --oi-csv "{oi_path}"'
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--symbol", help="One USDT perpetual symbol (e.g. BTCUSDT)")
+    group.add_argument(
+        "--symbols", nargs="+",
+        help="Several USDT perpetual symbols (e.g. BTCUSDT ETHUSDT SOLUSDT)",
     )
+    parser.add_argument("--output-dir", default=".", help="Directory for the CSV files")
+    args = parser.parse_args()
+    symbols = args.symbols or ([args.symbol] if args.symbol else ["BTCUSDT"])
+    outcomes = export_symbols(symbols, args.output_dir)
+    failures = {symbol: result for symbol, result in outcomes.items() if result != "success"}
+    if failures:
+        parser.exit(1, f"One or more exports failed: {failures}\n")
+    print("\nExport summary:")
+    for symbol, result in outcomes.items():
+        print(f"  {symbol}: {result}")
+    print("Note: Binance OI history is limited to at most 500 samples per request.")
+    print("Use the matching *_candles.csv and *_oi.csv files with oi_engine.backtest.")
 
 
 if __name__ == "__main__":
