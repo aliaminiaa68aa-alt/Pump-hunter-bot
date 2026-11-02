@@ -3530,6 +3530,7 @@ def scan_oi_surge_watch(tickers, state, max_symbols=12):
     alert_state = state.setdefault("oi_surge_watch_alerts", {})
     checked = qualified = sent = 0
     rejects = {}
+    reject_samples = []
     now = int(time.time())
     for _, turnover, contract in ranked:
         try:
@@ -3541,6 +3542,11 @@ def scan_oi_surge_watch(tickers, state, max_symbols=12):
             tier = oi_surge_tier(derivatives)
             if not tier:
                 rejects["oi_surge_below_threshold"] = rejects.get("oi_surge_below_threshold", 0) + 1
+                if len(reject_samples) < 8:
+                    reject_samples.append(
+                        f"{contract}: OI4h={format_oi_change(derivatives.get('oi_change4h'))}, "
+                        f"OI24h={format_oi_change(derivatives.get('oi_change24h'))}"
+                    )
                 continue
             funding = float(derivatives.get("funding_rate"))
             if funding > 0.0005:
@@ -3563,6 +3569,12 @@ def scan_oi_surge_watch(tickers, state, max_symbols=12):
             risk_pct = risk / entry * 100.0
             if risk <= 0 or risk_pct > 6.0:
                 rejects["risk_too_wide"] = rejects.get("risk_too_wide", 0) + 1
+                if len(reject_samples) < 8:
+                    reject_samples.append(
+                        f"{contract}: risk={risk_pct:.2f}% (max 6.00%), "
+                        f"OI4h={format_oi_change(derivatives.get('oi_change4h'))}, "
+                        f"OI24h={format_oi_change(derivatives.get('oi_change24h'))}"
+                    )
                 continue
             tp1 = entry + 2.0 * risk
             tp2 = entry + 3.0 * risk
@@ -3612,6 +3624,8 @@ def scan_oi_surge_watch(tickers, state, max_symbols=12):
         f"OI SURGE diagnostics: checked={checked}, qualified={qualified}, "
         f"sent={sent}, rejections={rejects}"
     )
+    if reject_samples:
+        print("OI SURGE rejection samples: " + " | ".join(reject_samples))
 
 
 def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=50):
