@@ -3,7 +3,7 @@ import requests
 from unittest.mock import Mock
 from unittest.mock import patch
 from oi_engine.signal_engine import Signal
-from oi_engine.watchlist_engine import coinalyze_confirms, scan_watchlist
+from oi_engine.watchlist_engine import coinalyze_confirms, scan_watchlist, format_confirmed_signal
 
 def signal(side="LONG"):
     return Signal("ABCUSDT",side,1,.98,1.02,1.04,.8,.3,.56,1.4,.0001,82,900000)
@@ -50,6 +50,11 @@ class WatchlistTests(unittest.TestCase):
         self.assertEqual(updated["ABCUSDT"]["status"], "تأیید LONG")
         self.assertIn("Coinalyze 15m fallback", updated["ABCUSDT"]["data_source"])
         self.assertNotIn("market_snapshot", updated["ABCUSDT"]["coinalyze"])
+
+    def test_signal_labels_coinalyze_as_second_stage_not_always_independent(self):
+        message = format_confirmed_signal(signal(), metrics())
+        self.assertIn("تأیید مرحله دوم Coinalyze", message)
+        self.assertNotIn("تأیید مستقل Coinalyze", message)
 
     def test_confirmed_status(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",return_value={}), \
