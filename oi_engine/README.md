@@ -56,6 +56,34 @@ as a robust long-term win rate. Run multiple symbols and longer, independently
 collected data before drawing conclusions.
 
 
+
+### Authorized CSV history import
+
+If the hosted runner cannot access Binance, the backtest can use an authorized
+historical export without changing the signal rules:
+
+```bash
+python -m oi_engine.backtest --symbol BTCUSDT \
+  --candles-csv candles.csv --oi-csv oi.csv \
+  --output oi_backtest_report.json
+```
+
+Both files must use Unix millisecond timestamps. The candle CSV must contain
+these exact headers:
+
+`open_time,close_time,open,high,low,close,volume,quote_volume,taker_buy_quote`
+
+The OI CSV must contain:
+
+`timestamp,sumOpenInterestValue`
+
+The candle export must include the taker-buy quote volume field; ordinary OHLCV
+exports that omit it are not equivalent and cannot be used by this strategy.
+Use only data you are authorized to access and export. The importer checks
+required columns, duplicate timestamps, basic volume validity, and minimum
+history length. It does not invent missing values or convert incompatible
+provider-specific fields.
+
 ### Regional API availability
 
 The historical backtest workflow is manual-only. The GitHub-hosted runner
