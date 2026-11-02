@@ -84,6 +84,18 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result["gross_r"], 0.0)
         self.assertEqual(result["exit_reason"], "stop_after_tp1")
 
+    def test_summary_reports_long_and_short_metrics_separately(self):
+        metrics = summarize([
+            {"net_r": 1.0, "side": "LONG"},
+            {"net_r": -1.0, "side": "LONG"},
+            {"net_r": 2.0, "side": "SHORT"},
+        ])
+        self.assertEqual(metrics["by_side"]["LONG"]["trades"], 2)
+        self.assertEqual(metrics["by_side"]["LONG"]["win_rate_pct"], 50.0)
+        self.assertEqual(metrics["by_side"]["SHORT"]["trades"], 1)
+        self.assertEqual(metrics["by_side"]["SHORT"]["win_rate_pct"], 100.0)
+        self.assertEqual(metrics["by_side"]["SHORT"]["expectancy_r"], 2.0)
+
     def test_summary_reports_actual_metrics(self):
         metrics = summarize([{"net_r": 1.0, "side": "LONG"},
                              {"net_r": -1.0, "side": "SHORT"}])
