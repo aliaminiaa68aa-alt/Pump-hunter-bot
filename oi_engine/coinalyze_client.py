@@ -197,10 +197,10 @@ class CoinalyzeClient:
             )
         )
         if cadence_ok:
-            old_oi = float(oi_by_time[int(aligned_metrics[0]["t"])].get("c", 0) or 0)
+            previous_oi = float(oi_by_time[int(aligned_metrics[-2]["t"])].get("c", 0) or 0)
             new_oi = float(oi_by_time[int(aligned_metrics[-1]["t"])].get("c", 0) or 0)
-            if old_oi > 0 and new_oi > 0:
-                oi_change_pct = (new_oi / float(oi_by_time[int(aligned_metrics[-2]["t"])].get("c", 0) or 0) - 1.0) * 100.0
+            if previous_oi > 0 and new_oi > 0:
+                oi_change_pct = (new_oi / previous_oi - 1.0) * 100.0
         if len(closed_ohlcv) >= 22 and len(aligned) >= 3:
             aligned = aligned[-3:]
             if cadence_ok:
