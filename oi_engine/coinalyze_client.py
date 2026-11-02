@@ -42,6 +42,7 @@ class CoinalyzeClient:
         self.sleeper = sleeper
         self.request_times = deque()
         self._future_markets_cache: Optional[List[dict]] = None
+        self._binance_exchange_codes: Optional[set[str]] = None
 
     def _throttle(self) -> None:
         now = self.clock()
@@ -86,13 +87,32 @@ class CoinalyzeClient:
         self._future_markets_cache = payload
         return payload
 
+    def get_binance_exchange_codes(self) -> set[str]:
+        """Resolve Coinalyze exchange codes to the Binance exchange name."""
+        if self._binance_exchange_codes is not None:
+            return self._binance_exchange_codes
+        payload = self._get("exchanges")
+        if not isinstance(payload, list):
+            raise CoinalyzeError("Unexpected Coinalyze exchanges response")
+        codes = {
+            str(item.get("code", "")).upper()
+            for item in payload
+            if "BINANCE" in str(item.get("name", "")).upper()
+            and item.get("code")
+        }
+        # Also accept a literal exchange name in market records for API variants.
+        codes.add("BINANCE")
+        self._binance_exchange_codes = codes
+        return codes
+
     def resolve_market(self, binance_symbol: str) -> str:
         if not binance_symbol.endswith("USDT"):
             raise CoinalyzeError(f"Unsupported Binance symbol: {binance_symbol}")
         base = binance_symbol[:-4]
+        binance_codes = self.get_binance_exchange_codes()
         matches = [
             market for market in self.get_future_markets()
-            if market.get("exchange", "").upper() == "BINANCE"
+            if str(market.get("exchange", "")).upper() in binance_codes
             and market.get("base_asset", "").upper() == base.upper()
             and market.get("quote_asset", "").upper() == "USDT"
             and market.get("is_perpetual") is True
