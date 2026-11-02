@@ -37,6 +37,7 @@ def make_snapshot(side="LONG"):
         "symbol": "TESTUSDT",
         "candles": candles,
         "oi_values": [100.0, 100.2, 101.0],
+        "oi_timestamp": candles[-1]["close_time"],
         "funding_rate": 0.0001,
     }
 
@@ -59,6 +60,11 @@ class SignalEngineTests(unittest.TestCase):
     def test_no_signal_without_oi_growth(self):
         snapshot = make_snapshot("LONG")
         snapshot["oi_values"] = [100.0, 100.0, 100.0]
+        self.assertIsNone(evaluate_snapshot(snapshot))
+
+    def test_no_signal_when_oi_sample_is_stale(self):
+        snapshot = make_snapshot("LONG")
+        snapshot["oi_timestamp"] -= 16 * 60 * 1000
         self.assertIsNone(evaluate_snapshot(snapshot))
 
 
