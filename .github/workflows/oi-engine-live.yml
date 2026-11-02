@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Restore signal deduplication state
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: .oi_state
           key: oi-state-${{ github.run_id }}
@@ -37,3 +37,9 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
           OI_MAX_SYMBOLS: "100"
         run: python -m oi_engine.telegram_runner
+      - name: Save signal deduplication state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .oi_state
+          key: oi-state-${{ github.run_id }}
