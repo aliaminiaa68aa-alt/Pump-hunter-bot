@@ -3386,7 +3386,7 @@ def register_early_watch_outcome(state, contract, strategy, entry, created_at=No
         records = state.setdefault("early_watch_outcomes", [])
         records.append({
             "contract": contract, "strategy": strategy, "created_at": now,
-            "entry": price, "last_candle_time": now - (now % 60),
+            "entry": price, "last_candle_time": 0,
             "max_favorable_pct": 0.0, "max_adverse_pct": 0.0,
             "checkpoints": {}, "completed": False,
         })
@@ -3397,7 +3397,7 @@ def register_early_watch_outcome(state, contract, strategy, entry, created_at=No
 
 
 def update_early_watch_outcomes(state, now=None):
-    """Track 1h/4h/24h price excursions after early warnings using closed 1m futures candles."""
+    """Track 1h/4h/24h price excursions after early warnings using closed 15m futures candles."""
     now = int(time.time()) if now is None else int(now)
     records = state.setdefault("early_watch_outcomes", [])
     if not isinstance(records, list) or not records:
@@ -3408,7 +3408,7 @@ def update_early_watch_outcomes(state, now=None):
             active.setdefault(record["contract"], []).append(record)
     for contract, group in active.items():
         try:
-            candles = closed_candles(contract, "1m", 31)
+            candles = closed_candles(contract, "15m", 105)
             for record in group:
                 entry = float(record["entry"])
                 created = int(record["created_at"])
