@@ -3250,6 +3250,14 @@ def oi_surge_tier(derivatives):
     return None
 
 
+def format_oi_change(value):
+    """Format optional OI percentage data without breaking watch alerts."""
+    try:
+        return f"{float(value):+.2f}%"
+    except (TypeError, ValueError):
+        return "ناموجود"
+
+
 def detect_oi_prepump_watch(candles_1m, candles_5m, diagnostics=None):
     """
     Find a quiet, high-turnover compression close to resistance BEFORE breakout.
@@ -3579,8 +3587,8 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                                     f"🪙 ارز: {contract.replace('_', '/')}\n"
                                     f"💰 قیمت بسته‌شدن ۵دقیقه: {float(candles_5m[-1]['c']):.10g}\n"
                                     f"📈 رشد OI پنج‌دقیقه: {float(watch_derivatives['oi_change']):+.3f}% ({watch_source})\n"
-                                    f"📊 رشد OI چهار‌ساعته: {float(watch_derivatives['oi_change4h']):+.2f}%\n"
-                                    f"📈 رشد OI بیست‌وچهارساعته: {float(watch_derivatives['oi_change24h']):+.2f}%\n"
+                                    f"📊 رشد OI چهار‌ساعته: {format_oi_change(watch_derivatives.get('oi_change4h'))}\n"
+                                    f"📈 رشد OI بیست‌وچهارساعته: {format_oi_change(watch_derivatives.get('oi_change24h'))}\n"
                                     + (f"🚀 طبقه جهش OI: {surge_tier}\n" if surge_tier else "")
                                     + f"💸 Funding: {float(watch_derivatives['funding_rate'])*100:+.4f}%\n"
                                     f"📊 حجم نسبی ۱دقیقه: {watch['turnover_ratio_1m']:.2f}x | ۵دقیقه: {watch['turnover_ratio_5m']:.2f}x\n"
