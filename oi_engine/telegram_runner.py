@@ -15,7 +15,7 @@ from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
-MAX_WATCHLIST_SYMBOLS = 4  # Scan four queued symbols per run to respect the Coinalyze rate limit
+MAX_WATCHLIST_SYMBOLS = 5  # Five symbols × seven Coinalyze calls + two mapping calls = 37/min worst case
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
 
 
