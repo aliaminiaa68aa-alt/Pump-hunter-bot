@@ -1,0 +1,261 @@
+"""Standalone 15m Open Interest signal engine.
+
+This module is intentionally independent of the legacy Pump Hunter strategies.
+It emits only confirmed LONG/SHORT candidates; it does not send Telegram messages.
+Public Binance USD-M Futures endpoints are used for market data.
+"""
+from __future__ import annotations
+
+import math
+import time
+from dataclasses import dataclass, asdict
+from typing import Any, Dict, List, Optional
+
+import requests
+
+BASE_URL = "https://fapi.binance.com"
+INTERVAL = "15m"
+SESSION = requests.Session()
+SESSION.headers.update({"User-Agent": "OI-Signal-Engine/1.0"})
+
+
+class MarketDataError(RuntimeError):
+    pass
+
+
+@dataclass
+class Signal:
+    symbol: str
+    side: str
+    entry: float
+    stop_loss: float
+    take_profit_1: float
+    take_profit_2: float
+    oi_change_pct: float
+    price_change_pct: float
+    taker_buy_ratio: float
+    volume_ratio: float
+    funding_rate: float
+    confidence: int
+    candle_close_time: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def _get(path: str, params: Optional[dict] = None) -> Any:
+    response = SESSION.get(BASE_URL + path, params=params, timeout=12)
+    response.raise_for_status()
+    payload = response.json()
+    if isinstance(payload, dict) and payload.get("code") not in (None, 0):
+        raise MarketDataError(str(payload))
+    return payload
+
+
+def _float(value: Any, field: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise MarketDataError(f"Invalid {field}")
+    if not math.isfinite(number):
+        raise MarketDataError(f"Non-finite {field}")
+    return number
+
+
+def get_active_symbols() -> List[str]:
+    """Return active USDT-margined perpetual symbols with trading status."""
+    info = _get("/fapi/v1/exchangeInfo")
+    symbols = []
+    for item in info.get("symbols", []):
+        if (
+            item.get("status") == "TRADING"
+            and item.get("contractType") == "PERPETUAL"
+            and item.get("quoteAsset") == "USDT"
+            and item.get("symbol", "").endswith("USDT")
+        ):
+            symbols.append(item["symbol"])
+    return symbols
+
+
+def fetch_snapshot(symbol: str) -> Dict[str, Any]:
+    """Fetch closed 15m candles, OI history and current funding."""
+    candles = _get("/fapi/v1/klines", {
+        "symbol": symbol, "interval": INTERVAL, "limit": 40
+    })
+    # Binance returns the currently-forming candle last; exclude it.
+    candles = candles[:-1]
+    if len(candles) < 22:
+        raise MarketDataError("Not enough closed candles")
+
+    oi_rows = _get("/futures/data/openInterestHist", {
+        "symbol": symbol, "period": INTERVAL, "limit": 6
+    })
+    if not isinstance(oi_rows, list) or len(oi_rows) < 3:
+        raise MarketDataError("Not enough OI history")
+
+    premium = _get("/fapi/v1/premiumIndex", {"symbol": symbol})
+    if isinstance(premium, list):
+        premium = next((x for x in premium if x.get("symbol") == symbol), None)
+    if not premium:
+        raise MarketDataError("Funding data unavailable")
+
+    parsed = []
+    for row in candles:
+        parsed.append({
+            "open_time": int(row[0]),
+            "open": _float(row[1], "open"),
+            "high": _float(row[2], "high"),
+            "low": _float(row[3], "low"),
+            "close": _float(row[4], "close"),
+            "volume": _float(row[5], "volume"),
+            "quote_volume": _float(row[7], "quote volume"),
+            "taker_buy_quote": _float(row[10], "taker buy quote"),
+            "close_time": int(row[6]),
+        })
+
+    oi_rows.sort(key=lambda x: int(x.get("timestamp", 0)))
+    oi_values = [_float(x.get("sumOpenInterestValue"), "OI value") for x in oi_rows]
+    if any(x <= 0 for x in oi_values):
+        raise MarketDataError("Invalid OI values")
+
+    return {
+        "symbol": symbol,
+        "candles": parsed,
+        "oi_values": oi_values,
+        "funding_rate": _float(premium.get("lastFundingRate"), "funding"),
+    }
+
+
+def _atr(candles: List[dict], period: int = 14) -> float:
+    recent = candles[-(period + 1):]
+    true_ranges = []
+    for previous, current in zip(recent, recent[1:]):
+        true_ranges.append(max(
+            current["high"] - current["low"],
+            abs(current["high"] - previous["close"]),
+            abs(current["low"] - previous["close"]),
+        ))
+    if not true_ranges:
+        return 0.0
+    return sum(true_ranges) / len(true_ranges)
+
+
+def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
+    """Return a final signal only after closed-candle, OI, flow and breakout checks."""
+    candles = snapshot["candles"]
+    oi_values = snapshot["oi_values"]
+    if len(candles) < 22 or len(oi_values) < 3:
+        return None
+
+    last = candles[-1]
+    previous = candles[-2]
+    baseline = candles[-21:-1]
+    avg_quote_volume = sum(x["quote_volume"] for x in baseline) / len(baseline)
+    if avg_quote_volume <= 0:
+        return None
+
+    volume_ratio = last["quote_volume"] / avg_quote_volume
+    taker_ratio = (
+        last["taker_buy_quote"] / last["quote_volume"]
+        if last["quote_volume"] > 0 else 0.5
+    )
+    oi_change = (oi_values[-1] / oi_values[-3] - 1.0) * 100
+    price_change = (last["close"] / previous["close"] - 1.0) * 100
+    atr = _atr(candles)
+    if atr <= 0 or last["close"] <= 0:
+        return None
+
+    prior = candles[-6:-1]
+    prior_high = max(x["high"] for x in prior)
+    prior_low = min(x["low"] for x in prior)
+    funding = snapshot["funding_rate"]
+
+    # Require fresh positioning, directional aggression and a confirmed 5-candle break.
+    long_checks = [
+        oi_change >= 0.35,
+        price_change >= 0.15,
+        taker_ratio >= 0.53,
+        volume_ratio >= 1.15,
+        last["close"] > prior_high and last["close"] > last["open"],
+    ]
+    short_checks = [
+        oi_change >= 0.35,
+        price_change <= -0.15,
+        taker_ratio <= 0.47,
+        volume_ratio >= 1.15,
+        last["close"] < prior_low and last["close"] < last["open"],
+    ]
+
+    side = None
+    checks = None
+    if sum(long_checks) == 5:
+        side, checks = "LONG", long_checks
+    elif sum(short_checks) == 5:
+        side, checks = "SHORT", short_checks
+    else:
+        return None
+
+    entry = last["close"]
+    risk = max(atr * 1.25, entry * 0.002)
+    if side == "LONG":
+        stop = entry - risk
+        tp1, tp2 = entry + risk, entry + risk * 2
+    else:
+        stop = entry + risk
+        tp1, tp2 = entry - risk, entry - risk * 2
+
+    # Funding crowding is reported, not used as a blind directional veto.
+    confidence = min(95, 70 + int(max(0, volume_ratio - 1.15) * 8)
+                     + int(min(abs(oi_change), 2.0) * 3))
+    return Signal(
+        symbol=snapshot["symbol"],
+        side=side,
+        entry=entry,
+        stop_loss=stop,
+        take_profit_1=tp1,
+        take_profit_2=tp2,
+        oi_change_pct=oi_change,
+        price_change_pct=price_change,
+        taker_buy_ratio=taker_ratio,
+        volume_ratio=volume_ratio,
+        funding_rate=funding,
+        confidence=confidence,
+        candle_close_time=last["close_time"],
+    )
+
+
+def scan(symbols: Optional[List[str]] = None, max_symbols: int = 120) -> List[Signal]:
+    """Scan a bounded symbol list; failed symbols are skipped, never fabricated."""
+    universe = symbols if symbols is not None else get_active_symbols()
+    results: List[Signal] = []
+    for symbol in universe[:max_symbols]:
+        try:
+            snapshot = fetch_snapshot(symbol)
+            signal = evaluate_snapshot(snapshot)
+            if signal is not None:
+                results.append(signal)
+        except (requests.RequestException, MarketDataError, KeyError, TypeError, ValueError):
+            continue
+        except Exception:
+            # A single malformed market response must not stop the entire scan.
+            continue
+        time.sleep(0.03)
+    return sorted(results, key=lambda item: item.confidence, reverse=True)
+
+
+def format_signal(signal: Signal) -> str:
+    direction = "خرید LONG" if signal.side == "LONG" else "فروش SHORT"
+    return (
+        f"🚨 سیگنال نهایی {direction}\n"
+        f"ارز: {signal.symbol}\n"
+        f"ورود: {signal.entry:.8g}\n"
+        f"حد ضرر: {signal.stop_loss:.8g}\n"
+        f"هدف ۱: {signal.take_profit_1:.8g}\n"
+        f"هدف ۲: {signal.take_profit_2:.8g}\n"
+        f"تغییر OI: {signal.oi_change_pct:+.2f}%\n"
+        f"تغییر قیمت ۱۵دقیقه: {signal.price_change_pct:+.2f}%\n"
+        f"نسبت خرید تهاجمی: {signal.taker_buy_ratio:.1%}\n"
+        f"حجم نسبت به میانگین: {signal.volume_ratio:.2f}x\n"
+        f"Funding: {signal.funding_rate:.5%}\n"
+        f"امتیاز شرایط: {signal.confidence}/100"
+    )
