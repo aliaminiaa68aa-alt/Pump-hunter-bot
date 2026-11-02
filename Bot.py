@@ -872,7 +872,7 @@ def leg_spike_long_short_filter(contract):
     try:
         ratio_1h = okx_contract_long_ratio(contract, "1H")
         ratio_1d = okx_currency_daily_long_ratio(contract)
-        passed = ratio_1h > 50.0 and ratio_1d <= 70.0
+        passed = ratio_1h > 50.0 and 50.0 < ratio_1d <= 70.0
         return {
             "valid": True, "passed": passed,
             "ratio_1h": ratio_1h, "ratio_1d": ratio_1d,
@@ -2079,8 +2079,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if metrics.get("long1h") is None or metrics["long1h"] <= 50:
                         print(f"{contract}: LEG SPIKE entry blocked; 1h long share missing or <=50%")
                         continue
-                    if metrics.get("long1d") is None or metrics["long1d"] > 70:
-                        print(f"{contract}: LEG SPIKE entry blocked; daily long share missing or >70%")
+                    if metrics.get("long1d") is None or not (50 < metrics["long1d"] <= 70):
+                        print(f"{contract}: LEG SPIKE entry blocked; daily long share must be >50% and <=70%")
                         continue
                     if metrics.get("oi_change4h") is None or metrics["oi_change4h"] <= 0:
                         print(f"{contract}: LEG SPIKE entry blocked; 4h OI growth missing or non-positive")
@@ -2202,8 +2202,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if metrics.get("long1h") is None or metrics["long1h"] <= 50:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze 1h long share is missing or <=50%")
                         continue
-                    if metrics.get("long1d") is None or metrics["long1d"] > 70:
-                        print(f"{contract}: LEG SPIKE rejected; Coinalyze daily long share is missing or exceeds 70%")
+                    if metrics.get("long1d") is None or not (50 < metrics["long1d"] <= 70):
+                        print(f"{contract}: LEG SPIKE rejected; daily long share must be >50% and <=70%")
                         continue
                     alert_oi = metrics.get("oi_usd")
                     alert_funding = metrics.get("funding_avg")
