@@ -40,6 +40,8 @@ class BatchBacktestTests(unittest.TestCase):
             self.assertEqual(report["per_symbol"]["BTCUSDT"]["metrics"]["trades"], 0)
             self.assertEqual(report["pooled_trade_count"], 0)
             self.assertIsNone(report["pooled_equal_risk_metrics"]["max_drawdown_r"])
+            for side_metrics in report["pooled_equal_risk_metrics"]["by_side"].values():
+                self.assertIsNone(side_metrics["max_drawdown_r"])
             self.assertEqual(
                 report["per_symbol"]["BTCUSDT"]["sample_assessment"], "no_signals"
             )
