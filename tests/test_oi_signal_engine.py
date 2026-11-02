@@ -83,6 +83,18 @@ class SignalEngineTests(unittest.TestCase):
         snapshot["oi_timestamp"] -= 16 * 60 * 1000
         self.assertIsNone(evaluate_snapshot(snapshot))
 
+    def test_oi_period_end_at_next_boundary_is_accepted(self):
+        snapshot = make_snapshot("LONG")
+        snapshot["oi_timestamp"] = snapshot["candles"][-1]["close_time"] + 1
+        signal = evaluate_snapshot(snapshot)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.side, "LONG")
+
+    def test_oi_timestamp_after_next_boundary_is_rejected(self):
+        snapshot = make_snapshot("LONG")
+        snapshot["oi_timestamp"] = snapshot["candles"][-1]["close_time"] + 2
+        self.assertIsNone(evaluate_snapshot(snapshot))
+
 
     def test_scan_fails_if_every_market_request_fails(self):
         with patch("oi_engine.signal_engine.get_active_symbols", return_value=["AAAUSDT", "BBBUSDT"]), patch("oi_engine.signal_engine.fetch_snapshot", side_effect=MarketDataError("HTTP 451")):
