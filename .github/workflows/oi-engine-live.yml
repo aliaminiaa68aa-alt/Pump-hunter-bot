@@ -34,7 +34,7 @@ jobs:
             oi-public-only-v2-
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check requests
-      - name: Ingest public Telegram OI posts and forwarded alerts, monitor watchlist and send confirmed signals
+      - name: Ingest only public @oi_detector posts, monitor watchlist and send confirmed signals
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
