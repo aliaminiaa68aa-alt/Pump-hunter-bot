@@ -14,6 +14,7 @@ on:
       - "oi_engine/**"
       - "tests/test_oi_signal_engine.py"
       - "tests/test_oi_backtest.py"
+      - "tests/test_oi_batch_backtest.py"
 
 jobs:
   unit-tests:
