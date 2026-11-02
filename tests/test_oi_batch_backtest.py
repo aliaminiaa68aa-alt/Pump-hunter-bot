@@ -39,7 +39,11 @@ class BatchBacktestTests(unittest.TestCase):
             self.assertIn("ETHUSDT", report["symbols_failed"])
             self.assertEqual(report["per_symbol"]["BTCUSDT"]["metrics"]["trades"], 0)
             self.assertEqual(report["pooled_trade_count"], 0)
-            self.assertIn("not a portfolio equity curve", report["pooled_metrics_note"])
+            self.assertIsNone(report["pooled_equal_risk_metrics"]["max_drawdown_r"])
+            self.assertEqual(
+                report["per_symbol"]["BTCUSDT"]["sample_assessment"], "no_signals"
+            )
+            self.assertIn("omit pooled drawdown", report["pooled_metrics_note"])
 
     def test_invalid_symbol_is_reported_without_aborting(self):
         report = run_batch_backtest(["BTCUSD"])
