@@ -86,6 +86,16 @@ class TelegramRunnerTests(unittest.TestCase):
                 telegram_runner.main()
             poll.assert_not_called()
 
+    def test_watchlist_batch_rotates_without_dropping_symbols(self):
+        watchlist = {f"COIN{i}USDT": {"status": "در حال رصد"} for i in range(7)}
+        first, cursor = telegram_runner.select_watchlist_batch(watchlist)
+        second, next_cursor = telegram_runner.select_watchlist_batch(watchlist, cursor)
+        self.assertEqual(list(first), ["COIN0USDT", "COIN1USDT", "COIN2USDT", "COIN3USDT"])
+        self.assertEqual(list(second), ["COIN4USDT", "COIN5USDT", "COIN6USDT", "COIN0USDT"])
+        self.assertEqual(cursor, "COIN3USDT")
+        self.assertEqual(next_cursor, "COIN0USDT")
+        self.assertEqual(len(watchlist), 7)
+
     def test_prunes_expired_watchlist_symbols(self):
         now = 1000000
         kept = telegram_runner.prune_watchlist({
