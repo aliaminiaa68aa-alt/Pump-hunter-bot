@@ -1,10 +1,11 @@
 import unittest
+from unittest.mock import patch
 import csv
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
-from oi_engine.backtest import align_oi, load_csv_history, reprice_signal_for_next_open, simulate_trade, summarize
+from oi_engine.backtest import align_oi, download_history, load_csv_history, reprice_signal_for_next_open, simulate_trade, summarize
 from oi_engine.signal_engine import MarketDataError
 
 
@@ -284,6 +285,59 @@ class BacktestTests(unittest.TestCase):
                 writer.writerows(oi_rows)
             with self.assertRaisesRegex(MarketDataError, "chronological order"):
                 load_csv_history(str(candles_path), str(oi_path))
+
+
+    def test_download_history_pages_klines_and_oi(self):
+        interval = 900000
+        now_ms = 1_800_000_000_000
+        start = now_ms - 29 * 24 * 60 * 60 * 1000
+        start -= start % interval
+
+        def kline(open_time):
+            return [open_time, "100", "101", "99", "100", "10",
+                    open_time + interval - 1, "1000", 10, "5", "520", "0"]
+
+        def oi(timestamp):
+            return {"timestamp": timestamp, "sumOpenInterest": "1000"}
+
+        first_klines = [kline(start + i * interval) for i in range(1500)]
+        second_klines = [kline(start + i * interval) for i in range(1500, 1502)]
+        first_oi = [oi(start + (i + 1) * interval) for i in range(500)]
+        second_oi = [oi(start + (i + 1) * interval) for i in range(500, 502)]
+
+        class Response:
+            status_code = 200
+            def __init__(self, payload):
+                self.payload = payload
+            def raise_for_status(self):
+                return None
+            def json(self):
+                return self.payload
+
+        class Session:
+            def __init__(self):
+                self.headers = {}
+                self.calls = []
+                self.responses = [
+                    Response(first_klines), Response(second_klines),
+                    Response(first_oi), Response(second_oi),
+                ]
+            def get(self, url, params, timeout):
+                self.calls.append((url, dict(params)))
+                return self.responses.pop(0)
+
+        session = Session()
+        with patch("oi_engine.backtest.requests.Session", return_value=session), \
+             patch("time.time", return_value=now_ms / 1000):
+            candles, oi_rows = download_history("BTCUSDT")
+
+        self.assertEqual(len(candles), 1502)
+        self.assertEqual(len(oi_rows), 502)
+        self.assertEqual(len(session.calls), 4)
+        self.assertEqual(session.calls[1][1]["startTime"],
+                         start + 1500 * interval)
+        self.assertEqual(session.calls[3][1]["startTime"],
+                         start + 500 * interval + 1)
 
 
 if __name__ == "__main__":
