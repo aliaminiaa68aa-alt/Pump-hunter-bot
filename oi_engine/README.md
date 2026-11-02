@@ -31,3 +31,26 @@ The scanner is configured to run every five minutes and evaluates closed 15-minu
 - The OI history endpoint is sampled data; it is not a tick-by-tick liquidation or order-flow feed.
 - The engine has unit tests, but no historical backtest, paper-trading validation, or live Telegram delivery has yet been confirmed.
 - A rule score is not a statistical probability. Do not treat it as a win-rate estimate.
+
+
+## Historical backtest
+
+Run a recent-data backtest (default: BTCUSDT):
+
+```bash
+python -m oi_engine.backtest --symbol BTCUSDT
+```
+
+Optional execution-cost assumptions can be changed with `--fee-bps` and
+`--slippage-bps` (each is basis points per side). The JSON report includes
+trade count, win rate, profit factor, expectancy/average R, max drawdown in R,
+LONG/SHORT counts, and individual trade outcomes.
+
+The backtest uses only closed 15m candles and OI samples timestamped no later
+than each signal candle. It does not stack positions in the same symbol.
+Exits assume 50% at TP1 and 50% at TP2, with a fixed stop; if stop and target
+are both touched in one OHLC candle, stop is counted first. Historical funding
+is excluded. Binance's OI history endpoint is capped at 500 samples in this
+implementation, so this is only a short recent sample and must not be presented
+as a robust long-term win rate. Run multiple symbols and longer, independently
+collected data before drawing conclusions.
