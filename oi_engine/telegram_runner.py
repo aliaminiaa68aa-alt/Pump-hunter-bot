@@ -150,10 +150,15 @@ def main() -> None:
     offset, added, status_requested = poll_forwarded_alerts(token, offset, watchlist)
     public_channel = os.getenv("OI_PUBLIC_CHANNEL", "oi_detector").strip()
     public_last_id = int(watch_state.get("public_channel_last_id", 0))
-    public_last_id, public_added = poll_public_channel_alerts(
-        public_channel, public_last_id, watchlist
-    )
-    added += public_added
+    try:
+        public_last_id, public_added = poll_public_channel_alerts(
+            public_channel, public_last_id, watchlist
+        )
+        added += public_added
+        print(f"Public Telegram source @{public_channel}: new_alerts={public_added}")
+    except requests.RequestException as exc:
+        # Keep the previous cursor and continue scanning existing watchlist symbols.
+        print(f"WARNING: public Telegram source fetch failed: {exc}")
     watchlist = prune_watchlist(watchlist)
     client = CoinalyzeClient(api_key=api_key)
     confirmed, watchlist = scan_watchlist(watchlist, client=client)
