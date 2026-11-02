@@ -1,5 +1,6 @@
 import os
 import time
+import math
 import requests
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -902,6 +903,14 @@ FIB_FULL_VOLUME_TO_MARKET_CAP = 2.00  # >=2x passes volume tier; 1.8-2x needs ev
 # Accept negative funding and near-zero positive funding up to +0.01%.
 # Funding values are stored internally as decimal fractions.
 FIB_MAX_FUNDING_RATE = 0.0001
+
+
+def leg_spike_final_oi_context_available(oi_change4h):
+    """Require a valid 4h OI observation for context, but never veto on its sign."""
+    try:
+        return oi_change4h is not None and math.isfinite(float(oi_change4h))
+    except (TypeError, ValueError):
+        return False
 
 
 def leg_spike_oi_growth_gate(oi_change, oi_change4h):
@@ -2126,8 +2135,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if metrics.get("long1d") is None or not (50 < metrics["long1d"] <= 70):
                         print(f"{contract}: LEG SPIKE entry blocked; daily long share must be >50% and <=70%")
                         continue
-                    if metrics.get("oi_change4h") is None or metrics["oi_change4h"] <= 0:
-                        print(f"{contract}: LEG SPIKE entry blocked; 4h OI growth missing or non-positive")
+                    if not leg_spike_final_oi_context_available(metrics.get("oi_change4h")):
+                        print(f"{contract}: LEG SPIKE entry blocked; 4h OI context missing or invalid")
                         continue
                     live_oi = metrics.get("oi_usd")
                     live_funding = metrics["funding_avg"]
