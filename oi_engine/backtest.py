@@ -132,8 +132,10 @@ def simulate_trade(signal: Any, future_candles: List[dict],
     if not observed:
         return None
     exit_price = observed[-1]["close"]
+    bars_held = 0
 
-    for candle in observed:
+    for bar_index, candle in enumerate(observed):
+        bars_held = bar_index + 1
         opening = candle.get("open")
         if opening is not None:
             opening = float(opening)
@@ -227,6 +229,7 @@ def simulate_trade(signal: Any, future_candles: List[dict],
         "cost_r": round(cost_r, 4),
         "net_r": round(net_r, 4),
         "exit_reason": exit_reason,
+        "bars_held": bars_held,
         "candle_close_time": signal.candle_close_time,
     }
 
@@ -417,7 +420,9 @@ def run_backtest_data(symbol: str, candles: List[dict], oi_rows: List[dict],
             (executable_signal.entry / signal.entry - 1.0) * 100.0, 4
         )
         trades.append(trade)
-        next_available_index = index + min(MAX_HOLD_CANDLES, len(candles) - index - 1) + 1
+        # The next signal may be evaluated at the close of the exit candle;
+        # entry would occur on the following candle, after this trade is flat.
+        next_available_index = index + trade["bars_held"]
 
     return {
         "symbol": symbol.upper(),
