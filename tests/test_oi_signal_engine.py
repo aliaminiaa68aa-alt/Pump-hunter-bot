@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from oi_engine.signal_engine import evaluate_snapshot, scan, MarketDataError, validate_oi_cadence
+from oi_engine.signal_engine import diagnose_snapshot, evaluate_snapshot, scan, MarketDataError, validate_oi_cadence
 
 
 def make_snapshot(side="LONG"):
@@ -44,6 +44,15 @@ def make_snapshot(side="LONG"):
 
 
 class SignalEngineTests(unittest.TestCase):
+    def test_diagnostics_name_failed_filters_without_changing_signal(self):
+        snapshot = make_snapshot("LONG")
+        snapshot["oi_values"] = [100.0, 100.0, 100.1]
+        snapshot["candles"][-1]["quote_volume"] = 105000.0
+        reasons = diagnose_snapshot(snapshot)
+        self.assertTrue(any("رشد OI کم است" in reason for reason in reasons))
+        self.assertTrue(any("حجم پایین است" in reason for reason in reasons))
+        self.assertIsNone(evaluate_snapshot(snapshot))
+
     def test_confirmed_long(self):
         signal = evaluate_snapshot(make_snapshot("LONG"))
         self.assertIsNotNone(signal)
