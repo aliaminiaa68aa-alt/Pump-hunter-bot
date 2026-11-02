@@ -1,0 +1,539 @@
+"""Historical, no-lookahead backtest for the standalone OI signal engine.
+
+Binance's public openInterestHist endpoint retains only the latest month and
+returns at most 500 samples per request. This tool pages through that available
+window and reports the actual returned range; it never labels it long-term validation.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import csv
+from copy import copy
+from typing import Any, Dict, List, Optional
+
+import requests
+
+from .signal_engine import BASE_URL, MarketDataError, _float, evaluate_snapshot
+
+INTERVAL_MS = 15 * 60 * 1000
+DEFAULT_FEE_BPS = 5.0
+DEFAULT_SLIPPAGE_BPS = 2.0
+MAX_HOLD_CANDLES = 32
+
+
+def parse_klines(rows: List[list]) -> List[dict]:
+    parsed = []
+    for row in rows:
+        parsed.append({
+            "open_time": int(row[0]),
+            "open": _float(row[1], "open"),
+            "high": _float(row[2], "high"),
+            "low": _float(row[3], "low"),
+            "close": _float(row[4], "close"),
+            "volume": _float(row[5], "volume"),
+            "quote_volume": _float(row[7], "quote volume"),
+            "taker_buy_quote": _float(row[10], "taker buy quote"),
+            "close_time": int(row[6]),
+        })
+    return parsed
+
+
+def align_oi(candles: List[dict], oi_rows: List[dict]) -> List[Optional[List[float]]]:
+    """For each closed candle, return its three latest OI samples, without lookahead."""
+    ordered = sorted(oi_rows, key=lambda row: int(row.get("timestamp", 0)))
+    result: List[Optional[List[float]]] = []
+    cursor = 0
+    available: List[dict] = []
+    for candle in candles:
+        # OI-statistics timestamp is the period END; kline close_time is
+        # inclusive and therefore one millisecond before the next boundary.
+        oi_cutoff_time = candle["close_time"] + 1
+        while cursor < len(ordered) and int(ordered[cursor].get("timestamp", 0)) <= oi_cutoff_time:
+            available.append(ordered[cursor])
+            cursor += 1
+        if not available:
+            result.append(None)
+            continue
+        latest_ts = int(available[-1].get("timestamp", 0))
+        if oi_cutoff_time - latest_ts > INTERVAL_MS:
+            result.append(None)
+            continue
+        last_three = available[-3:]
+        if len(last_three) < 3:
+            result.append(None)
+            continue
+        # OI inputs must be a genuine 15m sequence, not three stale samples
+        # separated by missing intervals.
+        oi_times = [int(row.get("timestamp", 0)) for row in last_three]
+        if any(
+            current - previous != INTERVAL_MS
+            for previous, current in zip(oi_times, oi_times[1:])
+        ):
+            result.append(None)
+            continue
+        try:
+            values = [_float(row.get("sumOpenInterest"), "OI value") for row in last_three]
+        except MarketDataError:
+            result.append(None)
+            continue
+        result.append(values if all(value > 0 for value in values) else None)
+    return result
+
+
+def reprice_signal_for_next_open(signal: Any, next_open: float) -> Any:
+    """Move entry to the first executable bar open and preserve the planned R distance."""
+    entry = _float(next_open, "next candle open")
+    if entry <= 0:
+        raise MarketDataError("Next candle open must be positive")
+    risk = abs(float(signal.entry) - float(signal.stop_loss))
+    if risk <= 0:
+        raise MarketDataError("Signal risk distance must be positive")
+    if signal.side == "LONG":
+        stop, tp1, tp2 = entry - risk, entry + risk, entry + 2.0 * risk
+    elif signal.side == "SHORT":
+        stop, tp1, tp2 = entry + risk, entry - risk, entry - 2.0 * risk
+    else:
+        raise MarketDataError(f"Unsupported signal side: {signal.side}")
+    repriced = copy(signal)
+    repriced.entry = entry
+    repriced.stop_loss = stop
+    repriced.take_profit_1 = tp1
+    repriced.take_profit_2 = tp2
+    return repriced
+
+
+def simulate_trade(signal: Any, future_candles: List[dict],
+                   fee_bps: float = DEFAULT_FEE_BPS,
+                   slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
+                   max_hold: int = MAX_HOLD_CANDLES) -> Optional[dict]:
+    """50% exits at TP1 and 50% at TP2; stop is not moved after TP1.
+
+    Opening gaps are processed before each candle's high/low: stop gaps fill
+    at the worse opening price, while target gaps receive opening-price
+    improvement. If stop and target are both touched intrabar, stop is
+    assumed first because OHLC data cannot reveal the path.
+    """
+    if not future_candles:
+        return None
+    side = signal.side
+    entry = signal.entry
+    stop = signal.stop_loss
+    tp1 = signal.take_profit_1
+    tp2 = signal.take_profit_2
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return None
+
+    first_target_hit = False
+    gross_r = 0.0
+    exit_reason = "time"
+    observed = future_candles[:max_hold]
+    if not observed:
+        return None
+    exit_price = observed[-1]["close"]
+    bars_held = 0
+
+    for bar_index, candle in enumerate(observed):
+        bars_held = bar_index + 1
+        opening = candle.get("open")
+        if opening is not None:
+            opening = float(opening)
+            if side == "LONG":
+                stop_gap = opening <= stop
+                tp1_gap = opening >= tp1
+                tp2_gap = opening >= tp2
+            else:
+                stop_gap = opening >= stop
+                tp1_gap = opening <= tp1
+                tp2_gap = opening <= tp2
+
+            # A stop crossed between candles cannot realistically fill at the
+            # old stop price; use the opening price, including adverse gap size.
+            if stop_gap:
+                if first_target_hit:
+                    direction = 1.0 if side == "LONG" else -1.0
+                    gross_r += 0.5 * direction * (opening - entry) / risk
+                    exit_reason = "gap_stop_after_tp1"
+                else:
+                    gross_r = -abs(opening - entry) / risk
+                    exit_reason = "gap_stop"
+                exit_price = opening
+                break
+
+            direction = 1.0 if side == "LONG" else -1.0
+            if tp2_gap:
+                opening_r = direction * (opening - entry) / risk
+                if first_target_hit:
+                    gross_r += 0.5 * opening_r
+                else:
+                    gross_r = opening_r
+                exit_reason = "gap_tp2"
+                exit_price = opening
+                break
+            if tp1_gap and not first_target_hit:
+                # Resting limit receives price improvement on a favorable gap.
+                gross_r += 0.5 * direction * (opening - entry) / risk
+                first_target_hit = True
+
+        if side == "LONG":
+            stop_hit = candle["low"] <= stop
+            tp1_hit = candle["high"] >= tp1
+            tp2_hit = candle["high"] >= tp2
+        else:
+            stop_hit = candle["high"] >= stop
+            tp1_hit = candle["low"] <= tp1
+            tp2_hit = candle["low"] <= tp2
+
+        # Conservative ordering when OHLC cannot reveal which intrabar level came first.
+        if stop_hit:
+            if first_target_hit:
+                gross_r += -0.5
+            else:
+                gross_r = -1.0
+            exit_reason = "stop_after_tp1" if first_target_hit else "stop"
+            exit_price = stop
+            break
+
+        if tp2_hit:
+            if not first_target_hit:
+                gross_r += 0.5 * 1.0
+            gross_r += 0.5 * 2.0
+            exit_reason = "tp2"
+            exit_price = tp2
+            break
+
+        if tp1_hit and not first_target_hit:
+            first_target_hit = True
+            gross_r += 0.5 * 1.0
+
+        exit_price = candle["close"]
+    else:
+        # Time exit: mark the remaining position at the last observed close.
+        direction = 1.0 if side == "LONG" else -1.0
+        remaining_fraction = 0.5 if first_target_hit else 1.0
+        gross_r += remaining_fraction * direction * (exit_price - entry) / risk
+
+    # Approximate entry + exit trading costs on full notional.
+    cost_r = (entry * 2.0 * (fee_bps + slippage_bps) / 10000.0) / risk
+    net_r = gross_r - cost_r
+    return {
+        "symbol": signal.symbol,
+        "side": side,
+        "entry": entry,
+        "stop_loss": stop,
+        "tp1": tp1,
+        "tp2": tp2,
+        "exit_price": round(exit_price, 10),
+        "gross_r": round(gross_r, 4),
+        "cost_r": round(cost_r, 4),
+        "net_r": round(net_r, 4),
+        "exit_reason": exit_reason,
+        "bars_held": bars_held,
+        "candle_close_time": signal.candle_close_time,
+    }
+
+
+def _summarize_group(trades: List[dict]) -> dict:
+    if not trades:
+        return {"trades": 0, "wins": 0, "losses": 0, "breakeven": 0,
+                "win_rate_pct": None, "profit_factor": None,
+                "expectancy_r": None, "average_r": None, "max_drawdown_r": None}
+    values = [float(item["net_r"]) for item in trades]
+    wins = [value for value in values if value > 0]
+    losses = [value for value in values if value < 0]
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
+    equity = peak = 0.0
+    max_drawdown = 0.0
+    for value in values:
+        equity += value
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, peak - equity)
+    return {
+        "trades": len(values),
+        "wins": len(wins),
+        "losses": len(losses),
+        "breakeven": len(values) - len(wins) - len(losses),
+        "win_rate_pct": round(len(wins) / len(values) * 100, 2),
+        "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss else None,
+        "expectancy_r": round(sum(values) / len(values), 4),
+        "average_r": round(sum(values) / len(values), 4),
+        "max_drawdown_r": round(max_drawdown, 4),
+    }
+
+
+def summarize(trades: List[dict]) -> dict:
+    overall = _summarize_group(trades)
+    overall["long_trades"] = sum(item["side"] == "LONG" for item in trades)
+    overall["short_trades"] = sum(item["side"] == "SHORT" for item in trades)
+    overall["by_side"] = {
+        side: _summarize_group([item for item in trades if item["side"] == side])
+        for side in ("LONG", "SHORT")
+    }
+    return overall
+
+
+def download_history(symbol: str) -> tuple[List[dict], List[dict]]:
+    """Download the maximum recent OI history available, paging within Binance's
+    documented one-month retention window. Klines are paged separately because
+    their endpoint has a larger per-request limit.
+    """
+    import time
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "OI-Signal-Backtest/1.0"})
+    base = BASE_URL
+    interval_ms = INTERVAL_MS
+    now_ms = int(time.time() * 1000)
+    # Binance documents only the latest one month for OI statistics. Stay
+    # inside that retention window rather than repeatedly requesting older data.
+    start_time = now_ms - 29 * 24 * 60 * 60 * 1000
+    start_time -= start_time % interval_ms
+
+    def get_page(path: str, params: dict) -> list:
+        try:
+            response = session.get(base + path, params=params, timeout=20)
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            if response.status_code == 451:
+                raise MarketDataError(
+                    "Binance USD-M Futures returned HTTP 451 (restricted location). "
+                    "No historical data was downloaded; run from a network where this "
+                    "market-data service is legally available, or provide an authorized data export."
+                ) from exc
+            raise MarketDataError(
+                f"Binance history request failed for {path}: HTTP {response.status_code}"
+            ) from exc
+        except requests.RequestException as exc:
+            raise MarketDataError(
+                f"Binance history request failed for {path}: {exc}"
+            ) from exc
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise MarketDataError(
+                f"Binance returned invalid JSON for {path}"
+            ) from exc
+        if not isinstance(payload, list):
+            raise MarketDataError("Unexpected Binance history response")
+        return payload
+
+    # Klines support up to 1500 rows per request.
+    raw_klines = []
+    cursor = start_time
+    for _ in range(4):
+        page = get_page("/fapi/v1/klines", {
+            "symbol": symbol, "interval": "15m", "limit": 1500,
+            "startTime": cursor, "endTime": now_ms,
+        })
+        if not page:
+            break
+        raw_klines.extend(page)
+        next_cursor = int(page[-1][0]) + interval_ms
+        if next_cursor <= cursor or len(page) < 1500:
+            break
+        cursor = next_cursor
+
+    # OI statistics support at most 500 rows per request and retain one month.
+    raw_oi = []
+    cursor = start_time
+    for _ in range(8):
+        page = get_page("/futures/data/openInterestHist", {
+            "symbol": symbol, "period": "15m", "limit": 500,
+            "startTime": cursor, "endTime": now_ms,
+        })
+        if not page:
+            break
+        raw_oi.extend(page)
+        next_cursor = int(page[-1].get("timestamp", 0)) + 1
+        if next_cursor <= cursor or len(page) < 500:
+            break
+        cursor = next_cursor
+
+    # Defensive de-duplication at page boundaries.
+    unique_klines = {int(row[0]): row for row in raw_klines}
+    unique_oi = {int(row["timestamp"]): row for row in raw_oi}
+    candles = parse_klines([unique_klines[key] for key in sorted(unique_klines)])
+    # Drop the currently-forming kline; only closed candles may generate signals.
+    candles = [candle for candle in candles if candle["close_time"] < now_ms]
+    oi_rows = [unique_oi[key] for key in sorted(unique_oi)]
+    if not candles or not oi_rows:
+        raise MarketDataError("Binance returned no usable recent candle/OI history")
+    return candles, oi_rows
+
+
+
+def load_csv_history(candles_path: str, oi_path: str) -> tuple[List[dict], List[dict]]:
+    """Load authorized historical exports using the documented CSV schema.
+
+    candles.csv: open_time,close_time,open,high,low,close,volume,quote_volume,taker_buy_quote
+    oi.csv: timestamp,sumOpenInterest
+    Timestamps are Unix milliseconds.
+    """
+    required_candles = {
+        "open_time", "close_time", "open", "high", "low", "close",
+        "volume", "quote_volume", "taker_buy_quote",
+    }
+    candles: List[dict] = []
+    with open(candles_path, newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        missing = required_candles - set(reader.fieldnames or [])
+        if missing:
+            raise MarketDataError(f"candles CSV missing columns: {', '.join(sorted(missing))}")
+        for row in reader:
+            item = {"open_time": int(row["open_time"]), "close_time": int(row["close_time"])}
+            for key in ("open", "high", "low", "close", "volume", "quote_volume", "taker_buy_quote"):
+                item[key] = _float(row[key], key)
+            if (
+                item["close_time"] != item["open_time"] + INTERVAL_MS - 1
+                or item["close"] <= 0
+                or item["open"] <= 0
+                or item["high"] < max(item["open"], item["close"])
+                or item["low"] > min(item["open"], item["close"])
+                or item["high"] < item["low"]
+            ):
+                raise MarketDataError("Invalid 15m candle timestamps or OHLC prices in CSV")
+            if (
+                item["volume"] < 0
+                or item["quote_volume"] <= 0
+                or item["taker_buy_quote"] < 0
+                or item["taker_buy_quote"] > item["quote_volume"] * 1.001
+            ):
+                raise MarketDataError("Invalid quote/taker-buy volume in candles CSV")
+            candles.append(item)
+
+    oi_rows: List[dict] = []
+    with open(oi_path, newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        required_oi = {"timestamp", "sumOpenInterest"}
+        missing = required_oi - set(reader.fieldnames or [])
+        if missing:
+            raise MarketDataError(f"OI CSV missing columns: {', '.join(sorted(missing))}")
+        for row in reader:
+            value = _float(row["sumOpenInterest"], "OI value")
+            if value <= 0:
+                raise MarketDataError("OI values must be positive")
+            oi_rows.append({"timestamp": int(row["timestamp"]), "sumOpenInterest": value})
+
+    if len(candles) < 22 or len(oi_rows) < 3:
+        raise MarketDataError("CSV history is too short: need at least 22 candles and 3 OI samples")
+    candle_times = [item["open_time"] for item in candles]
+    if len(set(candle_times)) != len(candle_times):
+        raise MarketDataError("Duplicate candle open_time values in CSV")
+    if any(current <= previous for previous, current in zip(candle_times, candle_times[1:])):
+        raise MarketDataError("Candles CSV rows must be in chronological order")
+    if any(
+        current["open_time"] - previous["open_time"] != INTERVAL_MS
+        for previous, current in zip(candles, candles[1:])
+    ):
+        raise MarketDataError("Candles CSV has missing or irregular 15m intervals")
+    oi_times = [item["timestamp"] for item in oi_rows]
+    if len(set(oi_times)) != len(oi_times):
+        raise MarketDataError("Duplicate OI timestamps in CSV")
+    if any(current <= previous for previous, current in zip(oi_times, oi_times[1:])):
+        raise MarketDataError("OI CSV rows must be in chronological order")
+    return candles, oi_rows
+
+
+def run_backtest_data(symbol: str, candles: List[dict], oi_rows: List[dict],
+                      fee_bps: float = DEFAULT_FEE_BPS,
+                      slippage_bps: float = DEFAULT_SLIPPAGE_BPS) -> dict:
+    aligned = align_oi(candles, oi_rows)
+    trades: List[dict] = []
+    next_available_index = 0
+    for index in range(21, len(candles) - 1):
+        if index < next_available_index or aligned[index] is None:
+            continue
+        oi_cutoff_time = candles[index]["close_time"] + 1
+        eligible = [r for r in oi_rows if int(r.get("timestamp", 0)) <= oi_cutoff_time]
+        if len(eligible) < 3:
+            continue
+        snapshot = {
+            "symbol": symbol.upper(),
+            "candles": candles[:index + 1],
+            "oi_values": aligned[index],
+            "oi_timestamp": max(int(r["timestamp"]) for r in eligible),
+            "funding_rate": 0.0,
+        }
+        signal = evaluate_snapshot(snapshot)
+        if signal is None:
+            continue
+        executable_signal = reprice_signal_for_next_open(signal, candles[index + 1]["open"])
+        trade = simulate_trade(executable_signal, candles[index + 1:], fee_bps, slippage_bps)
+        if trade is None:
+            continue
+        trade["signal_close_entry"] = signal.entry
+        trade["entry_gap_pct"] = round(
+            (executable_signal.entry / signal.entry - 1.0) * 100.0, 4
+        )
+        trades.append(trade)
+        # The next signal may be evaluated at the close of the exit candle;
+        # entry would occur on the following candle, after this trade is flat.
+        next_available_index = index + trade["bars_held"]
+
+    return {
+        "symbol": symbol.upper(),
+        "timeframe": "15m",
+        "candles": len(candles),
+        "oi_samples": len(oi_rows),
+        "history_start_ms": candles[0]["open_time"] if candles else None,
+        "history_end_ms": candles[-1]["close_time"] if candles else None,
+        "fee_bps_per_side": fee_bps,
+        "slippage_bps_per_side": slippage_bps,
+        "exit_model": "Entry at next candle open; 50% TP1 + 50% TP2; fixed stop; stop-first on same-candle ambiguity",
+        "funding_included": False,
+        "metrics": summarize(trades),
+        "trades_detail": trades,
+        "limitations": [
+            "Only closed 15m candles and OI samples timestamped no later than each signal candle are used.",
+            "Entries are modeled at the next candle open, not the signal candle close; SL/TP distances are preserved from the signal plan.",
+            "Funding is excluded from this backtest.",
+            "Fees and slippage are configurable approximations; actual fills differ.",
+        ],
+    }
+
+def run_backtest(symbol: str, fee_bps: float = DEFAULT_FEE_BPS,
+                 slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
+                 candles_csv: Optional[str] = None,
+                 oi_csv: Optional[str] = None) -> dict:
+    if bool(candles_csv) != bool(oi_csv):
+        raise MarketDataError("Both --candles-csv and --oi-csv must be supplied together")
+    if candles_csv and oi_csv:
+        candles, oi_rows = load_csv_history(candles_csv, oi_csv)
+        report = run_backtest_data(symbol, candles, oi_rows, fee_bps, slippage_bps)
+        report["data_source"] = "user_authorized_csv_export"
+        return report
+    candles, oi_rows = download_history(symbol.upper())
+    report = run_backtest_data(symbol, candles, oi_rows, fee_bps, slippage_bps)
+    report["data_source"] = "Binance USD-M Futures public API"
+    report["limitations"].extend([
+        "Binance OI statistics retain only the latest month; this run pages through that available window.",
+        "One month is still a limited sample, not robust multi-regime validation.",
+    ])
+    return report
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Backtest the 15m OI signal engine")
+    parser.add_argument("--symbol", default="BTCUSDT")
+    parser.add_argument("--fee-bps", type=float, default=DEFAULT_FEE_BPS)
+    parser.add_argument("--slippage-bps", type=float, default=DEFAULT_SLIPPAGE_BPS)
+    parser.add_argument("--output", default="oi_backtest_report.json")
+    parser.add_argument("--candles-csv", help="Authorized 15m candles CSV export")
+    parser.add_argument("--oi-csv", help="Authorized OI CSV export")
+    args = parser.parse_args()
+    try:
+        report = run_backtest(args.symbol, args.fee_bps, args.slippage_bps,
+                              args.candles_csv, args.oi_csv)
+    except MarketDataError as exc:
+        parser.exit(2, f"Backtest unavailable: {exc}\\n")
+    with open(args.output, "w", encoding="utf-8") as handle:
+        json.dump(report, handle, ensure_ascii=False, indent=2)
+    print(json.dumps({key: value for key, value in report.items() if key != "trades_detail"},
+                     ensure_ascii=False, indent=2))
+    print("Full report:", args.output)
+
+
+if __name__ == "__main__":
+    main()
