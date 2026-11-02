@@ -1514,7 +1514,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         "👀 حجم غیرعادی در کنار قیمت فشرده دیده شده؛ این فقط رصد قبل از حرکت احتمالی است، نه اثبات پامپ و نه سیگنال ورود. منتظر شکست معتبر سقف و تأیید ساختار بمان.\n"
                         "🟡━━━━━━━━━━━━━━━━━━🟡"
                     )
-                    send_message(liquidity_message)
+                    print(f"{contract}: liquidity-inflow watch retained internally; Telegram notification suppressed")
                     register_early_watch_outcome(state, contract, "LIQUIDITY_INFLOW", liquidity_signal["close"])
                     liquidity_state[contract] = {"candle_time": candle_key, "sent_at": int(time.time())}
                     counts["early_warnings_sent"] += 1
@@ -1616,7 +1616,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                             "⚠️ این هشدار فقط رسیدن/شکست سقف را اعلام می‌کند؛ نقطه ورود، حدضرر و تارگت را خودت تعیین کن.\n"
                             "🟢━━━━━━━━━━━━━━━━━━🟢"
                         )
-                        send_message(top_message)
+                        print(f"{contract}: LEG SPIKE top-break watch retained internally; Telegram notification suppressed")
                         top_state[contract] = top_key_stage1
                         print(f"{contract}: LEG SPIKE top-break watch sent at {confirmed_top:.10g}; entry still requires separate confirmation")
             except (TypeError, ValueError, KeyError, IndexError) as error:
@@ -1684,7 +1684,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 f"Funding: {funding_text} | حجم/مارکت‌کپ: {vol_mc_text}\n"
                 "⚠️ این فقط هشدار حرکت اولیه است، نه نقطه ورود. هشدار بعدی رسیدن/شکست سقف را اعلام می‌کند؛ ورود را خودت با بررسی نمودار انتخاب کن. فیبوناچی به‌تنهایی سیگنال ورود نمی‌دهد."
             )
-            send_message(early_message)
+            print(f"LEG SPIKE Stage-1 watch retained internally: {contract}; Telegram notification suppressed")
             register_early_watch_outcome(state, contract, "LEG_SPIKE_STAGE1", candles[-1]["c"])
             early_sent[contract] = early_key
             recent_early[contract] = int(time.time())
@@ -2728,7 +2728,7 @@ def scan_gateio_spot_liquidity(state, max_symbols=60):
                 f"📍 قیمت بسته‌شدن: {signal['close']:.10g}\n\n"
                 "👀 هشدار اولیه است؛ به‌تنهایی تأیید پامپ یا توصیه ورود نیست."
             )
-            send_message(message)
+            print(f"Gate.io spot liquidity watch retained internally: {symbol}; Telegram notification suppressed")
             register_combo_signal(state, symbol, "LIQUIDITY")
             alert_state[symbol] = {"candle_time": signal["candle_time"], "sent_at": now}
             sent += 1
@@ -3616,7 +3616,7 @@ def scan_oi_surge_watch(tickers, state, max_symbols=12):
                         price_change=price_change,
                         turnover=turnover,
                     )
-                    send_message(wide_message)
+                    print(f"OI SURGE wide-risk watch retained internally: {contract}; Telegram notification suppressed")
                     wide_risk_alerts[contract] = {"sent_at": now, "candle_time": candle_time, "tier": tier}
                     wide_risk_sent += 1
                     print(
@@ -3659,11 +3659,12 @@ def scan_oi_surge_watch(tickers, state, max_symbols=12):
                 f"⏳ وضعیت: {trigger_text}. ورود فقط بعد از تأیید پولبک؛ قیمت را تعقیب نکن. "
                 "این هشدار جای تأیید نسبت لانگ/شورت و فیلترهای سیگنال نهایی را نمی‌گیرد."
             )
-            send_message(message)
+            # OI SURGE is a candidate monitor, not a confirmed entry strategy.
+            # Keep its diagnostics/state but never send watch-only messages to Telegram.
             alert_state[contract] = {"sent_at": now, "candle_time": candle_time, "tier": tier}
             sent += 1
             print(
-                f"OI SURGE watch sent: {contract}; tier={tier}; "
+                f"OI SURGE watch retained internally: {contract}; tier={tier}; "
                 f"OI5m={oi5}; OI4h={oi4}; OI24h={oi24}; "
                 f"entry={entry:.10g}; stop={support:.10g}; TP1={tp1:.10g}; TP2={tp2:.10g}"
             )
@@ -3769,7 +3770,7 @@ def scan_oi_prepump_entries(tickers, state, confirmed_entries=True, max_symbols=
                                     "⚠️ پول/پوزیشن جدید و افزایش حجم دیده شده؛ احتمال حرکت وجود دارد اما جهت OI قطعی نیست. "
                                     "فعلاً فقط زیر نظر بگیر؛ ورود فقط با هشدار تأییدشده جداگانه."
                                 )
-                                send_message(watch_message)
+                                print(f"OI PRE-PUMP watch retained internally: {contract}; Telegram notification suppressed")
                                 watch_alerts[contract] = {
                                     "candle_time": str(watch["candle_time"]),
                                     "sent_at": now,
