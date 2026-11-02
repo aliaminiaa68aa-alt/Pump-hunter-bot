@@ -39,7 +39,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     ratio = metrics.get("long_short_ratio")
     long_liq, short_liq = metrics.get("long_liquidations"), metrics.get("short_liquidations")
     return (
-        format_signal(signal) + "\n\nتأیید مستقل Coinalyze"
+        format_signal(signal) + "\n\nتأیید مرحله دوم Coinalyze"
         + f"\nتغییر OI: {metrics['oi_change_15m_window_pct']:+.2f}%"
         + f"\nنسبت خرید تهاجمی: {metrics['taker_buy_ratio']:.1%}"
         + f"\nFunding: {pct(metrics.get('funding_rate'))}"
