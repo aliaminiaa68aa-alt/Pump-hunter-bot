@@ -54,6 +54,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             metrics = None
             try:
                 snapshot = fetch_snapshot(symbol)
+                record["data_source"] = "Binance Futures API"
             except requests.HTTPError as exc:
                 if exc.response is None or exc.response.status_code != 451:
                     raise
