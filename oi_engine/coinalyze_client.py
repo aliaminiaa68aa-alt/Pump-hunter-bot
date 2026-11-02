@@ -213,9 +213,16 @@ class CoinalyzeClient:
                         close_price = float(row["c"])
                         volume = float(row["v"])
                         buy_volume = float(row["bv"])
-                        if min(open_price, high_price, low_price, close_price, volume) <= 0:
+                        values = (open_price, high_price, low_price, close_price, volume, buy_volume)
+                        if (not all(__import__("math").isfinite(value) for value in values)
+                                or min(open_price, high_price, low_price, close_price, volume) <= 0
+                                or buy_volume < 0 or buy_volume > volume):
                             valid_candles = False
                             break
+                        # Coinalyze OHLCV exposes base-asset volume, not quote turnover.
+                        # Estimate quote volume with OHLC typical price; do not pretend
+                        # that close*volume is the exact traded quote volume.
+                        typical_price = (open_price + high_price + low_price + close_price) / 4.0
                     except (KeyError, TypeError, ValueError):
                         valid_candles = False
                         break
@@ -227,8 +234,8 @@ class CoinalyzeClient:
                         "low": low_price,
                         "close": close_price,
                         "volume": volume,
-                        "quote_volume": volume * close_price,
-                        "taker_buy_quote": buy_volume * close_price,
+                        "quote_volume": volume * typical_price,
+                        "taker_buy_quote": buy_volume * typical_price,
                         "close_time": open_ms + 15 * 60 * 1000 - 1,
                     })
                 oi_values = [float(oi_by_time[int(row["t"])]["c"]) for row in aligned]
