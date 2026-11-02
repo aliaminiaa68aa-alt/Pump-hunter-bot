@@ -22,4 +22,4 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m pip install --disable-pip-version-check requests
-      - run: python -m unittest tests.test_oi_coinalyze_client -v
+      - run: python -m unittest discover -s tests -p "test_oi_coinalyze_client.py" -v
