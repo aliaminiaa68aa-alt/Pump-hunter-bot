@@ -2141,7 +2141,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                             f"🛑 حد ضرر: {stop_price:.10g} (۱٪ زیر کف جاروب؛ ریسک {risk_pct:.2f}٪)\n"
                             f"🎯 تارگت: سقف موج {target_price:.10g}\n"
                             f"⚖️ ریسک به بازده تا سقف موج: ۱:{risk_reward:.2f} (حداقل مجاز ۱:۲)\n"
-                            f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x | ارزش OI: ${live_oi:,.0f} | رشد OI چهار‌ساعته: {metrics['oi_change4h']:+.2f}%\n"
+                            f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x ({'عبور کامل' if volume_mc >= FIB_FULL_VOLUME_TO_MARKET_CAP else 'عبور مشروط؛ همه فیلترهای دیگر پاس شده'}) | ارزش OI: ${live_oi:,.0f} | رشد OI چهار‌ساعته: {metrics['oi_change4h']:+.2f}%\n"
                             f"💸 Funding: {live_funding * 100:+.4f}% | {ratio_text}\n"
                             "✅ ورود فقط پس از سوئیپ نقدینگی و بسته‌شدن کندل ۱۵دقیقه بالای سطح بازیابی فیبو صادر می‌شود.\n"
                             "⚠️ سیگنال الگوریتمی است و برگشت را تضمین نمی‌کند؛ ریسک معامله را محدود نگه دار.\n"
@@ -2233,7 +2233,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         f"نسبت لانگ CoinAlayze: ۱ساعت {metrics['long1h']:.1f}% | روزانه {metrics['long1d']:.1f}%\n"
                         f"{daily_warning}\n"
                         f"{spike_metric_text(metrics)}\n"
-                        f"Funding مؤثر برای فیلتر: {alert_funding * 100:+.4f}% | OI مؤثر: {alert_oi / market_cap:.2%} از مارکت‌کپ\n"
+                        f"حجم/مارکت‌کپ: {volume_mc:.2f}x ({'عبور کامل' if volume_mc >= FIB_FULL_VOLUME_TO_MARKET_CAP else 'عبور مشروط؛ همه فیلترهای دیگر پاس شده'})\n"
+                        f"Funding مؤثر برای فیلتر: {alert_funding * 100:+.4f}% | OI مؤثر: ${alert_oi:,.0f}\n"
                         f"نسبت سود به ریسک تا سقف: {reward / risk:.2f}:1\n"
                         "⚠️ همه فیلترهای داده‌ای موجود و معتبرند؛ هشدار الگوریتمی است و ورود تضمینی نیست."
                     )
