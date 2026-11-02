@@ -163,7 +163,7 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
     aligned_rows = aligned_rows[-3:]
     validate_oi_cadence(aligned_rows)
     oi_values = [
-        _float(x.get("sumOpenInterestValue"), "OI value")
+        _float(x.get("sumOpenInterest"), "OI value")
         for x in aligned_rows
     ]
     if any(x <= 0 for x in oi_values):
