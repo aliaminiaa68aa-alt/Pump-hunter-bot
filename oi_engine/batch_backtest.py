@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from .backtest import (
@@ -21,13 +22,20 @@ def run_batch_backtest(
     fee_bps: float = DEFAULT_FEE_BPS,
     slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> dict:
+    for label, value in (("fee_bps", fee_bps), ("slippage_bps", slippage_bps)):
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"{label} must be a finite non-negative number")
+
+    normalized_symbols = [item.upper().strip() for item in symbols]
+    if len(set(normalized_symbols)) != len(normalized_symbols):
+        raise ValueError("Duplicate symbols are not allowed in a batch")
+
     root = Path(data_dir)
     reports: dict[str, dict] = {}
     failures: dict[str, str] = {}
     pooled_trades: list[dict] = []
 
-    for raw_symbol in symbols:
-        symbol = raw_symbol.upper().strip()
+    for symbol in normalized_symbols:
         if not symbol.endswith("USDT") or not symbol[:-4].isalnum():
             failures[symbol] = "Symbol must be a USDT perpetual"
             continue
@@ -61,7 +69,7 @@ def run_batch_backtest(
 
     return {
         "timeframe": "15m",
-        "symbols_requested": [item.upper().strip() for item in symbols],
+        "symbols_requested": normalized_symbols,
         "symbols_succeeded": list(reports),
         "symbols_failed": failures,
         "per_symbol": reports,
@@ -92,7 +100,12 @@ def main() -> None:
     parser.add_argument("--slippage-bps", type=float, default=DEFAULT_SLIPPAGE_BPS)
     parser.add_argument("--output", default="./oi-data/batch_backtest_report.json")
     args = parser.parse_args()
-    report = run_batch_backtest(args.symbols, args.data_dir, args.fee_bps, args.slippage_bps)
+    try:
+        report = run_batch_backtest(
+            args.symbols, args.data_dir, args.fee_bps, args.slippage_bps
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
