@@ -202,11 +202,17 @@ class CoinalyzeClient:
             if previous_oi > 0 and new_oi > 0:
                 oi_change_pct = (new_oi / previous_oi - 1.0) * 100.0
         if len(closed_ohlcv) >= 22 and len(aligned) >= 3:
+            latest_aligned_time = int(aligned[-1]["t"])
             aligned = aligned[-3:]
             if cadence_ok:
                 parsed_candles = []
                 valid_candles = True
-                for row in closed_ohlcv:
+                # Never pair a newer OHLCV candle with an older OI observation.
+                common_closed_ohlcv = [
+                    row for row in closed_ohlcv
+                    if int(row["t"]) <= latest_aligned_time
+                ]
+                for row in common_closed_ohlcv:
                     try:
                         open_price = float(row["o"])
                         high_price = float(row["h"])
@@ -254,9 +260,10 @@ class CoinalyzeClient:
                         ),
                     }
 
-        latest_closed_ohlcv = closed_ohlcv[-1] if closed_ohlcv else {}
-        total_volume = float(latest_closed_ohlcv.get("v", 0) or 0)
-        buy_volume = float(latest_closed_ohlcv.get("bv", 0) or 0)
+        # Taker flow must refer to the same latest closed candle that has aligned OI.
+        latest_aligned_ohlcv = aligned[-1] if aligned else {}
+        total_volume = float(latest_aligned_ohlcv.get("v", 0) or 0)
+        buy_volume = float(latest_aligned_ohlcv.get("bv", 0) or 0)
         taker_buy_ratio = buy_volume / total_volume if total_volume > 0 else None
 
         return {
