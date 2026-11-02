@@ -60,11 +60,14 @@ def main() -> None:
         send_telegram(token, chat_id, format_signal(signal))
         state[key] = candle_id
         sent += 1
+        # Persist immediately after each confirmed Telegram delivery. If a later
+        # message fails, already-delivered signals won't be sent again next run.
+        save_state(state)
 
     # Retain only the latest 500 symbol/direction records.
     if len(state) > 500:
         state = dict(sorted(state.items(), key=lambda item: item[1])[-500:])
-    save_state(state)
+        save_state(state)
     print(f"OI scan complete: candidates={len(signals)}, telegram_sent={sent}")
 
 
