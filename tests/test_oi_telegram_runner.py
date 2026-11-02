@@ -65,6 +65,29 @@ class TelegramRunnerTests(unittest.TestCase):
             self.assertIn("TESTUSDT", saved["symbols"])
             poll.assert_called_once()
 
+    def test_ingested_alerts_are_persisted_before_scanning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "sent_signals.json"
+            watch_path = Path(directory) / "watchlist.json"
+            env = {"BOT_TOKEN": "token", "CHAT_ID": "chat", "COINALYZE_API_KEY": "key"}
+            def ingest(channel, cursor, watchlist, **kwargs):
+                watchlist["NEWUSDT"] = {"status": "در حال رصد", "last_alert": 2000000}
+                return 123, 1
+            def scan(batch, client=None):
+                saved = json.loads(watch_path.read_text(encoding="utf-8"))
+                self.assertEqual(saved["public_channel_last_id"], 123)
+                self.assertIn("NEWUSDT", saved["symbols"])
+                return [], batch
+            with patch.object(telegram_runner, "STATE_PATH", state_path), \
+                 patch.object(telegram_runner, "WATCHLIST_PATH", watch_path), \
+                 patch.dict(os.environ, env), \
+                 patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
+                 patch.object(telegram_runner, "poll_public_channel_alerts", side_effect=ingest), \
+                 patch.object(telegram_runner, "scan_watchlist", side_effect=scan), \
+                 patch.object(telegram_runner, "send_telegram"), \
+                 patch.object(telegram_runner.time, "time", return_value=2000000):
+                telegram_runner.main()
+
     def test_duplicate_closed_candle_signal_is_not_resent(self):
         with tempfile.TemporaryDirectory() as directory:
             _, _, _, send = self._run_main(
