@@ -150,7 +150,8 @@ def simulate_trade(signal: Any, future_candles: List[dict],
             # old stop price; use the opening price, including adverse gap size.
             if stop_gap:
                 if first_target_hit:
-                    gross_r += 0.5 * (-1.0 if side == "LONG" else -1.0)
+                    direction = 1.0 if side == "LONG" else -1.0
+                    gross_r += 0.5 * direction * (opening - entry) / risk
                     exit_reason = "gap_stop_after_tp1"
                 else:
                     gross_r = -abs(opening - entry) / risk
