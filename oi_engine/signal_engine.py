@@ -215,8 +215,12 @@ def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
     if avg_volume <= 0 or float(last["close"]) <= 0:
         return ["حجم مبنا یا قیمت معتبر نیست"]
     last_volume = float(last["quote_volume"])
+    taker_buy_quote = float(last["taker_buy_quote"])
+    if (not math.isfinite(last_volume) or not math.isfinite(taker_buy_quote)
+            or last_volume <= 0 or taker_buy_quote < 0 or taker_buy_quote > last_volume):
+        return ["داده جریان خرید نامعتبر است؛ نسبت خرید تهاجمی باید بین 0 تا 100٪ باشد"]
     volume_ratio = last_volume / avg_volume
-    taker_ratio = (float(last["taker_buy_quote"]) / last_volume) if last_volume > 0 else 0.5
+    taker_ratio = taker_buy_quote / last_volume
     oi_change = (float(oi_values[-1]) / float(oi_values[-2]) - 1.0) * 100
     price_change = (float(last["close"]) / float(previous["close"]) - 1.0) * 100
     prior = candles[-6:-1]
@@ -273,11 +277,13 @@ def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
     if avg_quote_volume <= 0:
         return None
 
-    volume_ratio = last["quote_volume"] / avg_quote_volume
-    taker_ratio = (
-        last["taker_buy_quote"] / last["quote_volume"]
-        if last["quote_volume"] > 0 else 0.5
-    )
+    last_volume = last["quote_volume"]
+    taker_buy_quote = last["taker_buy_quote"]
+    if (not math.isfinite(last_volume) or not math.isfinite(taker_buy_quote)
+            or last_volume <= 0 or taker_buy_quote < 0 or taker_buy_quote > last_volume):
+        return None
+    volume_ratio = last_volume / avg_quote_volume
+    taker_ratio = taker_buy_quote / last_volume
     oi_change = (oi_values[-1] / oi_values[-2] - 1.0) * 100
     price_change = (last["close"] / previous["close"] - 1.0) * 100
     atr = _atr(candles)
