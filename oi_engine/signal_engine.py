@@ -406,5 +406,5 @@ def format_signal(signal: Signal) -> str:
         f"نسبت خرید تهاجمی: {signal.taker_buy_ratio:.1%}\n"
         f"حجم نسبت به میانگین: {signal.volume_ratio:.2f}x\n"
         f"Funding: {signal.funding_rate:.5%}\n"
-        f"امتیاز شرایط: {signal.confidence}/100"
+        f"امتیاز فنی: {signal.confidence}/100 (درصد احتمال برد نیست)"
     )
