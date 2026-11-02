@@ -269,21 +269,45 @@ def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
 
 
 def scan(symbols: Optional[List[str]] = None, max_symbols: int = 120) -> List[Signal]:
-    """Scan a bounded symbol list; failed symbols are skipped, never fabricated."""
+    """Scan a bounded symbol list and fail visibly if no market data is usable."""
     universe = symbols if symbols is not None else get_active_symbols()
+    selected = universe[:max_symbols]
     results: List[Signal] = []
-    for symbol in universe[:max_symbols]:
+    successful_snapshots = 0
+    skipped = 0
+    error_samples: List[str] = []
+    for symbol in selected:
         try:
             snapshot = fetch_snapshot(symbol)
+            successful_snapshots += 1
             signal = evaluate_snapshot(snapshot)
             if signal is not None:
                 results.append(signal)
-        except (requests.RequestException, MarketDataError, KeyError, TypeError, ValueError):
-            continue
-        except Exception:
-            # A single malformed market response must not stop the entire scan.
-            continue
+        except (requests.RequestException, MarketDataError, KeyError, TypeError, ValueError) as exc:
+            skipped += 1
+            if len(error_samples) < 3:
+                error_samples.append(f"{symbol}: {type(exc).__name__}: {exc}")
+        except Exception as exc:
+            # Keep a malformed symbol from stopping the scan, but retain diagnostics.
+            skipped += 1
+            if len(error_samples) < 3:
+                error_samples.append(f"{symbol}: unexpected {type(exc).__name__}: {exc}")
         time.sleep(0.03)
+
+    print(
+        f"OI market-data scan: attempted={len(selected)}, "
+        f"usable_snapshots={successful_snapshots}, skipped={skipped}, "
+        f"confirmed_signals={len(results)}"
+    )
+    for detail in error_samples:
+        print(f"OI scan diagnostic: {detail}")
+
+    if selected and successful_snapshots == 0:
+        details = "; ".join(error_samples) or "No usable market-data response"
+        raise MarketDataError(
+            f"All {len(selected)} market-data requests failed; refusing to report "
+            f"an empty signal scan as a valid no-signal result. Details: {details}"
+        )
     return sorted(results, key=lambda item: item.confidence, reverse=True)
 
 
