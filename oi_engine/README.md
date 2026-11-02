@@ -35,7 +35,9 @@ The scanner is configured to run every five minutes and evaluates closed 15-minu
 
 - Market data is currently sourced from Binance USD-M Futures public endpoints.
 - The OI history endpoint is sampled data; it is not a tick-by-tick liquidation or order-flow feed. The signal engine measures percentage change in `sumOpenInterest` (open-contract quantity), not `sumOpenInterestValue` (USD notional), so ordinary price movement does not mechanically inflate the OI-growth filter. Binance timestamps OI statistics at the end of each period; alignment accounts for the one-millisecond difference between the inclusive kline close time and the next 15m boundary.
-- The engine has unit tests, but no historical backtest, paper-trading validation, or live Telegram delivery has yet been confirmed.
+- The Coinalyze OHLCV endpoint supplies base-asset volume (and base-asset taker-buy volume), not exact quote-currency turnover. The HTTP 451 fallback therefore estimates quote volume as base volume multiplied by OHLC typical price (O+H+L+C)/4. This is an approximation, not exchange-reported quote turnover; the 1.15x relative-volume filter remains an estimate on this fallback path. The buy-flow ratio is unaffected by the common price multiplier. The Binance path continues to use Binance's reported quote volume and taker-buy quote volume.
+
+The engine has unit tests, but no historical backtest, paper-trading validation, or live Telegram delivery has yet been confirmed.
 - A rule score is not a statistical probability. Do not treat it as a win-rate estimate.
 
 
