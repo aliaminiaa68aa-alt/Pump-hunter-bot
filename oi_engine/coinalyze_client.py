@@ -161,7 +161,8 @@ class CoinalyzeClient:
         }), market_symbol)
 
         oi_hist = self._history("open-interest-history", market_symbol, start, end)
-        funding_hist = self._history("funding-rate-history", market_symbol, start, end)
+        # Historical funding is not used by entry confirmation or Telegram output.
+        # Skip this endpoint to reserve API quota for scanning more watchlist symbols.
         lsr_hist = self._history("long-short-ratio-history", market_symbol, start, end)
         liquidation_hist = self._history("liquidation-history", market_symbol, start, end)
         ohlcv_hist = self._history("ohlcv-history", market_symbol, start, end)
@@ -294,7 +295,6 @@ class CoinalyzeClient:
             "taker_buy_ratio": taker_buy_ratio,
             "data_quality": {
                 "oi_history_points": len(oi_hist),
-                "funding_history_points": len(funding_hist),
                 "long_short_history_points": len(lsr_hist),
                 "liquidation_history_points": len(liquidation_hist),
                 "ohlcv_history_points": len(ohlcv_hist),
