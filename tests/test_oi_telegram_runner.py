@@ -33,7 +33,7 @@ class TelegramRunnerTests(unittest.TestCase):
             with patch.object(telegram_runner, "STATE_PATH", state_path), \
                  patch.object(telegram_runner, "WATCHLIST_PATH", watch_path), \
                  patch.dict(os.environ, {"BOT_TOKEN":"token","CHAT_ID":"chat","COINALYZE_API_KEY":"key"}), \
-                 patch.object(telegram_runner, "poll_forwarded_alerts", return_value=(1,0)), \
+                 patch.object(telegram_runner, "poll_forwarded_alerts", return_value=(1,0,False)), \
                  patch.object(telegram_runner, "scan_watchlist", return_value=([(sample_signal(),sample_metrics())], {"TESTUSDT":{"status":"تأیید LONG"}})), \
                  patch.object(telegram_runner, "send_telegram") as send:
                 telegram_runner.main()
@@ -46,7 +46,7 @@ class TelegramRunnerTests(unittest.TestCase):
             with patch.object(telegram_runner, "STATE_PATH", state_path), \
                  patch.object(telegram_runner, "WATCHLIST_PATH", watch_path), \
                  patch.dict(os.environ, {"BOT_TOKEN":"token","CHAT_ID":"chat","COINALYZE_API_KEY":"key"}), \
-                 patch.object(telegram_runner, "poll_forwarded_alerts", return_value=(2,1)), \
+                 patch.object(telegram_runner, "poll_forwarded_alerts", return_value=(2,1,False)), \
                  patch.object(telegram_runner, "scan_watchlist", return_value=([(sample_signal(),sample_metrics())], {"TESTUSDT":{"status":"تأیید LONG"}})), \
                  patch.object(telegram_runner, "send_telegram") as send:
                 telegram_runner.main()
@@ -70,6 +70,16 @@ class TelegramRunnerTests(unittest.TestCase):
             "NEWUSDT":{"last_alert":now-10},
         },now=now)
         self.assertEqual(list(kept),["NEWUSDT"])
+
+    def test_telegram_status_command_is_detected(self):
+        response = type("Response", (), {"raise_for_status": lambda self: None,
+            "json": lambda self: {"ok": True, "result": [{"update_id": 5,
+                "message": {"date": 1000, "text": "/status"}}]}})()
+        with patch("oi_engine.telegram_runner.requests.get", return_value=response):
+            offset, added, status = telegram_runner.poll_forwarded_alerts("token",0,{},now=1000)
+        self.assertEqual(offset,6)
+        self.assertEqual(added,0)
+        self.assertTrue(status)
 
 
 if __name__ == "__main__":
