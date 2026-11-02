@@ -292,8 +292,8 @@ def download_history(symbol: str) -> tuple[List[dict], List[dict]]:
     start_time -= start_time % interval_ms
 
     def get_page(path: str, params: dict) -> list:
-        response = session.get(base + path, params=params, timeout=20)
         try:
+            response = session.get(base + path, params=params, timeout=20)
             response.raise_for_status()
         except requests.HTTPError as exc:
             if response.status_code == 451:
@@ -302,8 +302,19 @@ def download_history(symbol: str) -> tuple[List[dict], List[dict]]:
                     "No historical data was downloaded; run from a network where this "
                     "market-data service is legally available, or provide an authorized data export."
                 ) from exc
-            raise
-        payload = response.json()
+            raise MarketDataError(
+                f"Binance history request failed for {path}: HTTP {response.status_code}"
+            ) from exc
+        except requests.RequestException as exc:
+            raise MarketDataError(
+                f"Binance history request failed for {path}: {exc}"
+            ) from exc
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise MarketDataError(
+                f"Binance returned invalid JSON for {path}"
+            ) from exc
         if not isinstance(payload, list):
             raise MarketDataError("Unexpected Binance history response")
         return payload
