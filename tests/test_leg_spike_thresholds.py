@@ -4,8 +4,16 @@ import Bot
 
 
 class LegSpikeThresholdTests(unittest.TestCase):
-    def test_volume_to_market_cap_conditional_floor_is_1_8x(self):
-        self.assertEqual(Bot.FIB_MIN_VOLUME_TO_MARKET_CAP, 1.8)
+    def test_volume_to_market_cap_is_quality_metric_not_hard_veto(self):
+        self.assertEqual(Bot.FIB_MIN_VOLUME_TO_MARKET_CAP, 0.0)
+
+    def test_volume_quality_tiers(self):
+        self.assertEqual(Bot.leg_spike_volume_tier(2.0), "FULL")
+        self.assertEqual(Bot.leg_spike_volume_tier(1.2), "STRONG")
+        self.assertEqual(Bot.leg_spike_volume_tier(0.7), "MODERATE")
+        self.assertEqual(Bot.leg_spike_volume_tier(0.3), "LOW")
+        self.assertEqual(Bot.leg_spike_volume_tier(0), "INVALID")
+        self.assertEqual(Bot.leg_spike_volume_tier(None), "UNAVAILABLE")
 
     def test_full_volume_tier_starts_at_2x(self):
         self.assertEqual(Bot.FIB_FULL_VOLUME_TO_MARKET_CAP, 2.0)
