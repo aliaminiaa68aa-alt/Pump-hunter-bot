@@ -176,6 +176,71 @@ class CoinalyzeClient:
         last_liq = liquidation_hist[-1] if liquidation_hist else {}
         last_ohlcv = ohlcv_hist[-1] if ohlcv_hist else {}
 
+        # Build a closed 15m snapshot from Coinalyze OHLCV + OI history.
+        # This is also the fallback when Binance public futures endpoints return HTTP 451.
+        market_snapshot = None
+        oi_by_time = {
+            int(row.get("t", 0)): row for row in oi_hist
+            if row.get("t") is not None and row.get("c") is not None
+        }
+        closed_ohlcv = sorted(
+            (row for row in ohlcv_hist
+             if row.get("t") is not None and int(row["t"]) + 15 * 60 <= end),
+            key=lambda row: int(row["t"]),
+        )
+        aligned = [
+            row for row in closed_ohlcv if int(row["t"]) in oi_by_time
+        ]
+        if len(closed_ohlcv) >= 22 and len(aligned) >= 3:
+            aligned = aligned[-3:]
+            cadence_ok = all(
+                int(b["t"]) - int(a["t"]) == 15 * 60
+                for a, b in zip(aligned, aligned[1:])
+            )
+            if cadence_ok:
+                parsed_candles = []
+                valid_candles = True
+                for row in closed_ohlcv:
+                    try:
+                        open_price = float(row["o"])
+                        high_price = float(row["h"])
+                        low_price = float(row["l"])
+                        close_price = float(row["c"])
+                        volume = float(row["v"])
+                        buy_volume = float(row["bv"])
+                        if min(open_price, high_price, low_price, close_price, volume) <= 0:
+                            valid_candles = False
+                            break
+                    except (KeyError, TypeError, ValueError):
+                        valid_candles = False
+                        break
+                    open_ms = int(row["t"]) * 1000
+                    parsed_candles.append({
+                        "open_time": open_ms,
+                        "open": open_price,
+                        "high": high_price,
+                        "low": low_price,
+                        "close": close_price,
+                        "volume": volume,
+                        "quote_volume": volume * close_price,
+                        "taker_buy_quote": buy_volume * close_price,
+                        "close_time": open_ms + 15 * 60 * 1000 - 1,
+                    })
+                oi_values = [float(oi_by_time[int(row["t"])]["c"]) for row in aligned]
+                if valid_candles and all(value > 0 for value in oi_values):
+                    last_oi_time = int(aligned[-1]["t"])
+                    market_snapshot = {
+                        "symbol": binance_symbol,
+                        "candles": parsed_candles,
+                        "oi_values": oi_values,
+                        "oi_timestamp": (last_oi_time + 15 * 60) * 1000 - 1,
+                        "funding_rate": (
+                            float(current_funding["value"])
+                            if current_funding and current_funding.get("value") is not None
+                            else 0.0
+                        ),
+                    }
+
         total_volume = float(last_ohlcv.get("v", 0) or 0)
         buy_volume = float(last_ohlcv.get("bv", 0) or 0)
         taker_buy_ratio = buy_volume / total_volume if total_volume > 0 else None
@@ -183,6 +248,7 @@ class CoinalyzeClient:
         return {
             "provider": "Coinalyze",
             "binance_symbol": binance_symbol,
+            "market_snapshot": market_snapshot,
             "market_symbol": market_symbol,
             "as_of": end,
             "current_open_interest_usd": (
