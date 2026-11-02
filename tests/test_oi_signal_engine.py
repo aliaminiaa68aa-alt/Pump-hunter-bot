@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from oi_engine.signal_engine import evaluate_snapshot, scan, MarketDataError
+from oi_engine.signal_engine import evaluate_snapshot, scan, MarketDataError, validate_oi_cadence
 
 
 def make_snapshot(side="LONG"):
@@ -57,6 +57,21 @@ class SignalEngineTests(unittest.TestCase):
         self.assertEqual(signal.side, "SHORT")
         self.assertGreater(signal.stop_loss, signal.entry)
         self.assertLess(signal.take_profit_2, signal.take_profit_1)
+
+    def test_live_oi_cadence_requires_exact_15m_intervals(self):
+        valid = [
+            {"timestamp": 0},
+            {"timestamp": 900000},
+            {"timestamp": 1800000},
+        ]
+        validate_oi_cadence(valid)
+        irregular = [
+            {"timestamp": 0},
+            {"timestamp": 600000},
+            {"timestamp": 1200000},
+        ]
+        with self.assertRaisesRegex(MarketDataError, "exact 15m cadence"):
+            validate_oi_cadence(irregular)
 
     def test_no_signal_without_oi_growth(self):
         snapshot = make_snapshot("LONG")
