@@ -51,8 +51,10 @@ than each signal candle. Entries are modeled at the next candle open (not the
 signal candle close), while preserving the planned stop distance and 1R/2R
 targets; the report records the entry gap. It does not stack positions in the
 same symbol. Exits assume 50% at TP1 and 50% at TP2, with a fixed stop; if stop and target
-are both touched in one OHLC candle, stop is counted first. Historical funding
-is excluded. Binance's OI history endpoint is capped at 500 samples in this
+are both touched intrabar in one OHLC candle, stop is counted first. Opening
+gaps are processed before intrabar highs/lows: adverse stop gaps fill at the
+worse opening price, and favorable target gaps receive opening-price
+improvement. Historical funding is excluded. Binance's OI history endpoint is capped at 500 samples in this
 implementation, so this is only a short recent sample and must not be presented
 as a robust long-term win rate. Run multiple symbols and longer, independently
 collected data before drawing conclusions.
