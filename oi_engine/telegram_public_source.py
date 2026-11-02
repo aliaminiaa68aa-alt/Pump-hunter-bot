@@ -132,6 +132,10 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
                 print(f"WARNING: market validation failed for {symbol}: {type(exc).__name__}: {exc}")
                 break
         existing = watchlist.get(symbol, {})
+        print(
+            f"Public Telegram OI alert parsed: message_id={post['message_id']} "
+            f"symbol={symbol} already_watched={bool(existing)}"
+        )
         watchlist[symbol] = {
             **existing,
             "first_seen": existing.get("first_seen", post["date"]),
