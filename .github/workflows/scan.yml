@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: pump-hunter-scan
-      cancel-in-progress: true
+      cancel-in-progress: false
     timeout-minutes: 5
     steps:
       - name: Checkout
