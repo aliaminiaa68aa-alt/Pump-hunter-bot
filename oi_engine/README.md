@@ -117,3 +117,20 @@ win-rate or performance conclusion can be drawn from that run. Run the command
 from a network where Binance USD-M public market data is legally available,
 or use an authorized historical export. Do not route requests through an
 unofficial third-party mirror to bypass geographic restrictions.
+
+### Batch backtest across exported symbols
+
+After exporting several markets into the same directory, run:
+
+```bash
+python -m oi_engine.batch_backtest \
+  --symbols BTCUSDT ETHUSDT SOLUSDT BNBUSDT XRPUSDT \
+  --data-dir ./oi-data \
+  --output ./oi-data/batch_backtest_report.json
+```
+
+The report includes per-symbol metrics and a pooled equal-risk R-multiple
+summary. The pooled summary is **not** a portfolio equity curve: it does not
+model simultaneous positions, shared capital, or portfolio-level exposure.
+Symbols with missing or invalid CSV pairs are listed under
+`symbols_failed`; other symbols continue independently.
