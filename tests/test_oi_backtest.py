@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
-from oi_engine.backtest import align_oi, load_csv_history, simulate_trade, summarize
+from oi_engine.backtest import align_oi, load_csv_history, reprice_signal_for_next_open, simulate_trade, summarize
 from oi_engine.signal_engine import MarketDataError
 
 
@@ -40,6 +40,26 @@ class BacktestTests(unittest.TestCase):
             {"timestamp": 1200000, "sumOpenInterest": "102"},
         ]
         self.assertIsNone(align_oi(candle, rows)[0])
+
+    def test_entry_is_repriced_to_next_candle_open_preserving_risk(self):
+        signal = SimpleNamespace(
+            symbol="XUSDT", side="LONG", entry=100.0, stop_loss=98.0,
+            take_profit_1=102.0, take_profit_2=104.0, candle_close_time=1
+        )
+        executable = reprice_signal_for_next_open(signal, 101.0)
+        self.assertEqual(executable.entry, 101.0)
+        self.assertEqual(executable.stop_loss, 99.0)
+        self.assertEqual(executable.take_profit_1, 103.0)
+        self.assertEqual(executable.take_profit_2, 105.0)
+        self.assertEqual(signal.entry, 100.0)
+
+    def test_next_open_repricing_rejects_invalid_price(self):
+        signal = SimpleNamespace(
+            symbol="XUSDT", side="LONG", entry=100.0, stop_loss=98.0,
+            take_profit_1=102.0, take_profit_2=104.0, candle_close_time=1
+        )
+        with self.assertRaisesRegex(MarketDataError, "positive"):
+            reprice_signal_for_next_open(signal, 0.0)
 
     def test_stop_wins_when_stop_and_target_touch_same_bar(self):
         signal = SimpleNamespace(
