@@ -1,12 +1,9 @@
 name: Pump Hunter
 
 on:
-  push:
-    branches:
-      - main
+  # Legacy Pump Hunter scan is intentionally manual-only; the standalone OI
+  # + Coinalyze watchlist workflow owns automated scanning now.
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
