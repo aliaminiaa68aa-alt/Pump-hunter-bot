@@ -158,5 +158,46 @@ class BacktestTests(unittest.TestCase):
             with self.assertRaises(MarketDataError):
                 load_csv_history(str(candles_path), str(oi_path))
 
+    def test_csv_loader_rejects_out_of_order_candles_and_oi(self):
+        with tempfile.TemporaryDirectory() as directory:
+            candles_path = Path(directory) / "candles.csv"
+            oi_path = Path(directory) / "oi.csv"
+            candle_fields = ["open_time", "close_time", "open", "high", "low", "close",
+                             "volume", "quote_volume", "taker_buy_quote"]
+            candle_rows = [{
+                "open_time": i * 900000, "close_time": (i + 1) * 900000 - 1,
+                "open": 100, "high": 101, "low": 99, "close": 100,
+                "volume": 10, "quote_volume": 1000, "taker_buy_quote": 520,
+            } for i in range(22)]
+            candle_rows[0], candle_rows[1] = candle_rows[1], candle_rows[0]
+            with candles_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=candle_fields)
+                writer.writeheader()
+                writer.writerows(candle_rows)
+            with oi_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterestValue"])
+                writer.writeheader()
+                for i in range(22):
+                    writer.writerow({"timestamp": i * 900000, "sumOpenInterestValue": 1000 + i})
+            with self.assertRaisesRegex(MarketDataError, "chronological order"):
+                load_csv_history(str(candles_path), str(oi_path))
+
+            # Restore candles and independently verify OI ordering.
+            candle_rows.reverse()
+            with candles_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=candle_fields)
+                writer.writeheader()
+                writer.writerows(candle_rows)
+            oi_rows = [{"timestamp": i * 900000, "sumOpenInterestValue": 1000 + i}
+                       for i in range(22)]
+            oi_rows[0], oi_rows[1] = oi_rows[1], oi_rows[0]
+            with oi_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterestValue"])
+                writer.writeheader()
+                writer.writerows(oi_rows)
+            with self.assertRaisesRegex(MarketDataError, "chronological order"):
+                load_csv_history(str(candles_path), str(oi_path))
+
+
 if __name__ == "__main__":
     unittest.main()
