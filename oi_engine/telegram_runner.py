@@ -66,10 +66,14 @@ def send_telegram(token: str, chat_id: str, message: str) -> None:
 
 def poll_forwarded_alerts(token: str, offset: int, watchlist: Dict[str, Any],
                           now: int | None = None) -> Tuple[int, int, bool]:
-    """Poll messages explicitly forwarded by the user to this bot."""
+    """Poll forwarded alerts and direct posts from channels the bot has joined."""
     response = requests.get(
         f"https://api.telegram.org/bot{token}/getUpdates",
-        params={"offset": offset, "timeout": 0, "allowed_updates": json.dumps(["message"])},
+        params={
+            "offset": offset,
+            "timeout": 0,
+            "allowed_updates": json.dumps(["message", "channel_post"]),
+        },
         timeout=15,
     )
     response.raise_for_status()
@@ -88,9 +92,10 @@ def poll_forwarded_alerts(token: str, offset: int, watchlist: Dict[str, Any],
     for update in payload.get("result", []):
         update_id = int(update.get("update_id", -1))
         next_offset = max(next_offset, update_id + 1)
-        message = update.get("message") or {}
-        message_text = message.get("text") or ""
-        if isinstance(message_text, str) and message_text.strip().split("@")[0] in ("/status", "/watchlist"):
+        is_channel_post = isinstance(update.get("channel_post"), dict)
+        message = update.get("channel_post") or update.get("message") or {}
+        message_text = message.get("text") or message.get("caption") or ""
+        if not is_channel_post and isinstance(message_text, str) and message_text.strip().split("@")[0] in ("/status", "/watchlist"):
             status_requested = True
         symbol = parse_forwarded_oi_alert(update)
         if not symbol:
@@ -105,7 +110,7 @@ def poll_forwarded_alerts(token: str, offset: int, watchlist: Dict[str, Any],
             **existing,
             "first_seen": existing.get("first_seen", alert_time),
             "last_alert": alert_time,
-            "source": "forwarded_telegram_oi_alert",
+            "source": "telegram_channel_post" if is_channel_post else "forwarded_telegram_oi_alert",
             "source_update_id": update_id,
             "source_chat_id": (message.get("chat") or {}).get("id"),
             "source_message_id": message.get("message_id"),
@@ -177,7 +182,7 @@ def main() -> None:
     })
     print(
         f"Alert-driven OI scan complete: watchlist={len(watchlist)}, "
-        f"new_forwarded_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}"
+        f"new_channel_or_forwarded_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}"
     )
     for symbol, record in watchlist.items():
         print(f"Watchlist {symbol}: {record.get('status')} - {record.get('reason', '')}")
