@@ -45,14 +45,17 @@ def align_oi(candles: List[dict], oi_rows: List[dict]) -> List[Optional[List[flo
     cursor = 0
     available: List[dict] = []
     for candle in candles:
-        while cursor < len(ordered) and int(ordered[cursor].get("timestamp", 0)) <= candle["close_time"]:
+        # OI-statistics timestamp is the period END; kline close_time is
+        # inclusive and therefore one millisecond before the next boundary.
+        oi_cutoff_time = candle["close_time"] + 1
+        while cursor < len(ordered) and int(ordered[cursor].get("timestamp", 0)) <= oi_cutoff_time:
             available.append(ordered[cursor])
             cursor += 1
         if not available:
             result.append(None)
             continue
         latest_ts = int(available[-1].get("timestamp", 0))
-        if candle["close_time"] - latest_ts > INTERVAL_MS:
+        if oi_cutoff_time - latest_ts > INTERVAL_MS:
             result.append(None)
             continue
         last_three = available[-3:]
@@ -317,7 +320,8 @@ def run_backtest_data(symbol: str, candles: List[dict], oi_rows: List[dict],
     for index in range(21, len(candles) - 1):
         if index < next_available_index or aligned[index] is None:
             continue
-        eligible = [r for r in oi_rows if int(r.get("timestamp", 0)) <= candles[index]["close_time"]]
+        oi_cutoff_time = candles[index]["close_time"] + 1
+        eligible = [r for r in oi_rows if int(r.get("timestamp", 0)) <= oi_cutoff_time]
         if len(eligible) < 3:
             continue
         snapshot = {
