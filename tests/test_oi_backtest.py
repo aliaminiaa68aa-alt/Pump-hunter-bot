@@ -90,6 +90,56 @@ class BacktestTests(unittest.TestCase):
             self.assertEqual(len(oi_rows), 22)
             self.assertEqual(candles[-1]["taker_buy_quote"], 520.0)
 
+    def test_csv_loader_rejects_missing_15m_candle_interval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            candles_path = Path(directory) / "candles.csv"
+            oi_path = Path(directory) / "oi.csv"
+            fields = ["open_time", "close_time", "open", "high", "low", "close",
+                      "volume", "quote_volume", "taker_buy_quote"]
+            with candles_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                for index in range(22):
+                    # Leave a 30-minute hole at candle 10.
+                    actual_index = index + (1 if index >= 10 else 0)
+                    writer.writerow({
+                        "open_time": actual_index * 900000,
+                        "close_time": (actual_index + 1) * 900000 - 1,
+                        "open": 100, "high": 101, "low": 99, "close": 100,
+                        "volume": 10, "quote_volume": 1000, "taker_buy_quote": 520,
+                    })
+            with oi_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterestValue"])
+                writer.writeheader()
+                for index in range(22):
+                    writer.writerow({"timestamp": index * 900000, "sumOpenInterestValue": 1000 + index})
+            with self.assertRaisesRegex(MarketDataError, "missing or irregular 15m"):
+                load_csv_history(str(candles_path), str(oi_path))
+
+    def test_csv_loader_rejects_invalid_ohlc_relationship(self):
+        with tempfile.TemporaryDirectory() as directory:
+            candles_path = Path(directory) / "candles.csv"
+            oi_path = Path(directory) / "oi.csv"
+            fields = ["open_time", "close_time", "open", "high", "low", "close",
+                      "volume", "quote_volume", "taker_buy_quote"]
+            with candles_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                for index in range(22):
+                    writer.writerow({
+                        "open_time": index * 900000,
+                        "close_time": (index + 1) * 900000 - 1,
+                        "open": 100, "high": 99, "low": 98, "close": 100,
+                        "volume": 10, "quote_volume": 1000, "taker_buy_quote": 520,
+                    })
+            with oi_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["timestamp", "sumOpenInterestValue"])
+                writer.writeheader()
+                for index in range(22):
+                    writer.writerow({"timestamp": index * 900000, "sumOpenInterestValue": 1000 + index})
+            with self.assertRaisesRegex(MarketDataError, "OHLC"):
+                load_csv_history(str(candles_path), str(oi_path))
+
     def test_csv_loader_rejects_missing_columns(self):
         with tempfile.TemporaryDirectory() as directory:
             candles_path = Path(directory) / "candles.csv"
