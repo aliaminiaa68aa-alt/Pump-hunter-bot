@@ -9,7 +9,6 @@ from typing import Any, Dict, Tuple
 
 import requests
 
-from oi_engine.alert_ingest import parse_forwarded_oi_alert
 from oi_engine.telegram_public_source import poll_public_channel_alerts
 from oi_engine.coinalyze_client import CoinalyzeClient
 from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal
@@ -65,63 +64,6 @@ def send_telegram(token: str, chat_id: str, message: str) -> None:
         raise RuntimeError(f"Telegram rejected message: {payload}")
 
 
-def poll_forwarded_alerts(token: str, offset: int, watchlist: Dict[str, Any],
-                          now: int | None = None) -> Tuple[int, int, bool]:
-    """Poll forwarded alerts and direct posts from channels the bot has joined."""
-    response = requests.get(
-        f"https://api.telegram.org/bot{token}/getUpdates",
-        params={
-            "offset": offset,
-            "timeout": 0,
-            "allowed_updates": json.dumps(["message", "channel_post"]),
-        },
-        timeout=15,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not payload.get("ok"):
-        description = payload.get("description", "Telegram getUpdates failed")
-        raise RuntimeError(
-            f"Telegram inbox unavailable: {description}. If a webhook is configured, "
-            "polling cannot be used until that webhook is intentionally removed."
-        )
-
-    timestamp = int(now if now is not None else time.time())
-    next_offset = offset
-    added = 0
-    status_requested = False
-    for update in payload.get("result", []):
-        update_id = int(update.get("update_id", -1))
-        next_offset = max(next_offset, update_id + 1)
-        is_channel_post = isinstance(update.get("channel_post"), dict)
-        message = update.get("channel_post") or update.get("message") or {}
-        message_text = message.get("text") or message.get("caption") or ""
-        if not is_channel_post and isinstance(message_text, str) and message_text.strip().split("@")[0] in ("/status", "/watchlist"):
-            status_requested = True
-        symbol = parse_forwarded_oi_alert(update)
-        if not symbol:
-            continue
-        alert_time = int(message.get("date", timestamp))
-        if timestamp - alert_time > MAX_FORWARDED_ALERT_AGE_SECONDS or alert_time > timestamp + 60:
-            continue
-        if symbol not in watchlist and len(watchlist) >= MAX_WATCHLIST_SYMBOLS:
-            continue
-        existing = watchlist.get(symbol, {})
-        watchlist[symbol] = {
-            **existing,
-            "first_seen": existing.get("first_seen", alert_time),
-            "last_alert": alert_time,
-            "source": "telegram_channel_post" if is_channel_post else "forwarded_telegram_oi_alert",
-            "source_update_id": update_id,
-            "source_chat_id": (message.get("chat") or {}).get("id"),
-            "source_message_id": message.get("message_id"),
-            "status": "در حال رصد",
-            "reason": "هشدار اولیه Open Interest دریافت شد؛ منتظر تأیید هستیم",
-        }
-        added += 1
-    return next_offset, added, status_requested
-
-
 def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[str, Any]:
     timestamp = int(now if now is not None else time.time())
     return {
@@ -153,13 +95,14 @@ def main() -> None:
 
     state = load_state()
     watch_state = load_watchlist_state()
-    offset = int(watch_state.get("telegram_update_offset", 0))
+    # Start from the public-channel source only. Do not ingest Telegram forwards,
+    # direct channel updates delivered to the bot, or any legacy alert inbox.
     watchlist = watch_state.get("symbols", {})
     if not isinstance(watchlist, dict):
         watchlist = {}
 
     client = CoinalyzeClient(api_key=api_key)
-    offset, added, status_requested = poll_forwarded_alerts(token, offset, watchlist)
+    added = 0
     public_channel = os.getenv("OI_PUBLIC_CHANNEL", "oi_detector").strip()
     public_last_id = int(watch_state.get("public_channel_last_id", 0))
     try:
@@ -190,24 +133,14 @@ def main() -> None:
         state = dict(sorted(state.items(), key=lambda item: item[1])[-500:])
         save_state(state)
 
-    if status_requested:
-        if watchlist:
-            lines = ["📋 وضعیت واچ‌لیست OI"]
-            for symbol, record in sorted(watchlist.items()):
-                lines.append(f"{symbol}: {record.get('status', 'در حال رصد')}")
-            send_telegram(token, chat_id, "\n".join(lines))
-        else:
-            send_telegram(token, chat_id, "واچ‌لیست خالی است؛ هنوز هشدار تازه و قابل‌قبولی از منبع عمومی OI دریافت نشده است.")
-
     save_watchlist_state({
-        "telegram_update_offset": offset,
         "public_channel_last_id": public_last_id,
         "symbols": watchlist,
         "updated_at": int(time.time()),
     })
     print(
         f"Alert-driven OI scan complete: watchlist={len(watchlist)}, "
-        f"new_channel_or_forwarded_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}"
+        f"new_public_channel_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}"
     )
     for symbol, record in watchlist.items():
         print(f"Watchlist {symbol}: {record.get('status')} - {record.get('reason', '')} [source={record.get('data_source', 'unknown')}]")
