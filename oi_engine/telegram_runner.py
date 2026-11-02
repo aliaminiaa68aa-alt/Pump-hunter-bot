@@ -10,6 +10,7 @@ from typing import Any, Dict, Tuple
 import requests
 
 from oi_engine.alert_ingest import parse_forwarded_oi_alert
+from oi_engine.telegram_public_source import poll_public_channel_alerts
 from oi_engine.coinalyze_client import CoinalyzeClient
 from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal
 
@@ -147,6 +148,12 @@ def main() -> None:
         watchlist = {}
 
     offset, added, status_requested = poll_forwarded_alerts(token, offset, watchlist)
+    public_channel = os.getenv("OI_PUBLIC_CHANNEL", "oi_detector").strip()
+    public_last_id = int(watch_state.get("public_channel_last_id", 0))
+    public_last_id, public_added = poll_public_channel_alerts(
+        public_channel, public_last_id, watchlist
+    )
+    added += public_added
     watchlist = prune_watchlist(watchlist)
     client = CoinalyzeClient(api_key=api_key)
     confirmed, watchlist = scan_watchlist(watchlist, client=client)
@@ -173,10 +180,11 @@ def main() -> None:
                 lines.append(f"{symbol}: {record.get('status', 'در حال رصد')}")
             send_telegram(token, chat_id, "\n".join(lines))
         else:
-            send_telegram(token, chat_id, "واچ‌لیست خالی است. هشدار اولیه Open Interest را از کانال اصلی به این ربات فوروارد کن.")
+            send_telegram(token, chat_id, "واچ‌لیست خالی است؛ هنوز هشدار تازه و قابل‌قبولی از منبع عمومی OI دریافت نشده است.")
 
     save_watchlist_state({
         "telegram_update_offset": offset,
+        "public_channel_last_id": public_last_id,
         "symbols": watchlist,
         "updated_at": int(time.time()),
     })
