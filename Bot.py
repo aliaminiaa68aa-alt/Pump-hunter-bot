@@ -866,17 +866,16 @@ def spike_metric_text(metrics):
 def leg_spike_long_short_filter(contract):
     """
     LEG SPIKE crowding filter using public OKX account-ratio data:
-    15m long share >50%, 1h >50%, daily <=70%.
+    1h long share >50%, daily long share <=70%.
     Fail closed if required data is unavailable.
     """
     try:
-        ratio_15m = okx_contract_long_ratio(contract, "15m")
         ratio_1h = okx_contract_long_ratio(contract, "1H")
         ratio_1d = okx_currency_daily_long_ratio(contract)
-        passed = ratio_15m > 50.0 and ratio_1h > 50.0 and ratio_1d <= 70.0
+        passed = ratio_1h > 50.0 and ratio_1d <= 70.0
         return {
             "valid": True, "passed": passed,
-            "ratio_15m": ratio_15m, "ratio_1h": ratio_1h, "ratio_1d": ratio_1d,
+            "ratio_1h": ratio_1h, "ratio_1d": ratio_1d,
             "symbol": (contract[:-5] if contract.endswith("_USDT") else contract) + "USDT",
         }
     except Exception as error:
@@ -885,8 +884,11 @@ def leg_spike_long_short_filter(contract):
 
 
 # Fibonacci pullback strategy configuration.
-# "Several times market cap" is set to >=2x by default and can be tuned here.
+# Minimum 24h aggregate spot volume / market cap ratio.
 FIB_MIN_VOLUME_TO_MARKET_CAP = 2.00
+# Accept negative funding and near-zero positive funding up to +0.01%.
+# Funding values are stored internally as decimal fractions.
+FIB_MAX_FUNDING_RATE = 0.0001
 FIB_MAX_OI_TO_MARKET_CAP = 0.50
 # Stage-2 impulse detection: slightly more inclusive so valid developing
 # setups are tracked; Stage-3 entry confirmation remains fully gated by Fib,
@@ -1706,7 +1708,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             # Tracked LEG SPIKE setups must reach Coinalyze even when Gate.io's
             # single-venue funding is zero, positive, or missing. Aggregate
             # funding is validated later by coinalyze_derivatives_check.
-            if (funding0 is None or funding0 >= 0) and not (COINALYZE_API_KEY and contract0 in priority_contracts):
+            if (funding0 is None or funding0 > FIB_MAX_FUNDING_RATE) and not (COINALYZE_API_KEY and contract0 in priority_contracts):
                 continue
             symbol0 = contract0[:-5].upper()
             cap0 = caps.get(symbol0)
@@ -1863,7 +1865,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                 funding = 0.0
             else:
                 funding = float(raw_funding)
-                if funding >= 0 and not COINALYZE_API_KEY:
+                if funding > FIB_MAX_FUNDING_RATE and not COINALYZE_API_KEY:
                     if contract in early_pattern_details: early_filter_status[contract] = f"Funding non-negative ({funding*100:+.4f}%)"
                     continue
             if contract in early_pattern_details: early_filter_status[contract] = "Checking aggregate funding and market cap"
@@ -1919,9 +1921,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if contract in early_pattern_details:
                         early_filter_status[contract] = f"Coinalyze OI/MC exceeds {FIB_MAX_OI_TO_MARKET_CAP:.0%} ({aggregate_oi/market_cap:.1%})"
                     continue
-                if aggregate_funding >= 0:
+                if aggregate_funding > FIB_MAX_FUNDING_RATE:
                     if contract in early_pattern_details:
-                        early_filter_status[contract] = f"Coinalyze funding not negative ({aggregate_funding*100:+.4f}%)"
+                        early_filter_status[contract] = f"Coinalyze funding above +0.01% ({aggregate_funding*100:+.4f}%)"
                     continue
                 oi_usd = aggregate_oi
                 funding = aggregate_funding
@@ -2174,11 +2176,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if metrics.get("oi_change4h") is None or metrics["oi_change4h"] <= 0:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze OI 4h change is missing or not positive")
                         continue
-                    if metrics.get("funding_avg") is None or metrics["funding_avg"] >= 0:
-                        print(f"{contract}: LEG SPIKE rejected; Coinalyze average funding is missing or non-negative")
-                        continue
-                    if metrics.get("long15m") is None or metrics["long15m"] <= 50:
-                        print(f"{contract}: LEG SPIKE rejected; Coinalyze 15m long share is missing or <=50%")
+                    if metrics.get("funding_avg") is None or metrics["funding_avg"] > FIB_MAX_FUNDING_RATE:
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze average funding is missing or above +0.01%")
                         continue
                     if metrics.get("long1h") is None or metrics["long1h"] <= 50:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze 1h long share is missing or <=50%")
@@ -2208,7 +2207,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         f"ورود ۲ (فیبو 0.66): {float(candidate['fib66']):.10g}\n"
                         f"سقف پامپ/هدف: {high:.10g} | کف پامپ/حد ضرر: {low:.10g}\n"
                         f"حرکت پامپ: {float(candidate['pump_pct']):.2f}% با {int(candidate['body_count'])} کندل قوی ۵دقیقه‌ای\n"
-                        f"نسبت لانگ CoinAlayze: ۱۵دقیقه {metrics['long15m']:.1f}% | ۱ساعت {metrics['long1h']:.1f}% | روزانه {metrics['long1d']:.1f}%\n"
+                        f"نسبت لانگ CoinAlayze: ۱ساعت {metrics['long1h']:.1f}% | روزانه {metrics['long1d']:.1f}%\n"
                         f"{daily_warning}\n"
                         f"{spike_metric_text(metrics)}\n"
                         f"Funding مؤثر برای فیلتر: {alert_funding * 100:+.4f}% | OI مؤثر: {alert_oi / market_cap:.2%} از مارکت‌کپ\n"
