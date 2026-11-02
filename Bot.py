@@ -902,6 +902,29 @@ FIB_FULL_VOLUME_TO_MARKET_CAP = 2.00  # >=2x passes volume tier; 1.8-2x needs ev
 # Accept negative funding and near-zero positive funding up to +0.01%.
 # Funding values are stored internally as decimal fractions.
 FIB_MAX_FUNDING_RATE = 0.0001
+
+
+def leg_spike_oi_growth_gate(oi_change, oi_change4h):
+    """
+    Require fresh positive short-term aggregate OI for LEG SPIKE.
+    Four-hour OI is a ranking/context metric, not a directional veto:
+    a recent short-term OI expansion can coexist with a negative 4h net change.
+    Both measurements must be available from the cross-venue check.
+    """
+    if oi_change4h is None:
+        return False, "4h OI history unavailable"
+    if oi_change is None:
+        return False, "short-term OI history unavailable"
+    try:
+        short_term = float(oi_change)
+        float(oi_change4h)  # validate coverage; its sign is used for ranking only
+    except (TypeError, ValueError):
+        return False, "invalid OI history"
+    if short_term <= 0:
+        return False, "short-term OI growth is not positive"
+    return True, "short-term OI growth positive; 4h change retained for ranking"
+
+
 # OI/market-cap is informational only; OI growth is the actionable signal.
 # Stage-2 impulse detection: slightly more inclusive so valid developing
 # setups are tracked; Stage-3 entry confirmation remains fully gated by Fib,
@@ -1433,7 +1456,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
     sent = state["fib_alerts"]
     counts = {
         "tickers": 0, "funding_gate_pass": 0, "cap_available": 0,
-        "early_scan_checked": 0, "early_patterns_seen": 0, "early_warnings_sent": 0,
+        "early_scan_checked": 0, "early_patterns_seen": 0, "early_watches_registered": 0,
         "early_duplicate_suppressed": 0, "early_recent_suppressed": 0, "early_candle_errors": 0, "volume_pass": 0, "oi_pass": 0,
         "pump_detected": 0, "pump_pattern_rejected": 0,
         "stage1_candidates_monitored": 0, "reversal_checks": 0,
@@ -1517,9 +1540,9 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     print(f"{contract}: liquidity-inflow watch retained internally; Telegram notification suppressed")
                     register_early_watch_outcome(state, contract, "LIQUIDITY_INFLOW", liquidity_signal["close"])
                     liquidity_state[contract] = {"candle_time": candle_key, "sent_at": int(time.time())}
-                    counts["early_warnings_sent"] += 1
+                    counts["early_watches_registered"] += 1
                     print(
-                        f"{contract}: pre-pump liquidity Telegram watch sent; "
+                        f"{contract}: pre-pump liquidity watch registered internally; Telegram suppressed; "
                         f"turnover={liquidity_signal['volume_ratio']:.2f}x, "
                         f"compression={liquidity_signal['compression_pct']:.2f}%, "
                         f"price={liquidity_signal['price_change_pct']:+.2f}%"
@@ -1688,8 +1711,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
             register_early_watch_outcome(state, contract, "LEG_SPIKE_STAGE1", candles[-1]["c"])
             early_sent[contract] = early_key
             recent_early[contract] = int(time.time())
-            counts["early_warnings_sent"] += 1
-            print(f"LEG SPIKE Stage-1 early Telegram warning sent: {contract}; entry is not confirmed")
+            counts["early_watches_registered"] += 1
+            print(f"LEG SPIKE Stage-1 watch registered internally; Telegram suppressed: {contract}; entry is not confirmed")
         except Exception as error:
             counts["early_candle_errors"] += 1
             print(f"{contract}: LEG SPIKE early scan failed: {type(error).__name__}: {error}")
@@ -1936,12 +1959,18 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if contract in early_pattern_details:
                         early_filter_status[contract] = "Coinalyze aggregate OI missing or non-positive"
                     continue
+                oi_change = coinalyze_check.get("oi_change")
                 oi_change4h = coinalyze_check.get("oi_change4h")
-                if oi_change4h is None or oi_change4h <= 0:
+                oi_gate_ok, oi_gate_reason = leg_spike_oi_growth_gate(oi_change, oi_change4h)
+                if not oi_gate_ok:
                     counts["oi_rejected"] += 1
                     if contract in early_pattern_details:
-                        early_filter_status[contract] = "Coinalyze 4h OI growth missing or non-positive"
+                        early_filter_status[contract] = f"Coinalyze OI rejected: {oi_gate_reason}"
                     continue
+                print(
+                    f"{contract}: LEG SPIKE OI gate passed; short-term={float(oi_change):+.3f}%, "
+                    f"4h={float(oi_change4h):+.3f}% (ranking/context only)"
+                )
                 if aggregate_funding > FIB_MAX_FUNDING_RATE:
                     if contract in early_pattern_details:
                         early_filter_status[contract] = f"Coinalyze funding above +0.01% ({aggregate_funding*100:+.4f}%)"
