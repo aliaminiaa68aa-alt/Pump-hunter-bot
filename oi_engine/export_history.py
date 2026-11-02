@@ -1,9 +1,9 @@
 """Export recent Binance USD-M 15m candles and OI history to backtest CSV files.
 
 Uses public market-data endpoints only; no API key is required. It does not
-attempt to bypass regional restrictions. Binance OI history is capped at 500
-samples per request, so this export is a short recent sample, not long-term
-strategy validation.
+attempt to bypass regional restrictions. Binance OI history is capped at 500 samples per request and retains only
+the latest month; the exporter pages through that window, which is still not
+long-term strategy validation.
 """
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ def main() -> None:
     print("\nExport summary:")
     for symbol, result in outcomes.items():
         print(f"  {symbol}: {result}")
-    print("Note: Binance OI history is limited to at most 500 samples per request.")
+    print("Note: Binance OI history is paged at 500 samples/request within its latest-month retention window.")
     print("Use the matching *_candles.csv and *_oi.csv files with oi_engine.backtest.")
 
 
