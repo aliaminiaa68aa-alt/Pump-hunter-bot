@@ -221,6 +221,8 @@ def _summarize_group(trades: List[dict]) -> dict:
 
 def summarize(trades: List[dict]) -> dict:
     overall = _summarize_group(trades)
+    overall["long_trades"] = sum(item["side"] == "LONG" for item in trades)
+    overall["short_trades"] = sum(item["side"] == "SHORT" for item in trades)
     overall["by_side"] = {
         side: _summarize_group([item for item in trades if item["side"] == side])
         for side in ("LONG", "SHORT")
