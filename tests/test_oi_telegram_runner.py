@@ -33,11 +33,13 @@ class FakeClient:
 
 
 class TelegramRunnerTests(unittest.TestCase):
-    def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None):
+    def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None):
         state_path = Path(directory) / "sent_signals.json"
         watch_path = Path(directory) / "watchlist.json"
         if sent_state is not None:
             state_path.write_text(json.dumps(sent_state), encoding="utf-8")
+        if initial_watchlist is not None:
+            watch_path.write_text(json.dumps({"public_channel_last_id": 10, "symbols": initial_watchlist}), encoding="utf-8")
         env = {"BOT_TOKEN": "token", "CHAT_ID": "chat", "COINALYZE_API_KEY": "key"}
         with patch.object(telegram_runner, "STATE_PATH", state_path), \
              patch.object(telegram_runner, "WATCHLIST_PATH", watch_path), \
@@ -45,7 +47,8 @@ class TelegramRunnerTests(unittest.TestCase):
              patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
              patch.object(telegram_runner, "poll_public_channel_alerts", return_value=public_result) as poll, \
              patch.object(telegram_runner, "scan_watchlist", return_value=scan_result), \
-             patch.object(telegram_runner, "send_telegram") as send:
+             patch.object(telegram_runner, "send_telegram") as send, \
+             patch.object(telegram_runner.time, "time", return_value=now if now is not None else 2000000):
             telegram_runner.main()
         return state_path, watch_path, poll, send
 
@@ -90,6 +93,22 @@ class TelegramRunnerTests(unittest.TestCase):
             "NEWUSDT": {"last_alert": now - 10},
         }, now=now)
         self.assertEqual(list(kept), ["NEWUSDT"])
+
+    def test_expired_slots_are_removed_before_public_alert_ingestion(self):
+        now = 2000000
+        expired = {
+            f"OLD{i}USDT": {
+                "last_alert": now - telegram_runner.WATCHLIST_TTL_SECONDS - 10
+            }
+            for i in range(4)
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            _, watch_path, poll, _ = self._run_main(
+                directory, ([], {}), initial_watchlist=expired, now=now
+            )
+            ingested_watchlist = poll.call_args.args[2]
+            self.assertEqual(ingested_watchlist, {})
+            self.assertEqual(json.loads(watch_path.read_text(encoding="utf-8"))["symbols"], {})
 
 
 if __name__ == "__main__":
