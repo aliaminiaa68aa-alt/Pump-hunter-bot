@@ -173,7 +173,11 @@ def main() -> None:
         f"new_public_channel_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}"
     )
     for symbol, record in scanned_batch.items():
-        print(f"Watchlist {symbol}: {record.get('status')} - {record.get('reason', '')} [source={record.get('data_source', 'unknown')}]")
+        print(
+            f"Watchlist {symbol}: {record.get('status')} - {record.get('reason', '')} "
+            f"[market_source={record.get('data_source', 'unknown')}, "
+            f"alert_message_id={record.get('source_message_id', 'unknown')}]"
+        )
 
 
 if __name__ == "__main__":
