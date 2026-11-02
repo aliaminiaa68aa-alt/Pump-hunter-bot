@@ -1,35 +1,54 @@
-"""Scheduled Telegram runner for the standalone OI signal engine."""
+"""Scheduled alert-driven OI + Coinalyze Telegram runner."""
 from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict, Tuple
 
 import requests
 
-from oi_engine.signal_engine import scan, format_signal
+from oi_engine.alert_ingest import parse_forwarded_oi_alert
+from oi_engine.coinalyze_client import CoinalyzeClient
+from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
+WATCHLIST_PATH = Path(".oi_state/watchlist.json")
+MAX_WATCHLIST_SYMBOLS = 50
+WATCHLIST_TTL_SECONDS = 24 * 60 * 60
+
+
+def _load_json(path: Path, default: Any) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def _save_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    temporary_path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary_path.replace(path)
 
 
 def load_state() -> Dict[str, int]:
-    try:
-        raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    raw = _load_json(STATE_PATH, {})
+    return raw if isinstance(raw, dict) else {}
 
 
 def save_state(state: Dict[str, int]) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # Replace atomically so an interrupted runner cannot leave truncated JSON.
-    temporary_path = STATE_PATH.with_suffix(STATE_PATH.suffix + ".tmp")
-    temporary_path.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temporary_path.replace(STATE_PATH)
+    _save_json(STATE_PATH, state)
+
+
+def load_watchlist_state() -> Dict[str, Any]:
+    raw = _load_json(WATCHLIST_PATH, {})
+    return raw if isinstance(raw, dict) else {}
+
+
+def save_watchlist_state(state: Dict[str, Any]) -> None:
+    _save_json(WATCHLIST_PATH, state)
 
 
 def send_telegram(token: str, chat_id: str, message: str) -> None:
@@ -44,34 +63,107 @@ def send_telegram(token: str, chat_id: str, message: str) -> None:
         raise RuntimeError(f"Telegram rejected message: {payload}")
 
 
+def poll_forwarded_alerts(token: str, offset: int, watchlist: Dict[str, Any],
+                          now: int | None = None) -> Tuple[int, int]:
+    """Poll messages explicitly forwarded by the user to this bot."""
+    response = requests.get(
+        f"https://api.telegram.org/bot{token}/getUpdates",
+        params={"offset": offset, "timeout": 0, "allowed_updates": json.dumps(["message"])},
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("ok"):
+        description = payload.get("description", "Telegram getUpdates failed")
+        raise RuntimeError(
+            f"Telegram inbox unavailable: {description}. If a webhook is configured, "
+            "polling cannot be used until that webhook is intentionally removed."
+        )
+
+    timestamp = int(now if now is not None else time.time())
+    next_offset = offset
+    added = 0
+    for update in payload.get("result", []):
+        update_id = int(update.get("update_id", -1))
+        next_offset = max(next_offset, update_id + 1)
+        symbol = parse_forwarded_oi_alert(update)
+        if not symbol:
+            continue
+        message = update.get("message") or {}
+        if symbol not in watchlist and len(watchlist) >= MAX_WATCHLIST_SYMBOLS:
+            continue
+        existing = watchlist.get(symbol, {})
+        watchlist[symbol] = {
+            **existing,
+            "first_seen": existing.get("first_seen", timestamp),
+            "last_alert": timestamp,
+            "source": "forwarded_telegram_oi_alert",
+            "source_update_id": update_id,
+            "source_chat_id": (message.get("chat") or {}).get("id"),
+            "source_message_id": message.get("message_id"),
+            "status": "در حال رصد",
+            "reason": "هشدار اولیه Open Interest دریافت شد؛ منتظر تأیید هستیم",
+        }
+        added += 1
+    return next_offset, added
+
+
+def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[str, Any]:
+    timestamp = int(now if now is not None else time.time())
+    return {
+        symbol: record for symbol, record in watchlist.items()
+        if timestamp - int(record.get("last_alert", record.get("first_seen", timestamp)))
+        <= WATCHLIST_TTL_SECONDS
+    }
+
+
 def main() -> None:
     token = os.getenv("BOT_TOKEN")
     chat_id = os.getenv("CHAT_ID")
+    api_key = os.getenv("COINALYZE_API_KEY")
     if not token or not chat_id:
         raise SystemExit("BOT_TOKEN and CHAT_ID GitHub secrets are required")
+    if not api_key:
+        raise SystemExit("COINALYZE_API_KEY GitHub secret is required")
 
     state = load_state()
-    signals = scan(max_symbols=int(os.getenv("OI_MAX_SYMBOLS", "100")))
-    sent = 0
+    watch_state = load_watchlist_state()
+    offset = int(watch_state.get("telegram_update_offset", 0))
+    watchlist = watch_state.get("symbols", {})
+    if not isinstance(watchlist, dict):
+        watchlist = {}
 
-    for signal in signals:
-        # One notification per symbol and closed 15m candle.
+    offset, added = poll_forwarded_alerts(token, offset, watchlist)
+    watchlist = prune_watchlist(watchlist)
+    client = CoinalyzeClient(api_key=api_key)
+    confirmed, watchlist = scan_watchlist(watchlist, client=client)
+
+    sent = 0
+    for signal, metrics in confirmed:
         key = f"{signal.symbol}:{signal.side}"
         candle_id = int(signal.candle_close_time)
         if state.get(key) == candle_id:
             continue
-        send_telegram(token, chat_id, format_signal(signal))
+        send_telegram(token, chat_id, format_confirmed_signal(signal, metrics))
         state[key] = candle_id
         sent += 1
-        # Persist immediately after each confirmed Telegram delivery. If a later
-        # message fails, already-delivered signals won't be sent again next run.
         save_state(state)
 
-    # Retain only the latest 500 symbol/direction records.
     if len(state) > 500:
         state = dict(sorted(state.items(), key=lambda item: item[1])[-500:])
         save_state(state)
-    print(f"OI scan complete: candidates={len(signals)}, telegram_sent={sent}")
+
+    save_watchlist_state({
+        "telegram_update_offset": offset,
+        "symbols": watchlist,
+        "updated_at": int(time.time()),
+    })
+    print(
+        f"Alert-driven OI scan complete: watchlist={len(watchlist)}, "
+        f"new_forwarded_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}"
+    )
+    for symbol, record in watchlist.items():
+        print(f"Watchlist {symbol}: {record.get('status')} - {record.get('reason', '')}")
 
 
 if __name__ == "__main__":
