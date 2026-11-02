@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import time
+import math
 from collections import deque
 from typing import Any, Dict, List, Optional
 
@@ -214,7 +215,7 @@ class CoinalyzeClient:
                         volume = float(row["v"])
                         buy_volume = float(row["bv"])
                         values = (open_price, high_price, low_price, close_price, volume, buy_volume)
-                        if (not all(__import__("math").isfinite(value) for value in values)
+                        if (not all(math.isfinite(value) for value in values)
                                 or min(open_price, high_price, low_price, close_price, volume) <= 0
                                 or buy_volume < 0 or buy_volume > volume):
                             valid_candles = False
