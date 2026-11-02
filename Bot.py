@@ -2062,17 +2062,31 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if f"{fib_end_time}:{name}" not in alerted_levels
                 ]
                 if new_levels:
-                    # The user's entry trigger is the confirmed 15m liquidity sweep + bullish reclaim.
-                    # Long/short ratios are informational only and must not block this entry.
-                    try:
-                        ratio_check = leg_spike_long_short_filter(contract)
-                    except Exception:
-                        ratio_check = {"valid": False}
+                    # Mandatory live confirmation filters for the actual Telegram entry path.
+                    # A missing derivatives field is NOT treated as zero or as a pass.
+                    metrics = coinalyze_spike_metrics(
+                        contract, ticker, market_cap, total_market_volume, state
+                    )
+                    if metrics.get("funding_avg") is None or metrics["funding_avg"] > FIB_MAX_FUNDING_RATE:
+                        print(f"{contract}: LEG SPIKE entry blocked; funding missing or above +0.01%")
+                        continue
+                    if metrics.get("long1h") is None or metrics["long1h"] <= 50:
+                        print(f"{contract}: LEG SPIKE entry blocked; 1h long share missing or <=50%")
+                        continue
+                    if metrics.get("long1d") is None or metrics["long1d"] > 70:
+                        print(f"{contract}: LEG SPIKE entry blocked; daily long share missing or >70%")
+                        continue
+                    if metrics.get("oi_change4h") is None or metrics["oi_change4h"] <= 0:
+                        print(f"{contract}: LEG SPIKE entry blocked; 4h OI growth missing or non-positive")
+                        continue
+                    live_oi = metrics.get("oi_usd")
+                    live_funding = metrics["funding_avg"]
+                    if live_oi is None or live_oi <= 0 or live_oi / market_cap > FIB_MAX_OI_TO_MARKET_CAP:
+                        print(f"{contract}: LEG SPIKE entry blocked; live OI/market-cap missing or above limit")
+                        continue
                     ratio_text = (
-                        f"سهم لانگ ۱۵دقیقه: {ratio_check.get('ratio_15m', float('nan')):.1f}%، "
-                        f"یک‌ساعت: {ratio_check.get('ratio_1h', float('nan')):.1f}%، "
-                        f"روزانه: {ratio_check.get('ratio_1d', float('nan')):.1f}%"
-                        if ratio_check.get("valid") else "نسبت لانگ/شورت: ناموجود (فیلتر ورود نیست)"
+                        f"لانگ ۱ساعته: {metrics['long1h']:.1f}% | "
+                        f"لانگ روزانه: {metrics['long1d']:.1f}%"
                     )
                     ob = reversal.get("order_block")
                     ob_text = (
@@ -2118,8 +2132,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                             f"🛑 حد ضرر: {stop_price:.10g} (۱٪ زیر کف جاروب؛ ریسک {risk_pct:.2f}٪)\n"
                             f"🎯 تارگت: سقف موج {target_price:.10g}\n"
                             f"⚖️ ریسک به بازده تا سقف موج: ۱:{risk_reward:.2f} (حداقل مجاز ۱:۲)\n"
-                            f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x | OI/MC: {oi_usd / market_cap:.1%}\n"
-                            f"💸 Funding: {funding * 100:+.4f}% | {ratio_text}\n"
+                            f"📊 حجم/مارکت‌کپ: {volume_mc:.2f}x | OI/MC: {live_oi / market_cap:.1%} | رشد OI چهار‌ساعته: {metrics['oi_change4h']:+.2f}%\n"
+                            f"💸 Funding: {live_funding * 100:+.4f}% | {ratio_text}\n"
                             "✅ ورود فقط پس از سوئیپ نقدینگی و بسته‌شدن کندل ۱۵دقیقه بالای سطح بازیابی فیبو صادر می‌شود.\n"
                             "⚠️ سیگنال الگوریتمی است و برگشت را تضمین نمی‌کند؛ ریسک معامله را محدود نگه دار.\n"
                             "🟢━━━━━━━━━━━━━━━━━━🟢"
@@ -2212,7 +2226,7 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                         f"{spike_metric_text(metrics)}\n"
                         f"Funding مؤثر برای فیلتر: {alert_funding * 100:+.4f}% | OI مؤثر: {alert_oi / market_cap:.2%} از مارکت‌کپ\n"
                         f"نسبت سود به ریسک تا سقف: {reward / risk:.2f}:1\n"
-                        "⚠️ داده ناموجود از منبع در دسترس نبود؛ هشدار الگوریتمی است و ورود تضمینی نیست."
+                        "⚠️ همه فیلترهای داده‌ای موجود و معتبرند؛ هشدار الگوریتمی است و ورود تضمینی نیست."
                     )
                     send_message(message)
                     sent[contract] = alert_key
