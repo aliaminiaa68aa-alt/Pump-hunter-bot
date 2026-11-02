@@ -190,9 +190,10 @@ def simulate_trade(signal: Any, future_candles: List[dict],
     }
 
 
-def summarize(trades: List[dict]) -> dict:
+def _summarize_group(trades: List[dict]) -> dict:
     if not trades:
-        return {"trades": 0, "win_rate_pct": None, "profit_factor": None,
+        return {"trades": 0, "wins": 0, "losses": 0, "breakeven": 0,
+                "win_rate_pct": None, "profit_factor": None,
                 "expectancy_r": None, "average_r": None, "max_drawdown_r": None}
     values = [float(item["net_r"]) for item in trades]
     wins = [value for value in values if value > 0]
@@ -215,9 +216,16 @@ def summarize(trades: List[dict]) -> dict:
         "expectancy_r": round(sum(values) / len(values), 4),
         "average_r": round(sum(values) / len(values), 4),
         "max_drawdown_r": round(max_drawdown, 4),
-        "long_trades": sum(item["side"] == "LONG" for item in trades),
-        "short_trades": sum(item["side"] == "SHORT" for item in trades),
     }
+
+
+def summarize(trades: List[dict]) -> dict:
+    overall = _summarize_group(trades)
+    overall["by_side"] = {
+        side: _summarize_group([item for item in trades if item["side"] == side])
+        for side in ("LONG", "SHORT")
+    }
+    return overall
 
 
 def download_history(symbol: str) -> tuple[List[dict], List[dict]]:
