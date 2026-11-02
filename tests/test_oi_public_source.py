@@ -43,6 +43,22 @@ class PublicTelegramSourceTests(unittest.TestCase):
         self.assertEqual(cursor, 19)
         self.assertEqual(added, 0)
 
+    def test_unsupported_market_is_skipped_and_cursor_advances(self):
+        posts = [{
+            "message_id": 21, "date": 1000,
+            "text": "🚨 #AMD $478.66 • OI [15m] • Price change +2%",
+            "channel": "oi_detector",
+        }]
+        watchlist = {}
+        with patch("oi_engine.telegram_public_source.fetch_public_channel_posts", return_value=posts):
+            cursor, added = poll_public_channel_alerts(
+                "oi_detector", 20, watchlist, now=1000,
+                symbol_validator=lambda symbol: False,
+            )
+        self.assertEqual(cursor, 21)
+        self.assertEqual(added, 0)
+        self.assertEqual(watchlist, {})
+
     def test_old_posts_are_skipped(self):
         posts = [{
             "message_id": 20, "date": 1, "text": "OLDUSDT +2%",
