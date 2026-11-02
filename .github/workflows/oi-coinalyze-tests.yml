@@ -1,0 +1,25 @@
+name: OI Coinalyze integration tests
+
+on:
+  push:
+    branches: [oi-coinalyze-watchlist]
+    paths:
+      - "oi_engine/coinalyze_client.py"
+      - "tests/test_oi_coinalyze_client.py"
+      - ".github/workflows/oi-coinalyze-tests.yml"
+  pull_request:
+    paths:
+      - "oi_engine/coinalyze_client.py"
+      - "tests/test_oi_coinalyze_client.py"
+      - ".github/workflows/oi-coinalyze-tests.yml"
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check requests
+      - run: python -m unittest tests.test_oi_coinalyze_client -v
