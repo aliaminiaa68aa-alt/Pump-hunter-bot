@@ -25,6 +25,7 @@ class CoinalyzeClientTests(unittest.TestCase):
 
     def test_resolves_binance_perpetual(self):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.get_binance_exchange_codes = lambda: {"BINANCE"}
         client.get_future_markets = lambda: [
             {"symbol": "BTCUSDT_PERP.A", "exchange": "BINANCE",
              "base_asset": "BTC", "quote_asset": "USDT",
@@ -32,8 +33,20 @@ class CoinalyzeClientTests(unittest.TestCase):
         ]
         self.assertEqual(client.resolve_market("BTCUSDT"), "BTCUSDT_PERP.A")
 
+
+    def test_resolves_exchange_code_using_exchange_directory(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.get_binance_exchange_codes = lambda: {"A"}
+        client.get_future_markets = lambda: [
+            {"symbol": "BTCUSDT_PERP.A", "exchange": "A",
+             "base_asset": "BTC", "quote_asset": "USDT",
+             "is_perpetual": True, "margined": "STABLE"}
+        ]
+        self.assertEqual(client.resolve_market("BTCUSDT"), "BTCUSDT_PERP.A")
+
     def test_rejects_unmapped_symbol(self):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.get_binance_exchange_codes = lambda: {"BINANCE"}
         client.get_future_markets = lambda: []
         with self.assertRaisesRegex(CoinalyzeError, "No Binance USDT perpetual mapping"):
             client.resolve_market("UNKNOWNUSDT")
