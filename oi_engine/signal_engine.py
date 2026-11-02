@@ -133,8 +133,24 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
             "close_time": int(row[6]),
         })
 
+    # Align OI samples to the last CLOSED candle; never mix a newer, still-forming
+    # OI interval with a price candle that has already closed.
     oi_rows.sort(key=lambda x: int(x.get("timestamp", 0)))
-    oi_values = [_float(x.get("sumOpenInterestValue"), "OI value") for x in oi_rows]
+    last_close_time = parsed[-1]["close_time"]
+    aligned_rows = [
+        row for row in oi_rows
+        if int(row.get("timestamp", 0)) <= last_close_time
+    ]
+    if len(aligned_rows) < 3:
+        raise MarketDataError("Not enough OI samples aligned to closed candle")
+    latest_oi_timestamp = int(aligned_rows[-1].get("timestamp", 0))
+    if last_close_time - latest_oi_timestamp > 15 * 60 * 1000:
+        raise MarketDataError("OI sample is stale relative to closed candle")
+    aligned_rows = aligned_rows[-3:]
+    oi_values = [
+        _float(x.get("sumOpenInterestValue"), "OI value")
+        for x in aligned_rows
+    ]
     if any(x <= 0 for x in oi_values):
         raise MarketDataError("Invalid OI values")
 
@@ -142,6 +158,7 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
         "symbol": symbol,
         "candles": parsed,
         "oi_values": oi_values,
+        "oi_timestamp": latest_oi_timestamp,
         "funding_rate": _float(premium.get("lastFundingRate"), "funding"),
     }
 
@@ -168,6 +185,13 @@ def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
         return None
 
     last = candles[-1]
+    oi_timestamp = snapshot.get("oi_timestamp")
+    if oi_timestamp is None:
+        return None
+    if oi_timestamp > last["close_time"]:
+        return None
+    if last["close_time"] - oi_timestamp > 15 * 60 * 1000:
+        return None
     previous = candles[-2]
     baseline = candles[-21:-1]
     avg_quote_volume = sum(x["quote_volume"] for x in baseline) / len(baseline)
