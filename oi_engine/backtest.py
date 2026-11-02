@@ -106,7 +106,9 @@ def simulate_trade(signal: Any, future_candles: List[dict],
         # Conservative ordering when OHLC cannot reveal which level came first.
         if stop_hit:
             if first_target_hit:
-                gross_r += 0.5 * 1.0 + 0.5 * -1.0
+                # TP1's +0.5R was booked when first reached; only book
+                # the remaining half stopped at -1R here.
+                gross_r += 0.5 * -1.0
             else:
                 gross_r = -1.0
             exit_reason = "stop_after_tp1" if first_target_hit else "stop"
