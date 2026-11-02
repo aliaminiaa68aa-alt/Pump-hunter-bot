@@ -72,7 +72,7 @@ def align_oi(candles: List[dict], oi_rows: List[dict]) -> List[Optional[List[flo
             result.append(None)
             continue
         try:
-            values = [_float(row.get("sumOpenInterestValue"), "OI value") for row in last_three]
+            values = [_float(row.get("sumOpenInterest"), "OI value") for row in last_three]
         except MarketDataError:
             result.append(None)
             continue
@@ -243,7 +243,7 @@ def load_csv_history(candles_path: str, oi_path: str) -> tuple[List[dict], List[
     """Load authorized historical exports using the documented CSV schema.
 
     candles.csv: open_time,close_time,open,high,low,close,volume,quote_volume,taker_buy_quote
-    oi.csv: timestamp,sumOpenInterestValue
+    oi.csv: timestamp,sumOpenInterest
     Timestamps are Unix milliseconds.
     """
     required_candles = {
@@ -281,15 +281,15 @@ def load_csv_history(candles_path: str, oi_path: str) -> tuple[List[dict], List[
     oi_rows: List[dict] = []
     with open(oi_path, newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
-        required_oi = {"timestamp", "sumOpenInterestValue"}
+        required_oi = {"timestamp", "sumOpenInterest"}
         missing = required_oi - set(reader.fieldnames or [])
         if missing:
             raise MarketDataError(f"OI CSV missing columns: {', '.join(sorted(missing))}")
         for row in reader:
-            value = _float(row["sumOpenInterestValue"], "OI value")
+            value = _float(row["sumOpenInterest"], "OI value")
             if value <= 0:
                 raise MarketDataError("OI values must be positive")
-            oi_rows.append({"timestamp": int(row["timestamp"]), "sumOpenInterestValue": value})
+            oi_rows.append({"timestamp": int(row["timestamp"]), "sumOpenInterest": value})
 
     if len(candles) < 22 or len(oi_rows) < 3:
         raise MarketDataError("CSV history is too short: need at least 22 candles and 3 OI samples")
