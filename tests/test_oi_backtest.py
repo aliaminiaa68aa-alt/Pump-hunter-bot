@@ -3,6 +3,9 @@ from unittest.mock import patch
 import csv
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
+
+import requests
 from types import SimpleNamespace
 
 from oi_engine.backtest import align_oi, download_history, load_csv_history, reprice_signal_for_next_open, simulate_trade, summarize
@@ -338,6 +341,35 @@ class BacktestTests(unittest.TestCase):
                          start + 1500 * interval)
         self.assertEqual(session.calls[3][1]["startTime"],
                          start + 500 * interval + 1)
+
+
+    def test_download_history_wraps_network_timeouts_as_market_data_error(self):
+        class Session:
+            def __init__(self):
+                self.headers = {}
+            def get(self, url, params, timeout):
+                raise requests.Timeout("connection timed out")
+
+        with patch("oi_engine.backtest.requests.Session", return_value=Session()), \
+             patch("time.time", return_value=1_800_000_000):
+            with self.assertRaisesRegex(MarketDataError, "connection timed out"):
+                download_history("BTCUSDT")
+
+    def test_download_history_preserves_clear_http_451_restriction_error(self):
+        class Response:
+            status_code = 451
+            def raise_for_status(self):
+                raise requests.HTTPError("451 restricted")
+        class Session:
+            def __init__(self):
+                self.headers = {}
+            def get(self, url, params, timeout):
+                return Response()
+
+        with patch("oi_engine.backtest.requests.Session", return_value=Session()), \
+             patch("time.time", return_value=1_800_000_000):
+            with self.assertRaisesRegex(MarketDataError, "HTTP 451"):
+                download_history("BTCUSDT")
 
 
 if __name__ == "__main__":
