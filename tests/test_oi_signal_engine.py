@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from oi_engine.signal_engine import diagnose_snapshot, evaluate_snapshot, scan, MarketDataError, validate_oi_cadence
+from oi_engine.signal_engine import diagnose_snapshot, evaluate_snapshot, scan, MarketDataError, validate_oi_cadence, format_signal
 
 
 def make_snapshot(side="LONG"):
@@ -53,6 +53,12 @@ class SignalEngineTests(unittest.TestCase):
         self.assertTrue(any("رشد OI کم است" in reason for reason in reasons))
         self.assertTrue(any("حجم پایین است" in reason for reason in reasons))
         self.assertIsNone(evaluate_snapshot(snapshot))
+
+    def test_signal_score_is_not_presented_as_win_probability(self):
+        signal = evaluate_snapshot(make_snapshot("LONG"))
+        message = format_signal(signal)
+        self.assertIn("امتیاز فنی:", message)
+        self.assertIn("درصد احتمال برد نیست", message)
 
     def test_confirmed_long(self):
         signal = evaluate_snapshot(make_snapshot("LONG"))
