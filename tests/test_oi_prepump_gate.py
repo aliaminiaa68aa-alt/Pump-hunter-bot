@@ -10,6 +10,14 @@ class OIPrePumpGateTests(unittest.TestCase):
             "funding_rate": 0.0001,
         }))
 
+    def test_early_watch_accepts_smaller_positive_oi_rise_than_entry(self):
+        candidate = {
+            "valid": True, "oi_change": 0.20, "oi_change4h": 0.4,
+            "funding_rate": 0.0,
+        }
+        self.assertFalse(pre_pump_oi_gate(candidate))
+        self.assertTrue(pre_pump_oi_gate(candidate, min_oi_change=0.15))
+
     def test_rejects_flat_or_falling_short_term_oi(self):
         self.assertFalse(pre_pump_oi_gate({
             "valid": True, "oi_change": 0.29, "oi_change4h": 0.8,
