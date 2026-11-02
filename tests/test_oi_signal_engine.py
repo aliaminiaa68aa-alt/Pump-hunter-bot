@@ -82,6 +82,15 @@ class SignalEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(MarketDataError, "exact 15m cadence"):
             validate_oi_cadence(irregular)
 
+    def test_oi_change_uses_one_15m_interval_not_30m(self):
+        snapshot = make_snapshot("LONG")
+        snapshot["oi_values"] = [100.0, 100.5, 100.5]
+        # The 30m change is +0.5%, but the latest 15m change is 0%.
+        # A valid 15m signal must therefore be rejected.
+        self.assertIsNone(evaluate_snapshot(snapshot))
+        reasons = diagnose_snapshot(snapshot)
+        self.assertTrue(any("رشد OI کم است" in reason for reason in reasons))
+
     def test_no_signal_without_oi_growth(self):
         snapshot = make_snapshot("LONG")
         snapshot["oi_values"] = [100.0, 100.0, 100.0]
