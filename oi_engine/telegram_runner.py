@@ -5,7 +5,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
 import requests
 
@@ -17,7 +17,6 @@ STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
 MAX_WATCHLIST_SYMBOLS = 4  # 4 symbols x 8 metric calls + one market map stays below 40/min
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
-MAX_FORWARDED_ALERT_AGE_SECONDS = 6 * 60 * 60
 
 
 def _load_json(path: Path, default: Any) -> Any:
