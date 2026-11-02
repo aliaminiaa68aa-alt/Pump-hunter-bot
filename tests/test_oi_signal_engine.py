@@ -5,7 +5,7 @@ from oi_engine.signal_engine import evaluate_snapshot
 
 def make_snapshot(side="LONG"):
     candles = []
-    for index in range(21):
+    for index in range(22):
         close = 100.0
         candles.append({
             "open_time": index * 900000,
