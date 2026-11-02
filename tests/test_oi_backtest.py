@@ -22,6 +22,16 @@ class BacktestTests(unittest.TestCase):
         self.assertIsNone(aligned[1])  # timestamp 1,800,000 is still in the future
         self.assertEqual(aligned[2], [100.0, 101.0, 102.0])
 
+    def test_oi_alignment_rejects_missing_15m_sample(self):
+        candle = [{"close_time": 2699999}]
+        rows = [
+            {"timestamp": 0, "sumOpenInterestValue": "100"},
+            {"timestamp": 900000, "sumOpenInterestValue": "101"},
+            # Missing the 15m sample at 1,800,000.
+            {"timestamp": 2700000, "sumOpenInterestValue": "103"},
+        ]
+        self.assertIsNone(align_oi(candle, rows)[0])
+
     def test_stop_wins_when_stop_and_target_touch_same_bar(self):
         signal = SimpleNamespace(
             symbol="XUSDT", side="LONG", entry=100.0, stop_loss=98.0,
