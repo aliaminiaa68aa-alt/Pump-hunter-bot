@@ -99,6 +99,10 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
     added = 0
     for post in unseen:
         if timestamp - post["date"] > 6 * 60 * 60 or post["date"] > timestamp + 60:
+            print(
+                f"Public Telegram post skipped by age/time: message_id={post['message_id']} "
+                f"post_date={post['date']} now={timestamp}"
+            )
             next_id = post["message_id"]
             continue
         update = {"channel_post": {
@@ -107,12 +111,20 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
         }}
         symbol = parse_forwarded_oi_alert(update)
         if not symbol:
+            preview = post["text"][:240].replace("\\n", " ")
+            print(
+                f"Public Telegram OI post not parsed: message_id={post['message_id']} "
+                f"text={preview!r}"
+            )
             next_id = post["message_id"]
             continue
         if symbol_validator is not None:
             try:
                 if not symbol_validator(symbol):
-                    print(f"Public Telegram alert ignored: no supported perpetual market for {symbol}")
+                    print(
+                        f"Public Telegram alert ignored: message_id={post['message_id']} "
+                        f"symbol={symbol} reason=no supported USDT perpetual mapping"
+                    )
                     next_id = post["message_id"]
                     continue
             except Exception as exc:
