@@ -131,6 +131,14 @@ def main() -> None:
     except requests.RequestException as exc:
         # Keep the previous cursor and continue scanning existing watchlist symbols.
         print(f"WARNING: public Telegram source fetch failed: {exc}")
+    # Persist ingestion before any market-data calls. If a scan times out or the
+    # provider stalls, newly received alerts and the Telegram cursor survive.
+    save_watchlist_state({
+        "public_channel_last_id": public_last_id,
+        "symbols": watchlist,
+        "scan_cursor": str(watch_state.get("scan_cursor", "")),
+        "updated_at": int(time.time()),
+    })
     # Keep the complete alert queue, but scan only a rotating batch so API usage
     # stays bounded. Every retained symbol gets its turn on subsequent runs.
     batch, next_scan_cursor = select_watchlist_batch(
