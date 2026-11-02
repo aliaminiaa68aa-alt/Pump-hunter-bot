@@ -1,4 +1,6 @@
 import unittest
+import requests
+from unittest.mock import Mock
 from unittest.mock import patch
 from oi_engine.signal_engine import Signal
 from oi_engine.watchlist_engine import coinalyze_confirms, scan_watchlist
@@ -25,6 +27,23 @@ class WatchlistTests(unittest.TestCase):
         self.assertFalse(coinalyze_confirms(signal("SHORT"),metrics(taker=.55)))
     def test_missing_data_fails_closed(self):
         self.assertFalse(coinalyze_confirms(signal(),metrics(complete=False)))
+
+    def test_binance_451_uses_coinalyze_market_snapshot(self):
+        snapshot = {"symbol": "ABCUSDT", "candles": [], "oi_values": [1, 2, 3]}
+        fallback_metrics = {**metrics(), "market_snapshot": snapshot}
+        error = requests.HTTPError("451 Client Error")
+        error.response = Mock(status_code=451)
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", side_effect=error), \
+             patch("oi_engine.watchlist_engine.evaluate_snapshot", return_value=signal()):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {"status": "در حال رصد"}},
+                FakeClient(fallback_metrics), now=1000
+            )
+        self.assertEqual(len(found), 1)
+        self.assertEqual(updated["ABCUSDT"]["status"], "تأیید LONG")
+        self.assertIn("Coinalyze 15m fallback", updated["ABCUSDT"]["data_source"])
+        self.assertNotIn("market_snapshot", updated["ABCUSDT"]["coinalyze"])
+
     def test_confirmed_status(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",return_value={}), \
              patch("oi_engine.watchlist_engine.evaluate_snapshot",return_value=signal()):
