@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import csv
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -225,33 +226,77 @@ def download_history(symbol: str) -> tuple[List[dict], List[dict]]:
     return candles, oi_rows
 
 
-def run_backtest(symbol: str, fee_bps: float = DEFAULT_FEE_BPS,
-                 slippage_bps: float = DEFAULT_SLIPPAGE_BPS) -> dict:
-    candles, oi_rows = download_history(symbol.upper())
+
+def load_csv_history(candles_path: str, oi_path: str) -> tuple[List[dict], List[dict]]:
+    """Load authorized historical exports using the documented CSV schema.
+
+    candles.csv: open_time,close_time,open,high,low,close,volume,quote_volume,taker_buy_quote
+    oi.csv: timestamp,sumOpenInterestValue
+    Timestamps are Unix milliseconds.
+    """
+    required_candles = {
+        "open_time", "close_time", "open", "high", "low", "close",
+        "volume", "quote_volume", "taker_buy_quote",
+    }
+    candles: List[dict] = []
+    with open(candles_path, newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        missing = required_candles - set(reader.fieldnames or [])
+        if missing:
+            raise MarketDataError(f"candles CSV missing columns: {', '.join(sorted(missing))}")
+        for row in reader:
+            item = {"open_time": int(row["open_time"]), "close_time": int(row["close_time"])}
+            for key in ("open", "high", "low", "close", "volume", "quote_volume", "taker_buy_quote"):
+                item[key] = _float(row[key], key)
+            if item["close_time"] < item["open_time"] or item["close"] <= 0:
+                raise MarketDataError("Invalid candle timestamp or close price in CSV")
+            if item["quote_volume"] <= 0 or item["taker_buy_quote"] < 0 or item["taker_buy_quote"] > item["quote_volume"] * 1.001:
+                raise MarketDataError("Invalid quote/taker-buy volume in candles CSV")
+            candles.append(item)
+
+    oi_rows: List[dict] = []
+    with open(oi_path, newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        required_oi = {"timestamp", "sumOpenInterestValue"}
+        missing = required_oi - set(reader.fieldnames or [])
+        if missing:
+            raise MarketDataError(f"OI CSV missing columns: {', '.join(sorted(missing))}")
+        for row in reader:
+            value = _float(row["sumOpenInterestValue"], "OI value")
+            if value <= 0:
+                raise MarketDataError("OI values must be positive")
+            oi_rows.append({"timestamp": int(row["timestamp"]), "sumOpenInterestValue": value})
+
+    candles.sort(key=lambda item: item["open_time"])
+    oi_rows.sort(key=lambda item: item["timestamp"])
+    if len(candles) < 22 or len(oi_rows) < 3:
+        raise MarketDataError("CSV history is too short: need at least 22 candles and 3 OI samples")
+    if len({item["open_time"] for item in candles}) != len(candles):
+        raise MarketDataError("Duplicate candle open_time values in CSV")
+    if len({item["timestamp"] for item in oi_rows}) != len(oi_rows):
+        raise MarketDataError("Duplicate OI timestamps in CSV")
+    return candles, oi_rows
+
+
+def run_backtest_data(symbol: str, candles: List[dict], oi_rows: List[dict],
+                      fee_bps: float = DEFAULT_FEE_BPS,
+                      slippage_bps: float = DEFAULT_SLIPPAGE_BPS) -> dict:
     aligned = align_oi(candles, oi_rows)
     trades: List[dict] = []
     next_available_index = 0
-
     for index in range(21, len(candles) - 1):
         if index < next_available_index or aligned[index] is None:
+            continue
+        eligible = [r for r in oi_rows if int(r.get("timestamp", 0)) <= candles[index]["close_time"]]
+        if len(eligible) < 3:
             continue
         snapshot = {
             "symbol": symbol.upper(),
             "candles": candles[:index + 1],
             "oi_values": aligned[index],
-            "oi_timestamp": min(
-                int(row["timestamp"]) for row in sorted(
-                    [r for r in oi_rows if int(r.get("timestamp", 0)) <= candles[index]["close_time"]],
-                    key=lambda r: int(r.get("timestamp", 0))
-                )[-3:]
-            ) if len([r for r in oi_rows if int(r.get("timestamp", 0)) <= candles[index]["close_time"]]) >= 3 else None,
-            "funding_rate": 0.0,  # Historical funding is not available in this OI-only sample.
+            "oi_timestamp": max(int(r["timestamp"]) for r in eligible),
+            "funding_rate": 0.0,
         }
-        # evaluate_snapshot checks freshness of the latest OI timestamp.
-        eligible = [r for r in oi_rows if int(r.get("timestamp", 0)) <= candles[index]["close_time"]]
-        if len(eligible) < 3:
-            continue
-        snapshot["oi_timestamp"] = max(int(r["timestamp"]) for r in eligible)
         signal = evaluate_snapshot(snapshot)
         if signal is None:
             continue
@@ -259,18 +304,15 @@ def run_backtest(symbol: str, fee_bps: float = DEFAULT_FEE_BPS,
         if trade is None:
             continue
         trades.append(trade)
-        # Do not stack same-symbol positions; resume after this trade's max holding window.
         next_available_index = index + min(MAX_HOLD_CANDLES, len(candles) - index - 1) + 1
 
-    first_time = candles[0]["open_time"] if candles else None
-    last_time = candles[-1]["close_time"] if candles else None
     return {
         "symbol": symbol.upper(),
         "timeframe": "15m",
         "candles": len(candles),
         "oi_samples": len(oi_rows),
-        "history_start_ms": first_time,
-        "history_end_ms": last_time,
+        "history_start_ms": candles[0]["open_time"] if candles else None,
+        "history_end_ms": candles[-1]["close_time"] if candles else None,
         "fee_bps_per_side": fee_bps,
         "slippage_bps_per_side": slippage_bps,
         "exit_model": "50% TP1 + 50% TP2; fixed stop; stop-first on same-candle ambiguity",
@@ -278,12 +320,31 @@ def run_backtest(symbol: str, fee_bps: float = DEFAULT_FEE_BPS,
         "metrics": summarize(trades),
         "trades_detail": trades,
         "limitations": [
-            "Binance OI history endpoint returns at most 500 recent samples here.",
-            "This is a short recent sample, not a robust multi-market regime test.",
-            "Funding is excluded because historical funding was not fetched.",
+            "Only closed 15m candles and OI samples timestamped no later than each signal candle are used.",
+            "Funding is excluded from this backtest.",
             "Fees and slippage are configurable approximations; actual fills differ.",
         ],
     }
+
+def run_backtest(symbol: str, fee_bps: float = DEFAULT_FEE_BPS,
+                 slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
+                 candles_csv: Optional[str] = None,
+                 oi_csv: Optional[str] = None) -> dict:
+    if bool(candles_csv) != bool(oi_csv):
+        raise MarketDataError("Both --candles-csv and --oi-csv must be supplied together")
+    if candles_csv and oi_csv:
+        candles, oi_rows = load_csv_history(candles_csv, oi_csv)
+        report = run_backtest_data(symbol, candles, oi_rows, fee_bps, slippage_bps)
+        report["data_source"] = "user_authorized_csv_export"
+        return report
+    candles, oi_rows = download_history(symbol.upper())
+    report = run_backtest_data(symbol, candles, oi_rows, fee_bps, slippage_bps)
+    report["data_source"] = "Binance USD-M Futures public API"
+    report["limitations"].extend([
+        "Binance OI history endpoint returns at most 500 recent samples in this implementation.",
+        "This is a short recent sample, not a robust multi-market regime test.",
+    ])
+    return report
 
 
 def main() -> None:
@@ -292,9 +353,12 @@ def main() -> None:
     parser.add_argument("--fee-bps", type=float, default=DEFAULT_FEE_BPS)
     parser.add_argument("--slippage-bps", type=float, default=DEFAULT_SLIPPAGE_BPS)
     parser.add_argument("--output", default="oi_backtest_report.json")
+    parser.add_argument("--candles-csv", help="Authorized 15m candles CSV export")
+    parser.add_argument("--oi-csv", help="Authorized OI CSV export")
     args = parser.parse_args()
     try:
-        report = run_backtest(args.symbol, args.fee_bps, args.slippage_bps)
+        report = run_backtest(args.symbol, args.fee_bps, args.slippage_bps,
+                              args.candles_csv, args.oi_csv)
     except MarketDataError as exc:
         parser.exit(2, f"Backtest unavailable: {exc}\\n")
     with open(args.output, "w", encoding="utf-8") as handle:
