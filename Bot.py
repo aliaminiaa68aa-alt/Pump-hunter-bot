@@ -3506,6 +3506,24 @@ def update_early_watch_outcomes(state, now=None):
             avg_down = sum(float(r.get("max_adverse_pct", 0)) for r in rows) / len(rows)
             print(f"EARLY WATCH {strategy}: completed={len(rows)}, avg_MFE={avg_up:.2f}%, avg_MAE={avg_down:.2f}%")
 
+def build_oi_surge_wide_risk_watch_message(contract, tier, oi4, oi24, funding, close, resistance, support, risk_pct, price_change, turnover):
+    """Build a watch-only notice for exceptional OI surges whose structural stop is too wide."""
+    return (
+        "👀 OI SURGE | رصد جهش قوی با ریسک ساختاری بالا — بدون ورود\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🪙 ارز: {contract.replace('_', '/')}\n"
+        f"📈 تغییر قیمت ۲۴ساعته: {price_change:+.2f}%\n"
+        f"📊 رشد OI چهار‌ساعته: {oi4} | روزانه: {oi24}\n"
+        f"🚀 طبقه جهش OI: {tier} | Funding: {funding*100:+.4f}%\n"
+        f"💵 گردش ۲۴ساعته: {turnover:,.0f} USDT\n"
+        f"💰 قیمت بسته‌شده ۱۵دقیقه: {close:.10g}\n"
+        f"🧱 مقاومت: {resistance:.10g} | حمایت ساختاری: {support:.10g}\n"
+        f"⚠️ فاصله حدضرر ساختاری: {risk_pct:.2f}% (حد مجاز ورود: 6%)\n\n"
+        "این فقط هشدار رصد است؛ قیمت ورود، حدضرر جایگزین یا تارگت صادر نمی‌شود. "
+        "تا تشکیل ساختار تازه با ریسک منطقی و تأیید شکست/پولبک، وارد نشو و قیمت را تعقیب نکن."
+    )
+
+
 def scan_oi_surge_watch(tickers, state, max_symbols=12):
     """
     Independent continuation-pump monitor.
@@ -3528,7 +3546,8 @@ def scan_oi_surge_watch(tickers, state, max_symbols=12):
     ranked = ranked[:max_symbols]
 
     alert_state = state.setdefault("oi_surge_watch_alerts", {})
-    checked = qualified = sent = 0
+    wide_risk_alerts = state.setdefault("oi_surge_wide_risk_alerts", {})
+    checked = qualified = sent = wide_risk_sent = 0
     rejects = {}
     reject_samples = []
     now = int(time.time())
@@ -3573,6 +3592,36 @@ def scan_oi_surge_watch(tickers, state, max_symbols=12):
                     reject_samples.append(
                         f"{contract}: risk={risk_pct:.2f}% (max 6.00%), "
                         f"OI4h={format_oi_change(derivatives.get('oi_change4h'))}, "
+                        f"OI24h={format_oi_change(derivatives.get('oi_change24h'))}"
+                    )
+                previous_wide = wide_risk_alerts.get(contract, {})
+                if not isinstance(previous_wide, dict):
+                    previous_wide = {"sent_at": int(previous_wide or 0), "candle_time": ""}
+                candle_time = str(current.get("t", ""))
+                if (previous_wide.get("candle_time") != candle_time
+                        and now - int(previous_wide.get("sent_at", 0) or 0) >= 45 * 60):
+                    price_change = float(next(
+                        (t.get("change_percentage", 0) for t in tickers if t.get("contract") == contract), 0
+                    ))
+                    wide_message = build_oi_surge_wide_risk_watch_message(
+                        contract=contract,
+                        tier=tier,
+                        oi4=format_oi_change(derivatives.get("oi_change4h")),
+                        oi24=format_oi_change(derivatives.get("oi_change24h")),
+                        funding=funding,
+                        close=close,
+                        resistance=resistance,
+                        support=support,
+                        risk_pct=risk_pct,
+                        price_change=price_change,
+                        turnover=turnover,
+                    )
+                    send_message(wide_message)
+                    wide_risk_alerts[contract] = {"sent_at": now, "candle_time": candle_time, "tier": tier}
+                    wide_risk_sent += 1
+                    print(
+                        f"OI SURGE wide-risk watch sent: {contract}; tier={tier}; "
+                        f"risk={risk_pct:.2f}%; OI4h={format_oi_change(derivatives.get('oi_change4h'))}; "
                         f"OI24h={format_oi_change(derivatives.get('oi_change24h'))}"
                     )
                 continue
@@ -3622,7 +3671,7 @@ def scan_oi_surge_watch(tickers, state, max_symbols=12):
             print(f"OI SURGE watch {contract} failed: {type(error).__name__}: {error}")
     print(
         f"OI SURGE diagnostics: checked={checked}, qualified={qualified}, "
-        f"sent={sent}, rejections={rejects}"
+        f"sent={sent}, wide_risk_watch_sent={wide_risk_sent}, rejections={rejects}"
     )
     if reject_samples:
         print("OI SURGE rejection samples: " + " | ".join(reject_samples))
