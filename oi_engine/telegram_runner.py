@@ -23,10 +23,13 @@ def load_state() -> Dict[str, int]:
 
 def save_state(state: Dict[str, int]) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(
+    # Replace atomically so an interrupted runner cannot leave truncated JSON.
+    temporary_path = STATE_PATH.with_suffix(STATE_PATH.suffix + ".tmp")
+    temporary_path.write_text(
         json.dumps(state, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    temporary_path.replace(STATE_PATH)
 
 
 def send_telegram(token: str, chat_id: str, message: str) -> None:
