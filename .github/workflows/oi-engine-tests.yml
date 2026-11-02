@@ -1,0 +1,26 @@
+name: OI signal engine tests
+
+on:
+  push:
+    branches: [oi-signal-engine]
+    paths:
+      - "oi_engine/**"
+      - "tests/test_oi_signal_engine.py"
+      - ".github/workflows/oi-engine-tests.yml"
+  pull_request:
+    paths:
+      - "oi_engine/**"
+      - "tests/test_oi_signal_engine.py"
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependency
+        run: python -m pip install requests
+      - name: Run OI engine unit tests
+        run: python -m unittest discover -s tests -p "test_oi_signal_engine.py" -v
