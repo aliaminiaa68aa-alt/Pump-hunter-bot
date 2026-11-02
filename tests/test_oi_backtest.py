@@ -70,6 +70,7 @@ class BacktestTests(unittest.TestCase):
         result = simulate_trade(signal, future, fee_bps=0, slippage_bps=0)
         self.assertEqual(result["gross_r"], -1.0)
         self.assertEqual(result["exit_reason"], "stop")
+        self.assertEqual(result["bars_held"], 1)
 
     def test_long_stop_gap_fills_at_worse_open(self):
         signal = SimpleNamespace(
@@ -123,6 +124,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result["exit_reason"], "gap_stop_after_tp1")
         self.assertEqual(result["exit_price"], 95.0)
         self.assertEqual(result["gross_r"], -0.75)
+        self.assertEqual(result["bars_held"], 2)
 
     def test_tp1_then_stop_is_zero_gross_r(self):
         signal = SimpleNamespace(
