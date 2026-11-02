@@ -75,7 +75,7 @@ these exact headers:
 
 The OI CSV must contain:
 
-`timestamp,sumOpenInterestValue`
+`timestamp,sumOpenInterest`
 
 The candle export must include the taker-buy quote volume field; ordinary OHLCV
 exports that omit it are not equivalent and cannot be used by this strategy.
