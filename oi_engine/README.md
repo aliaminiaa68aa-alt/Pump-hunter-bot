@@ -54,9 +54,9 @@ same symbol. Exits assume 50% at TP1 and 50% at TP2, with a fixed stop; if stop 
 are both touched intrabar in one OHLC candle, stop is counted first. Opening
 gaps are processed before intrabar highs/lows: adverse stop gaps fill at the
 worse opening price, and favorable target gaps receive opening-price
-improvement. Historical funding is excluded. Binance's OI history endpoint is capped at 500 samples in this
-implementation, so this is only a short recent sample and must not be presented
-as a robust long-term win rate. Run multiple symbols and longer, independently
+improvement. Historical funding is excluded. Binance's OI history endpoint returns at most 500 samples per request and
+retains only the latest month; the downloader pages through that window. This
+is still a limited sample and must not be presented as a robust long-term win rate. Run multiple symbols and longer, independently
 collected data before drawing conclusions.
 
 
@@ -76,9 +76,9 @@ python -m oi_engine.backtest --symbol BTCUSDT \
 
 The exporter writes the exact candle and OI CSV schemas accepted by the
 backtest. It uses public endpoints only and does not bypass HTTP 451 or other
-regional restrictions. Binance currently caps OI history at 500 samples per
-request (about five days at 15m intervals); this is useful for a smoke test,
-not robust long-term validation. Collect a longer authorized history before
+regional restrictions. Binance caps OI history at 500 samples per request and retains only the latest
+month. The exporter paginates through that window (roughly 2,700+ 15m samples),
+but one month is still not robust long-term validation. Collect a longer authorized history before
 making claims about win rate or profitability.
 
 ### Authorized CSV history import
