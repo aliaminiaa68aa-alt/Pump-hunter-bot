@@ -71,6 +71,59 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result["gross_r"], -1.0)
         self.assertEqual(result["exit_reason"], "stop")
 
+    def test_long_stop_gap_fills_at_worse_open(self):
+        signal = SimpleNamespace(
+            symbol="XUSDT", side="LONG", entry=100.0, stop_loss=98.0,
+            take_profit_1=102.0, take_profit_2=104.0, candle_close_time=1
+        )
+        result = simulate_trade(
+            signal, [{"open": 96.0, "high": 97.0, "low": 95.0, "close": 96.5}],
+            fee_bps=0, slippage_bps=0
+        )
+        self.assertEqual(result["exit_reason"], "gap_stop")
+        self.assertEqual(result["exit_price"], 96.0)
+        self.assertEqual(result["gross_r"], -2.0)
+
+    def test_short_stop_gap_fills_at_worse_open(self):
+        signal = SimpleNamespace(
+            symbol="XUSDT", side="SHORT", entry=100.0, stop_loss=102.0,
+            take_profit_1=98.0, take_profit_2=96.0, candle_close_time=1
+        )
+        result = simulate_trade(
+            signal, [{"open": 104.0, "high": 105.0, "low": 103.0, "close": 104.5}],
+            fee_bps=0, slippage_bps=0
+        )
+        self.assertEqual(result["exit_reason"], "gap_stop")
+        self.assertEqual(result["exit_price"], 104.0)
+        self.assertEqual(result["gross_r"], -2.0)
+
+    def test_gap_through_tp2_gets_opening_price_improvement(self):
+        signal = SimpleNamespace(
+            symbol="XUSDT", side="LONG", entry=100.0, stop_loss=98.0,
+            take_profit_1=102.0, take_profit_2=104.0, candle_close_time=1
+        )
+        result = simulate_trade(
+            signal, [{"open": 105.0, "high": 106.0, "low": 104.5, "close": 105.5}],
+            fee_bps=0, slippage_bps=0
+        )
+        self.assertEqual(result["exit_reason"], "gap_tp2")
+        self.assertEqual(result["exit_price"], 105.0)
+        self.assertEqual(result["gross_r"], 2.5)
+
+    def test_gap_stop_after_tp1_marks_remaining_half_at_gap_open(self):
+        signal = SimpleNamespace(
+            symbol="XUSDT", side="LONG", entry=100.0, stop_loss=98.0,
+            take_profit_1=102.0, take_profit_2=104.0, candle_close_time=1
+        )
+        future = [
+            {"open": 100.0, "high": 102.5, "low": 99.5, "close": 102.0},
+            {"open": 95.0, "high": 96.0, "low": 94.0, "close": 95.5},
+        ]
+        result = simulate_trade(signal, future, fee_bps=0, slippage_bps=0)
+        self.assertEqual(result["exit_reason"], "gap_stop_after_tp1")
+        self.assertEqual(result["exit_price"], 95.0)
+        self.assertEqual(result["gross_r"], -0.75)
+
     def test_tp1_then_stop_is_zero_gross_r(self):
         signal = SimpleNamespace(
             symbol="XUSDT", side="LONG", entry=100.0, stop_loss=98.0,
