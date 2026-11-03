@@ -50,5 +50,5 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: .bot_state
+          path: .oi_state
           key: pump-hunter-state-${{ github.run_id }}
