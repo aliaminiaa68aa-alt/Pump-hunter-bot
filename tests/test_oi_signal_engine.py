@@ -57,8 +57,13 @@ class SignalEngineTests(unittest.TestCase):
     def test_signal_score_is_not_presented_as_win_probability(self):
         signal = evaluate_snapshot(make_snapshot("LONG"))
         message = format_signal(signal)
-        self.assertIn("امتیاز فنی:", message)
-        self.assertIn("درصد احتمال برد نیست", message)
+        self.assertIn("قدرت حرکت:", message)
+        self.assertIn("کیفیت نقطه ورود:", message)
+        self.assertIn("نه احتمال برد", message)
+        self.assertGreaterEqual(signal.movement_strength, 0)
+        self.assertLessEqual(signal.movement_strength, 100)
+        self.assertGreaterEqual(signal.entry_quality, 0)
+        self.assertLessEqual(signal.entry_quality, 100)
 
     def test_confirmed_long(self):
         signal = evaluate_snapshot(make_snapshot("LONG"))
@@ -66,6 +71,20 @@ class SignalEngineTests(unittest.TestCase):
         self.assertEqual(signal.side, "LONG")
         self.assertLess(signal.stop_loss, signal.entry)
         self.assertGreater(signal.take_profit_2, signal.take_profit_1)
+
+    def test_movement_and_entry_scores_are_separate_components(self):
+        strong = evaluate_snapshot(make_snapshot("LONG"))
+        self.assertIsNotNone(strong)
+        self.assertNotEqual(strong.movement_strength, strong.entry_quality)
+        stretched = make_snapshot("LONG")
+        stretched["candles"][-1]["close"] = 104.0
+        stretched["candles"][-1]["high"] = 104.1
+        stretched["candles"][-1]["open"] = 101.0
+        stretched["candles"][-1]["quote_volume"] = 200000.0
+        stretched["candles"][-1]["taker_buy_quote"] = 120000.0
+        late_entry = evaluate_snapshot(stretched)
+        self.assertIsNotNone(late_entry)
+        self.assertLess(late_entry.entry_quality, strong.entry_quality)
 
     def test_confirmed_short(self):
         signal = evaluate_snapshot(make_snapshot("SHORT"))
