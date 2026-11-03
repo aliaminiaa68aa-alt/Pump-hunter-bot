@@ -1,6 +1,6 @@
 import unittest
 
-from oi_engine.outcome_tracker import make_trade_record, monitor_journal
+from oi_engine.outcome_tracker import make_trade_record, monitor_journal, summarize_outcomes
 
 
 def signal(side="LONG"):
@@ -98,6 +98,32 @@ class OutcomeTrackerTests(unittest.TestCase):
         record = journal["trades"][key]
         self.assertEqual(record["status"], "OPEN")
         self.assertIn("provider unavailable", record["last_error"])
+
+    def test_signal_scores_are_preserved_and_reported_by_outcome(self):
+        source = signal()
+        source.update({"movement_strength": 78, "entry_quality": 42, "engine": "OI"})
+        record = make_trade_record(source, {"oi_change_15m_window_pct": 0.4}, 900000)
+        self.assertEqual(record["signal"]["movement_strength"], 78)
+        self.assertEqual(record["signal"]["entry_quality"], 42)
+        record["events"] = [{"event": "TP1", "time_ms": 1000000}]
+        record["status"] = "TP1_HIT"
+        report = summarize_outcomes({"trades": {record["trade_id"]: record}})
+        self.assertEqual(report["tp1_before_sl"], 1)
+        self.assertEqual(report["groups"]["tp1_before_sl"]["movement_strength_avg"], 78.0)
+        self.assertEqual(report["groups"]["tp1_before_sl"]["entry_quality_avg"], 42.0)
+        self.assertEqual(report["by_engine_side"]["OI:LONG"]["total"], 1)
+
+    def test_same_candle_stop_target_is_explicitly_flagged(self):
+        record = make_trade_record(signal(), {}, 900000)
+        journal = {"trades": {record["trade_id"]: record}}
+        both = [candle(900000, 100, 103, 97, 101)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: both)
+        event = journal["trades"][record["trade_id"]]["events"][0]
+        self.assertTrue(event["ambiguous_same_candle"])
+        self.assertEqual(event["same_candle_targets"], ["TP1"])
+        report = summarize_outcomes(journal)
+        self.assertEqual(report["ambiguous_stop_target"], 1)
+        self.assertEqual(report["sl_before_tp1"], 1)
 
     def test_trade_times_out_after_four_days(self):
         journal, key = self.journal()
