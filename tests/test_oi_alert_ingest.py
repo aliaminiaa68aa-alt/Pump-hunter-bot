@@ -4,7 +4,7 @@ from oi_engine.alert_ingest import parse_forwarded_oi_alert, parse_oi_alert_dire
 
 class AlertIngestTests(unittest.TestCase):
     def test_channel_green_marker_means_long(self):
-        self.assertEqual(parse_oi_alert_direction({"channel_post": {"text": "🔥🔥🔥 🟢 #GRVT $0.24 • OI [15m]"}}), "LONG")
+        self.assertEqual(parse_oi_alert_direction({"channel_post": {"text": "🚨 Crypto Open Interest | Pump/Dump Screener Bot 🔥 🔥 🔥 🟢 #GRVT $0.24 • OI [15m]"}}), "LONG")
 
     def test_channel_red_marker_means_short(self):
         self.assertEqual(parse_oi_alert_direction({"channel_post": {"text": "🔴 #ONDS $5.84 • OI [15m]"}}), "SHORT")
