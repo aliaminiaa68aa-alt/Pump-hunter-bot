@@ -1,8 +1,17 @@
 import unittest
-from oi_engine.alert_ingest import parse_forwarded_oi_alert
+from oi_engine.alert_ingest import parse_forwarded_oi_alert, parse_oi_alert_direction
 
 
 class AlertIngestTests(unittest.TestCase):
+    def test_channel_green_marker_means_long(self):
+        self.assertEqual(parse_oi_alert_direction({"channel_post": {"text": "🔥🔥🔥 🟢 #GRVT $0.24 • OI [15m]"}}), "LONG")
+
+    def test_channel_red_marker_means_short(self):
+        self.assertEqual(parse_oi_alert_direction({"channel_post": {"text": "🔴 #ONDS $5.84 • OI [15m]"}}), "SHORT")
+
+    def test_missing_direction_marker_is_not_guessed(self):
+        self.assertIsNone(parse_oi_alert_direction({"channel_post": {"text": "#TEST $1.00 • OI [15m]"}}))
+
     def test_forwarded_channel_symbol(self):
         self.assertEqual(parse_forwarded_oi_alert({"message": {"forward_origin": {"type": "channel"}, "text": "OI: JCT/USDT"}}), "JCTUSDT")
 
