@@ -37,7 +37,7 @@ def advance_pullback_setup(
         return None, None, "جهت هشدار جدید با setup قبلی متفاوت است؛ setup قبلی پاک شد"
 
     if pending is None:
-        breakout = evaluate_snapshot(snapshot)
+        breakout = evaluate_snapshot(snapshot, required_side)
         if breakout is None:
             return None, None, "شکست اولیه هنوز تأیید نشده"
         if required_side is not None and breakout.side != required_side:
