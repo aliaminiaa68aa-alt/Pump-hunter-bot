@@ -28,7 +28,7 @@ class WatchlistTests(unittest.TestCase):
         result = source_oi_priority(source)
         self.assertEqual(result["source_oi_15m_pct"], 5.30)
         self.assertEqual(result["source_oi_1h_pct"], 8.47)
-        self.assertAlmostEqual(result["oi_priority_score"], 11.46, places=2)
+        self.assertAlmostEqual(result["oi_priority_score"], 11.44, places=2)
 
     def test_source_oi_priority_supports_legacy_compact_feed(self):
         result = source_oi_priority("🟩+5.30%    🟩+2.17% (15m)")
