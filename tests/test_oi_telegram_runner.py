@@ -193,5 +193,45 @@ class TelegramRunnerTests(unittest.TestCase):
             self.assertEqual(json.loads(watch_path.read_text(encoding="utf-8"))["symbols"], {})
 
 
+    def test_migrates_cached_source_direction_without_guessing_ambiguous_alerts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "sent_signals.json"
+            watch_path = Path(directory) / "watchlist.json"
+            outcome_path = Path(directory) / "trade_outcomes.json"
+            initial = {
+                "BTCUSDT": {
+                    "last_alert": 2000000,
+                    "source_text": "🚨 Crypto Open Interest 🔥 🔥 🟢 #BTC $1.0 • OI [15m]",
+                },
+                "ETHUSDT": {
+                    "last_alert": 2000000,
+                    "source_text": "🚨 Crypto Open Interest #ETH $1.0 • OI [15m]",
+                },
+            }
+            watch_path.write_text(json.dumps({
+                "public_channel_last_id": 10, "symbols": initial
+            }), encoding="utf-8")
+            captured = {}
+            def scan(batch, client=None):
+                captured.update(batch)
+                return [], batch
+            env = {"BOT_TOKEN": "token", "CHAT_ID": "chat", "COINALYZE_API_KEY": "key"}
+            with patch.object(telegram_runner, "STATE_PATH", state_path), \\
+                 patch.object(telegram_runner, "WATCHLIST_PATH", watch_path), \\
+                 patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \\
+                 patch.dict(os.environ, env), \\
+                 patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \\
+                 patch.object(telegram_runner, "poll_public_channel_alerts", return_value=(10, 0)), \\
+                 patch.object(telegram_runner, "scan_watchlist", side_effect=scan), \\
+                 patch.object(telegram_runner, "send_telegram"), \\
+                 patch.object(telegram_runner.time, "time", return_value=2000000):
+                telegram_runner.main()
+            self.assertEqual(captured["BTCUSDT"].get("source_side"), "LONG")
+            self.assertNotIn("source_side", captured["ETHUSDT"])
+            saved = json.loads(watch_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["symbols"]["BTCUSDT"]["source_side"], "LONG")
+            self.assertNotIn("source_side", saved["symbols"]["ETHUSDT"])
+
+
 if __name__ == "__main__":
     unittest.main()
