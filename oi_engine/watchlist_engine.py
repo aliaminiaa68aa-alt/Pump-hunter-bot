@@ -149,50 +149,51 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                         "enough aligned 15m OHLCV/OI history for a safe fallback"
                     )
                 record["data_source"] = "Coinalyze 15m fallback (Binance HTTP 451)"
+            # Run OI/BOS independently; it must not wait for a pullback.
+            bos_signal = None
+            try:
+                bos_signal = evaluate_snapshot(snapshot)
+            except (KeyError, TypeError, ValueError, MarketDataError):
+                bos_signal = None
             previous_pending_setup = record.get("pending_setup")
-            signal, pending_setup, setup_reason = advance_pullback_setup(
+            pullback_signal, pending_setup, setup_reason = advance_pullback_setup(
                 snapshot, previous_pending_setup, record.get("source_side")
             )
-            if signal is None:
-                record["pending_setup"] = pending_setup
-                record["status"] = "منتظر پولبک و تأیید" if pending_setup else "در حال رصد"
-                if pending_setup:
-                    record["reason"] = setup_reason
-                else:
-                    reasons = diagnose_snapshot(snapshot)
-                    record["reason"] = setup_reason or ("رد شرایط: " + " | ".join(reasons[:3]))
-                continue
             if metrics is None:
                 metrics = client.fetch_metrics(symbol, now=timestamp)
                 metrics.pop("market_snapshot", None)
-            # Upstream OI expansion is a ranking bonus only. It never bypasses
-            # closed-candle, pullback, directional-flow, or Coinalyze entry checks.
             metrics.update(source_oi_priority(record.get("source_text", "")))
             record["oi_priority_score"] = metrics["oi_priority_score"]
             record["oi_priority_tier"] = metrics["oi_priority_tier"]
             record["coinalyze"] = metrics
-            if not coinalyze_confirms(signal, metrics):
-                # A transient/misaligned second-stage snapshot must not erase the
-                # valid pullback setup. Keep it alive so the next scan can retry
-                # confirmation on a fresh closed candle instead of requiring a
-                # completely new breakout.
-                record["pending_setup"] = pending_setup or previous_pending_setup
-                record["status"] = "نزدیک شرایط ورود"
-                oi_value = metrics.get("oi_change_15m_window_pct")
-                flow_value = metrics.get("taker_buy_ratio")
-                record["reason"] = (
-                    f"Coinalyze رد کرد: OI={oi_value if oi_value is not None else 'ناموجود'}%، "
-                    f"نسبت خرید={flow_value if flow_value is not None else 'ناموجود'}؛ "
-                    + ("برای LONG حداقل OI برابر 0.15% و خرید تهاجمی 52% لازم است"
-                       if signal.side == "LONG" else
-                       "برای SHORT حداقل OI برابر 0.15% و نسبت خرید حداکثر 48% لازم است")
-                )
-                continue
-            record.pop("pending_setup", None)
-            metrics["engine"] = "PULLBACK"
-            record["status"] = f"تأیید {signal.side}"
-            record["reason"] = "تأیید موتور 15m و Coinalyze"
-            confirmed.append((signal, metrics))
+            if bos_signal is not None and coinalyze_confirms(bos_signal, metrics):
+                bos_metrics = dict(metrics)
+                bos_metrics["engine"] = "OI_BOS"
+                confirmed.append((bos_signal, bos_metrics))
+            if pullback_signal is not None:
+                if coinalyze_confirms(pullback_signal, metrics):
+                    pullback_metrics = dict(metrics)
+                    pullback_metrics["engine"] = "PULLBACK"
+                    confirmed.append((pullback_signal, pullback_metrics))
+                    record.pop("pending_setup", None)
+                    record["status"] = f"تأیید {pullback_signal.side}"
+                    record["reason"] = "تأیید موتور Pullback و Coinalyze"
+                else:
+                    record["pending_setup"] = pending_setup or previous_pending_setup
+                    record["status"] = "نزدیک شرایط ورود"
+                    record["reason"] = "سیگنال پولبک منتظر تأیید OI/جریان سفارش است"
+            else:
+                record["pending_setup"] = pending_setup
+                record["status"] = "منتظر پولبک و تأیید" if pending_setup else "در حال رصد"
+                if pending_setup:
+                    record["reason"] = setup_reason
+                elif bos_signal is None:
+                    reasons = diagnose_snapshot(snapshot)
+                    record["reason"] = setup_reason or ("رد شرایط: " + " | ".join(reasons[:3]))
+                else:
+                    record["reason"] = "BOS تشکیل شد اما تأیید Coinalyze کامل نیست"
+            if bos_signal is not None and not coinalyze_confirms(bos_signal, metrics):
+                record["reason"] = record.get("reason", "") + " | تأیید OI_BOS در Coinalyze کامل نشد"
         except (CoinalyzeError, MarketDataError, OSError, ValueError, KeyError) as exc:
             record["status"] = "خطای دریافت داده"
             record["reason"] = f"{type(exc).__name__}: {exc}"
