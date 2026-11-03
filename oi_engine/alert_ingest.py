@@ -23,7 +23,7 @@ def _is_crypto_candidate(symbol: str) -> bool:
 
 
 def parse_oi_alert_direction(update: Dict[str, Any]) -> Optional[str]:
-    """Read @oi_detector's colored marker: green=LONG, red=SHORT."""
+    """Read the colored direction marker immediately before the ticker hashtag."""
     channel_post = update.get("channel_post")
     message = channel_post or update.get("message") or {}
     if not isinstance(message, dict):
@@ -31,7 +31,9 @@ def parse_oi_alert_direction(update: Dict[str, Any]) -> Optional[str]:
     body = message.get("text") or message.get("caption") or ""
     if not isinstance(body, str):
         return None
-    marker = re.search(r"^\s*(?:🔥\s*)*(🟢|🔴)", body)
+    # Real @oi_detector posts include a title before the marker, e.g.
+    # "🚨 Crypto Open Interest ... 🔥 🔥 🟢 #SAGA ...".
+    marker = re.search(r"(?:^|\\s)(?:🔥\\s*)*(🟢|🔴)\\s*#[A-Z0-9]{2,12}(?=\\s|$)", body, re.I)
     if not marker:
         return None
     return "LONG" if marker.group(1) == "🟢" else "SHORT"
