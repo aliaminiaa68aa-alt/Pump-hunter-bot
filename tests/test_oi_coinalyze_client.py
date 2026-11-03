@@ -61,6 +61,25 @@ class CoinalyzeClientTests(unittest.TestCase):
         self.assertNotIn("secret-value", repr(session.get.call_args))
 
 
+    def test_fetch_ohlcv_candles_returns_normalized_15m_rows(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"
+        seen = {}
+        def history(endpoint, symbol, start, end):
+            seen.update({"endpoint": endpoint, "symbol": symbol, "start": start, "end": end})
+            return [
+                {"t": 180000, "o": "100", "h": "105", "l": "98", "c": "103"},
+                {"t": 180900, "o": "103", "h": "106", "l": "101", "c": "104"},
+            ]
+        client._history = history
+        rows = client.fetch_ohlcv_candles("BTCUSDT", 180000000, 181800000)
+        self.assertEqual(seen, {
+            "endpoint": "ohlcv-history", "symbol": "BTCUSDT_PERP.A",
+            "start": 180000, "end": 181800,
+        })
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0][:5], [180000000, "100.0", "105.0", "98.0", "103.0"])
+
     def test_fetch_metrics_builds_closed_15m_market_snapshot(self):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
         client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"
