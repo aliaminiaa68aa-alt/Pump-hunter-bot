@@ -3,7 +3,7 @@ import requests
 from unittest.mock import Mock
 from unittest.mock import patch
 from oi_engine.signal_engine import Signal
-from oi_engine.watchlist_engine import coinalyze_confirms, scan_watchlist, format_confirmed_signal
+from oi_engine.watchlist_engine import coinalyze_confirms, scan_watchlist, format_confirmed_signal, source_oi_priority
 
 def signal(side="LONG"):
     return Signal("ABCUSDT",side,1,.98,1.02,1.04,.8,.3,.56,1.4,.0001,82,900000)
@@ -18,6 +18,23 @@ class FakeClient:
     def fetch_metrics(self, symbol, now=None): return self.value
 
 class WatchlistTests(unittest.TestCase):
+    def test_source_oi_priority_parses_labeled_timeframe_rows_not_price_changes(self):
+        source = (
+            "OI / Price change:\\n"
+            "5m: OI +0.20%, price -0.80%\\n"
+            "15m: OI +5.30%, price +2.17%\\n"
+            "1h: OI +8.47%, price +4.92%"
+        )
+        result = source_oi_priority(source)
+        self.assertEqual(result["source_oi_15m_pct"], 5.30)
+        self.assertEqual(result["source_oi_1h_pct"], 8.47)
+        self.assertAlmostEqual(result["oi_priority_score"], 11.46, places=2)
+
+    def test_source_oi_priority_supports_legacy_compact_feed(self):
+        result = source_oi_priority("🟩+5.30%    🟩+2.17% (15m)")
+        self.assertEqual(result["source_oi_15m_pct"], 5.30)
+        self.assertIsNone(result["source_oi_1h_pct"])
+
     def test_long_needs_oi_and_buy_flow(self):
         self.assertTrue(coinalyze_confirms(signal(),metrics()))
         self.assertFalse(coinalyze_confirms(signal(),metrics(taker=.49)))
