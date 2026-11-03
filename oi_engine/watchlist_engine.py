@@ -149,8 +149,9 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                         "enough aligned 15m OHLCV/OI history for a safe fallback"
                     )
                 record["data_source"] = "Coinalyze 15m fallback (Binance HTTP 451)"
+            previous_pending_setup = record.get("pending_setup")
             signal, pending_setup, setup_reason = advance_pullback_setup(
-                snapshot, record.get("pending_setup"), record.get("source_side")
+                snapshot, previous_pending_setup, record.get("source_side")
             )
             if signal is None:
                 record["pending_setup"] = pending_setup
@@ -161,7 +162,6 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     reasons = diagnose_snapshot(snapshot)
                     record["reason"] = setup_reason or ("رد شرایط: " + " | ".join(reasons[:3]))
                 continue
-            record.pop("pending_setup", None)
             if metrics is None:
                 metrics = client.fetch_metrics(symbol, now=timestamp)
                 metrics.pop("market_snapshot", None)
@@ -172,6 +172,11 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["oi_priority_tier"] = metrics["oi_priority_tier"]
             record["coinalyze"] = metrics
             if not coinalyze_confirms(signal, metrics):
+                # A transient/misaligned second-stage snapshot must not erase the
+                # valid pullback setup. Keep it alive so the next scan can retry
+                # confirmation on a fresh closed candle instead of requiring a
+                # completely new breakout.
+                record["pending_setup"] = pending_setup or previous_pending_setup
                 record["status"] = "نزدیک شرایط ورود"
                 oi_value = metrics.get("oi_change_15m_window_pct")
                 flow_value = metrics.get("taker_buy_ratio")
@@ -183,6 +188,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                        "برای SHORT حداقل OI برابر 0.15% و نسبت خرید حداکثر 48% لازم است")
                 )
                 continue
+            record.pop("pending_setup", None)
             record["status"] = f"تأیید {signal.side}"
             record["reason"] = "تأیید موتور 15m و Coinalyze"
             confirmed.append((signal, metrics))
