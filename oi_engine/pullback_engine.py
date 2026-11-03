@@ -88,7 +88,7 @@ def advance_pullback_setup(
     if not touched or not confirmed:
         return None, pending, "هنوز پولبک و کندل برگشتی معتبر شکل نگرفته"
     if not directional_flow:
-        return None, pending, "پولبک رخ داد اما جریان سفارش هنوز هم‌جهت نیست؛ تا پایان مهلت منتظر تأیید معتبر می‌مانیم"
+        return None, pending, "پولبک رخ داد اما جریان سفارش هنوز هم‌جهت نیست؛ setup تا پایان مهلت حفظ می‌شود و منتظر تأیید معتبر می‌مانیم"
 
     oi_change = (float(oi_values[-1]) / float(oi_values[-2]) - 1.0) * 100.0
     if oi_change < 0.35:
