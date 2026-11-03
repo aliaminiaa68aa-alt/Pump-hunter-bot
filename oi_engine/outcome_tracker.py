@@ -95,9 +95,49 @@ def monitor_journal(
     now = int(now_ms if now_ms is not None else time.time() * 1000)
     trades = journal.setdefault("trades", {})
     for trade_id, record in list(trades.items()):
-        if record.get("status") in {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT"}:
-            continue
+        status = record.get("status")
         signal = record["signal"]
+
+        # Keep observing stopped trades for 24h to measure post-stop follow-through.
+        # Historical status remains CLOSED_SL; this is diagnostic, not a reopened trade.
+        if status == "CLOSED_SL":
+            post_stop_until = int(record.get("post_stop_until_ms",
+                                             int(record.get("exit_time_ms", now)) + 24 * 60 * 60 * 1000))
+            if now > post_stop_until:
+                record["post_stop_tracking"] = "COMPLETE"
+                continue
+            try:
+                cursor = int(record.get("post_stop_last_checked_ms",
+                                        int(record.get("exit_time_ms", now)) + 1))
+                candles = sorted(fetcher(signal["symbol"], cursor, min(now, post_stop_until)),
+                                 key=lambda row: int(row[0]))
+                for candle in candles:
+                    open_ms = int(candle[0])
+                    close_ms = open_ms + INTERVAL_MS - 1
+                    if close_ms >= now:
+                        continue
+                    high, low = float(candle[2]), float(candle[3])
+                    entry = float(signal["entry"])
+                    side = signal["side"]
+                    favorable = ((high / entry - 1.0) * 100.0 if side == "LONG"
+                                 else (entry / low - 1.0) * 100.0)
+                    record["post_stop_mfe_pct"] = max(
+                        float(record.get("post_stop_mfe_pct", 0.0)), favorable
+                    )
+                    tp1 = float(signal["take_profit_1"])
+                    tp2 = float(signal["take_profit_2"])
+                    if (high >= tp1 if side == "LONG" else low <= tp1):
+                        record["post_stop_tp1_reached"] = True
+                    if (high >= tp2 if side == "LONG" else low <= tp2):
+                        record["post_stop_tp2_reached"] = True
+                    record["post_stop_last_checked_ms"] = close_ms + 1
+                record["post_stop_tracking"] = "COMPLETE" if now >= post_stop_until else "ACTIVE"
+            except Exception as exc:
+                record["post_stop_error"] = f"{type(exc).__name__}: {exc}"
+            continue
+
+        if status in {"CLOSED_TP2", "TIMED_OUT"}:
+            continue
         side = signal["side"]
         entry = float(signal["entry"])
         try:
@@ -128,6 +168,12 @@ def monitor_journal(
                     })
                     record["status"] = "CLOSED_SL"
                     record["exit_time_ms"] = close_ms
+                    record["post_stop_last_checked_ms"] = close_ms + 1
+                    record["post_stop_until_ms"] = close_ms + 24 * 60 * 60 * 1000
+                    record["post_stop_mfe_pct"] = 0.0
+                    record["post_stop_tp1_reached"] = False
+                    record["post_stop_tp2_reached"] = False
+                    record["post_stop_tracking"] = "ACTIVE"
                     record["mae_pct"] = max(
                         float(record.get("mae_pct", 0.0)),
                         abs(fill - entry) / entry * 100.0 if entry else 0.0,
