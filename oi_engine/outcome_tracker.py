@@ -36,6 +36,7 @@ def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
 
 def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> Dict[str, Any]:
     data = signal.to_dict() if hasattr(signal, "to_dict") else dict(signal)
+    data["engine"] = metrics.get("engine", data.get("engine", "UNSPECIFIED"))
     trade_id = f"{data['symbol']}:{data['side']}:{int(data['candle_close_time'])}"
     return {
         "trade_id": trade_id,
@@ -55,6 +56,7 @@ def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> 
         "mfe_pct": 0.0,
         "mae_pct": 0.0,
         "mae_before_tp1_pct": 0.0,
+        "mfe_before_tp1_pct": 0.0,
         "tp1_candle_excursion_ambiguous": False,
         "last_error": None,
     }
@@ -206,15 +208,25 @@ def monitor_journal(
 
                 if "TP1" not in event_names:
                     if tp1_hit:
+                        # Intrabar order is unknown: exclude both excursions from
+                        # the candle that first touched TP1.
                         record["tp1_candle_excursion_ambiguous"] = True
                     else:
                         adverse_before_tp1 = (
                             (entry - low) / entry * 100.0 if side == "LONG"
                             else (high - entry) / entry * 100.0
                         )
+                        favorable_before_tp1 = (
+                            (high - entry) / entry * 100.0 if side == "LONG"
+                            else (entry - low) / entry * 100.0
+                        )
                         record["mae_before_tp1_pct"] = max(
                             float(record.get("mae_before_tp1_pct", 0.0)),
                             max(0.0, adverse_before_tp1),
+                        )
+                        record["mfe_before_tp1_pct"] = max(
+                            float(record.get("mfe_before_tp1_pct", 0.0)),
+                            max(0.0, favorable_before_tp1),
                         )
 
                 if tp1_hit and "TP1" not in event_names:
@@ -302,6 +314,7 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
             "movement_strength": signal.get("movement_strength"),
             "entry_quality": signal.get("entry_quality"),
             "mae_before_tp1_pct": record.get("mae_before_tp1_pct"),
+            "mfe_before_tp1_pct": record.get("mfe_before_tp1_pct"),
         }
         if record.get("tp1_candle_excursion_ambiguous"):
             report.setdefault("tp1_excursion_ambiguous", 0)
@@ -315,7 +328,7 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         bucket["statuses"][status] = bucket["statuses"].get(status, 0) + 1
     for name, rows in groups.items():
         summary = {"count": len(rows)}
-        for field in ("movement_strength", "entry_quality", "mae_before_tp1_pct"):
+        for field in ("movement_strength", "entry_quality", "mae_before_tp1_pct", "mfe_before_tp1_pct"):
             values = [float(row[field]) for row in rows if row.get(field) is not None]
             summary[field + "_avg"] = round(sum(values) / len(values), 2) if values else None
         report["groups"][name] = summary
