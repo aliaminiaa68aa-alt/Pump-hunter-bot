@@ -297,7 +297,7 @@ def main() -> None:
         message_id = send_telegram(token, chat_id, format_confirmed_signal(signal, metrics))
         trade_record = make_trade_record(signal, metrics, int(time.time() * 1000))
         trade_record["telegram_chat_id"] = str(chat_id)
-        trade_record["telegram_message_id"] = message_id
+        trade_record["telegram_message_id"] = message_id if isinstance(message_id, int) else None
         outcome_journal.setdefault("trades", {}).setdefault(trade_record["trade_id"], trade_record)
         save_outcome_journal(outcome_journal)
         state[key] = candle_id
