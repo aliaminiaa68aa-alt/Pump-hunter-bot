@@ -21,7 +21,7 @@ class PublicTelegramSourceTests(unittest.TestCase):
 
     def test_new_public_post_is_added_and_cursor_moves(self):
         posts = [{
-            "message_id": 20, "date": 1000, "text": "🟢 OI alert TESTUSDT.P +2%",
+            "message_id": 20, "date": 1000, "text": "🚨 Crypto Open Interest | Pump/Dump Screener Bot 🔥 🔥 🟢 #TEST $0.123 • OI [15m]",
             "channel": "oi_detector",
         }]
         watchlist = {}
