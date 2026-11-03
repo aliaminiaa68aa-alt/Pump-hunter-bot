@@ -288,8 +288,14 @@ def score_signal_components(
     entry_quality = round(min(100.0, body_score + close_score + extension_score))
     return min(100, max(0, movement_strength)), min(100, max(0, entry_quality))
 
-def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
-    """Return a final signal only after closed-candle, OI, flow and breakout checks."""
+def evaluate_snapshot(snapshot: Dict[str, Any], required_side: Optional[str] = None) -> Optional[Signal]:
+    """Return a directional 15m signal after closed-candle, OI and order-flow confirmation.
+
+    The upstream OI alert supplies direction context, not permission to enter.
+    A signal still requires independent price, OI and taker-flow alignment.
+    """
+    if required_side not in {None, "LONG", "SHORT"}:
+        required_side = None
     candles = snapshot["candles"]
     oi_values = snapshot["oi_values"]
     if len(candles) < 22 or len(oi_values) < 3:
@@ -328,29 +334,38 @@ def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
     prior_low = min(x["low"] for x in prior)
     funding = snapshot["funding_rate"]
 
-    # Require fresh positioning, directional aggression and a confirmed 5-candle break.
-    long_checks = [
-        oi_change >= 0.35,
-        price_change >= 0.15,
-        taker_ratio >= 0.53,
-        volume_ratio >= 1.15,
-        last["close"] > prior_high and last["close"] > last["open"],
-    ]
-    short_checks = [
-        oi_change >= 0.35,
-        price_change <= -0.15,
-        taker_ratio <= 0.47,
-        volume_ratio >= 1.15,
-        last["close"] < prior_low and last["close"] < last["open"],
-    ]
+    # The channel alert narrows the direction. Keep OI + price + taker flow
+    # mandatory, while accepting either expanding volume or a local structure
+    # break as the fourth confirmation. Requiring all five checks caused the
+    # live scanner to watch valid alerts but almost never produce an entry.
+    long_break = last["close"] > prior_high and last["close"] > last["open"]
+    short_break = last["close"] < prior_low and last["close"] < last["open"]
+    active_volume = volume_ratio >= 1.05
 
-    side = None
-    checks = None
-    if sum(long_checks) == 5:
-        side, checks = "LONG", long_checks
-    elif sum(short_checks) == 5:
-        side, checks = "SHORT", short_checks
+    long_valid = (
+        oi_change >= 0.15
+        and price_change >= 0.05
+        and taker_ratio >= 0.52
+        and (active_volume or long_break)
+    )
+    short_valid = (
+        oi_change >= 0.15
+        and price_change <= -0.05
+        and taker_ratio <= 0.48
+        and (active_volume or short_break)
+    )
+
+    if required_side == "LONG":
+        side = "LONG" if long_valid else None
+    elif required_side == "SHORT":
+        side = "SHORT" if short_valid else None
+    elif long_valid and not short_valid:
+        side = "LONG"
+    elif short_valid and not long_valid:
+        side = "SHORT"
     else:
+        side = None
+    if side is None:
         return None
 
     entry = last["close"]
