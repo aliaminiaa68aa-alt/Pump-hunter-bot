@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Tuple
 
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
 from oi_engine.signal_engine import MarketDataError, Signal, diagnose_snapshot, evaluate_snapshot, fetch_snapshot, format_signal
+from oi_engine.pullback_engine import advance_pullback_setup
 
 
 def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
@@ -90,12 +91,19 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                         "enough aligned 15m OHLCV/OI history for a safe fallback"
                     )
                 record["data_source"] = "Coinalyze 15m fallback (Binance HTTP 451)"
-            signal = evaluate_snapshot(snapshot)
+            signal, pending_setup, setup_reason = advance_pullback_setup(
+                snapshot, record.get("pending_setup")
+            )
             if signal is None:
-                record["status"] = "در حال رصد"
-                reasons = diagnose_snapshot(snapshot)
-                record["reason"] = "رد شرایط: " + " | ".join(reasons[:3])
+                record["pending_setup"] = pending_setup
+                record["status"] = "منتظر پولبک و تأیید" if pending_setup else "در حال رصد"
+                if pending_setup:
+                    record["reason"] = setup_reason
+                else:
+                    reasons = diagnose_snapshot(snapshot)
+                    record["reason"] = setup_reason or ("رد شرایط: " + " | ".join(reasons[:3]))
                 continue
+            record.pop("pending_setup", None)
             if metrics is None:
                 metrics = client.fetch_metrics(symbol, now=timestamp)
                 metrics.pop("market_snapshot", None)
