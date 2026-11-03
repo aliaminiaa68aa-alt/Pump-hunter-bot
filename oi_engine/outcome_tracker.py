@@ -274,7 +274,7 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         metrics = {"movement_strength": signal.get("movement_strength"),
                    "entry_quality": signal.get("entry_quality")}
         groups.setdefault(outcome, []).append(metrics)
-        engine = str(signal.get("engine", signal.get("strategy", "OI")))
+        engine = str(signal.get("engine", signal.get("strategy", "UNSPECIFIED")))
         side = str(signal.get("side", "UNKNOWN"))
         key = f"{engine}:{side}"
         bucket = report["by_engine_side"].setdefault(key, {"total": 0, "statuses": {}})
