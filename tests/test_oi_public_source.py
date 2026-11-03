@@ -35,7 +35,7 @@ class PublicTelegramSourceTests(unittest.TestCase):
 
     def test_alert_is_added_even_when_watchlist_already_has_four_symbols(self):
         posts = [{
-            "message_id": 20, "date": 1000, "text": "NEWCOINUSDT +2%",
+            "message_id": 20, "date": 1000, "text": "🔥 🟢 #NEWCOIN NEWCOINUSDT +2%",
             "channel": "oi_detector",
         }]
         watchlist = {f"COIN{i}USDT": {} for i in range(4)}
@@ -45,6 +45,20 @@ class PublicTelegramSourceTests(unittest.TestCase):
         self.assertEqual(added, 1)
         self.assertIn("NEWCOINUSDT", watchlist)
         self.assertEqual(len(watchlist), 5)
+
+    def test_alert_without_explicit_direction_is_skipped(self):
+        posts = [{
+            "message_id": 23, "date": 1000, "text": "NEWCOINUSDT +2%",
+            "channel": "oi_detector",
+        }]
+        watchlist = {}
+        with patch("oi_engine.telegram_public_source.fetch_public_channel_posts", return_value=posts), \\
+             patch("builtins.print") as log:
+            cursor, added = poll_public_channel_alerts("oi_detector", 22, watchlist, now=1000)
+        self.assertEqual(cursor, 23)
+        self.assertEqual(added, 0)
+        self.assertEqual(watchlist, {})
+        self.assertIn("missing or ambiguous LONG/SHORT marker", " ".join(str(call) for call in log.call_args_list))
 
     def test_unparsed_post_is_logged_with_message_id_and_cursor_advances(self):
         posts = [{
