@@ -9,11 +9,24 @@ SYMBOL_PATTERNS = (
     re.compile(r"(?<![A-Z0-9])([A-Z0-9]{2,})USDT(?![A-Z0-9])", re.I),
 )
 
+# The upstream OI feed also emits tokenized equities and ETF/index contracts.
+# These are explicitly outside this crypto-only scanner's scope.
+NON_CRYPTO_BASES = {
+    "AAPL", "AMD", "COST", "BYD", "XLE", "UVXY", "HIMS", "HK1810",
+}
+
+
+def _is_crypto_candidate(symbol: str) -> bool:
+    return symbol.endswith("USDT") and symbol[:-4] not in NON_CRYPTO_BASES
+
+
 def parse_forwarded_oi_alert(update: Dict[str, Any]) -> Optional[str]:
-    """Return a normalized USDT symbol from a forwarded message or a channel post.
+    """Return a normalized crypto USDT symbol from a forwarded message or channel post.
 
     Direct channel posts are accepted because the bot must be added to the source
     channel. Ordinary private/group messages are accepted only when forwarded.
+    Known equity/ETF symbols are rejected even when the source formats them as
+    USDT perpetual instruments.
     """
     channel_post = update.get("channel_post")
     message = channel_post or update.get("message") or {}
@@ -36,7 +49,8 @@ def parse_forwarded_oi_alert(update: Dict[str, Any]) -> Optional[str]:
     for pattern in SYMBOL_PATTERNS:
         match = pattern.search(body.upper())
         if match:
-            return f"{match.group(1).upper()}USDT"
+            symbol = f"{match.group(1).upper()}USDT"
+            return symbol if _is_crypto_candidate(symbol) else None
 
     # OI Detector posts commonly format the instrument as "#TICKER $price"
     # rather than spelling out TICKERUSDT. Accept that only for direct posts
@@ -47,5 +61,6 @@ def parse_forwarded_oi_alert(update: Dict[str, Any]) -> Optional[str]:
             body.upper(),
         )
         if hashtag_price:
-            return f"{hashtag_price.group(1).upper()}USDT"
+            symbol = f"{hashtag_price.group(1).upper()}USDT"
+            return symbol if _is_crypto_candidate(symbol) else None
     return None
