@@ -1,6 +1,8 @@
 name: Pump Hunter
 
 on:
+  push:
+    branches: [main]
   # Restore the independent full-universe pump scanner.
   # It complements the alert-driven OI engine; it does not replace it.
   workflow_dispatch:
