@@ -12,9 +12,11 @@ import requests
 from oi_engine.telegram_public_source import poll_public_channel_alerts
 from oi_engine.coinalyze_client import CoinalyzeClient
 from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal
+from oi_engine.outcome_tracker import make_trade_record, monitor_journal
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
+OUTCOME_PATH = Path(".oi_state/trade_outcomes.json")
 MAX_WATCHLIST_SYMBOLS = 8  # Coinalyze throttles at 40/min; larger batches reduce watchlist revisit time
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
 
@@ -49,6 +51,15 @@ def load_watchlist_state() -> Dict[str, Any]:
 
 def save_watchlist_state(state: Dict[str, Any]) -> None:
     _save_json(WATCHLIST_PATH, state)
+
+
+def load_outcome_journal() -> Dict[str, Any]:
+    raw = _load_json(OUTCOME_PATH, {"trades": {}})
+    return raw if isinstance(raw, dict) else {"trades": {}}
+
+
+def save_outcome_journal(journal: Dict[str, Any]) -> None:
+    _save_json(OUTCOME_PATH, journal)
 
 
 def send_telegram(token: str, chat_id: str, message: str) -> None:
@@ -108,6 +119,9 @@ def main() -> None:
 
     state = load_state()
     watch_state = load_watchlist_state()
+    outcome_journal = load_outcome_journal()
+    outcome_journal = monitor_journal(outcome_journal)
+    save_outcome_journal(outcome_journal)
     # Start from the public-channel source only. Do not ingest Telegram forwards,
     # direct channel updates delivered to the bot, or any legacy alert inbox.
     watchlist = watch_state.get("symbols", {})
@@ -154,6 +168,9 @@ def main() -> None:
         if state.get(key) == candle_id:
             continue
         send_telegram(token, chat_id, format_confirmed_signal(signal, metrics))
+        trade_record = make_trade_record(signal, metrics, int(time.time() * 1000))
+        outcome_journal.setdefault("trades", {}).setdefault(trade_record["trade_id"], trade_record)
+        save_outcome_journal(outcome_journal)
         state[key] = candle_id
         sent += 1
         save_state(state)
@@ -162,6 +179,7 @@ def main() -> None:
         state = dict(sorted(state.items(), key=lambda item: item[1])[-500:])
         save_state(state)
 
+    save_outcome_journal(outcome_journal)
     save_watchlist_state({
         "public_channel_last_id": public_last_id,
         "symbols": watchlist,
@@ -170,7 +188,8 @@ def main() -> None:
     })
     print(
         f"Alert-driven OI scan complete: watchlist={len(watchlist)}, "
-        f"new_public_channel_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}"
+        f"new_public_channel_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}, "
+        f"tracked_trades={len(outcome_journal.get('trades', {}))}"
     )
     for symbol, record in scanned_batch.items():
         print(
