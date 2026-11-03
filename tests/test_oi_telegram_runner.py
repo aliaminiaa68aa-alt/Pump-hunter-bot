@@ -137,6 +137,24 @@ class TelegramRunnerTests(unittest.TestCase):
                 telegram_runner.main()
             poll.assert_not_called()
 
+    def test_scan_diagnostics_count_priority_status_and_unscanned_symbols(self):
+        watchlist = {
+            "AUSDT": {"oi_priority_score": 11.4},
+            "BUSDT": {"oi_priority_score": 0.0},
+            "CUSDT": {"oi_priority_score": 6.2},
+        }
+        scanned = {
+            "AUSDT": {"status": "نزدیک شرایط ورود", "reason": "Coinalyze رد کرد: OI=0.1%"},
+            "BUSDT": {"status": "منتظر پولبک و تأیید", "reason": "شکست LONG ثبت شد؛ منتظر پولبک"},
+        }
+        result = telegram_runner.summarize_scan_diagnostics(watchlist, scanned)
+        self.assertEqual(result["watchlist_total"], 3)
+        self.assertEqual(result["high_oi_priority"], 2)
+        self.assertEqual(result["scanned"], 2)
+        self.assertEqual(result["not_scanned_this_cycle"], 1)
+        self.assertEqual(result["reasons"]["coinalyze_rejected"], 1)
+        self.assertEqual(result["reasons"]["pending_pullback"], 1)
+
     def test_watchlist_batch_rotates_without_dropping_symbols(self):
         watchlist = {f"COIN{i}USDT": {"status": "در حال رصد"} for i in range(11)}
         first, cursor = telegram_runner.select_watchlist_batch(watchlist)
