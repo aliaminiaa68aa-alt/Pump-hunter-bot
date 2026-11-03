@@ -43,6 +43,19 @@ def add_retest(data, side):
 
 
 class PullbackEngineTests(unittest.TestCase):
+    def test_channel_direction_mismatch_blocks_breakout(self):
+        data = snapshot("LONG")
+        signal, pending, reason = advance_pullback_setup(data, required_side="SHORT")
+        self.assertIsNone(signal)
+        self.assertIsNone(pending)
+        self.assertIn("با جهت کانال", reason)
+
+    def test_channel_direction_match_allows_pending_breakout(self):
+        data = snapshot("SHORT")
+        signal, pending, _ = advance_pullback_setup(data, required_side="SHORT")
+        self.assertIsNone(signal)
+        self.assertEqual(pending["side"], "SHORT")
+
     def test_breakout_creates_pending_setup_not_signal(self):
         data = snapshot("LONG")
         signal, pending, reason = advance_pullback_setup(data)
