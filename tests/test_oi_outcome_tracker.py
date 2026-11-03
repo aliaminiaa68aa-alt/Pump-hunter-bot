@@ -125,6 +125,18 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(report["ambiguous_stop_target"], 1)
         self.assertEqual(report["sl_before_tp1"], 0)
 
+    def test_mae_before_tp1_excludes_ambiguous_target_candle(self):
+        journal, key = self.journal("LONG")
+        candles = [
+            candle(900000, 100, 100.5, 99.5, 100.2),
+            candle(1800000, 100.2, 103, 98.5, 102.5),
+        ]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: candles)
+        record = journal["trades"][key]
+        self.assertAlmostEqual(record["mae_before_tp1_pct"], 0.5)
+        self.assertTrue(record["tp1_candle_excursion_ambiguous"])
+        self.assertEqual(record["status"], "TP1_HIT")
+
     def test_trade_times_out_after_four_days(self):
         journal, key = self.journal()
         monitor_journal(journal, now_ms=900000 + 96 * 60 * 60 * 1000,
