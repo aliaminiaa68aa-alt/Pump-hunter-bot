@@ -906,29 +906,30 @@ FIB_MAX_FUNDING_RATE = 0.0001
 
 
 def leg_spike_final_oi_context_available(oi_change4h):
-    """Require a valid 4h OI observation for context, but never veto on its sign."""
+    """Require a finite 4h OI observation for context, but never veto on its sign."""
     try:
         return oi_change4h is not None and math.isfinite(float(oi_change4h))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
 
 
 def leg_spike_oi_growth_gate(oi_change, oi_change4h):
     """
-    Require fresh positive short-term aggregate OI for LEG SPIKE.
+    Require finite, positive short-term aggregate OI for LEG SPIKE.
     Four-hour OI is a ranking/context metric, not a directional veto:
     a recent short-term OI expansion can coexist with a negative 4h net change.
-    Both measurements must be available from the cross-venue check.
+    Both measurements must be present and finite.
     """
-    if oi_change4h is None:
-        return False, "4h OI history unavailable"
+    if not leg_spike_final_oi_context_available(oi_change4h):
+        return False, "4h OI history unavailable or invalid"
     if oi_change is None:
         return False, "short-term OI history unavailable"
     try:
         short_term = float(oi_change)
-        float(oi_change4h)  # validate coverage; its sign is used for ranking only
-    except (TypeError, ValueError):
-        return False, "invalid OI history"
+    except (TypeError, ValueError, OverflowError):
+        return False, "invalid short-term OI history"
+    if not math.isfinite(short_term):
+        return False, "non-finite short-term OI history"
     if short_term <= 0:
         return False, "short-term OI growth is not positive"
     return True, "short-term OI growth positive; 4h change retained for ranking"
@@ -2250,8 +2251,8 @@ def scan_fib_pullbacks(tickers, state, confirmed_entries=True):
                     if metrics.get("change24") in (None, "") or float(metrics["change24"]) <= 0:
                         print(f"{contract}: LEG SPIKE rejected; 24h price change is missing or not positive")
                         continue
-                    if metrics.get("oi_change4h") is None or metrics["oi_change4h"] <= 0:
-                        print(f"{contract}: LEG SPIKE rejected; Coinalyze OI 4h change is missing or not positive")
+                    if not leg_spike_final_oi_context_available(metrics.get("oi_change4h")):
+                        print(f"{contract}: LEG SPIKE rejected; Coinalyze OI 4h context is missing or invalid")
                         continue
                     if metrics.get("funding_avg") is None or metrics["funding_avg"] > FIB_MAX_FUNDING_RATE:
                         print(f"{contract}: LEG SPIKE rejected; Coinalyze average funding is missing or above +0.01%")
