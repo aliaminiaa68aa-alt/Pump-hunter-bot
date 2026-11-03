@@ -38,6 +38,8 @@ class Signal:
     funding_rate: float
     confidence: int
     candle_close_time: int
+    movement_strength: int = 0
+    entry_quality: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -255,6 +257,37 @@ def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
     return candidates or ["شرایط ورود کامل نیست"]
 
 
+
+def score_signal_components(
+    candles: List[dict], side: str, oi_change: float, price_change: float,
+    taker_ratio: float, volume_ratio: float, atr: float, breakout_level: float,
+) -> tuple[int, int]:
+    """Return separate heuristic movement-strength and entry-location scores.
+
+    These are technical component scores, not calibrated win probabilities.
+    """
+    oi_score = min(25.0, max(0.0, oi_change) / 2.0 * 25.0)
+    volume_score = min(25.0, max(0.0, volume_ratio - 1.0) / 3.0 * 25.0)
+    directional_taker = taker_ratio if side == "LONG" else 1.0 - taker_ratio
+    flow_score = min(25.0, max(0.0, directional_taker - 0.50) / 0.15 * 25.0)
+    momentum_score = min(25.0, abs(price_change) / 2.0 * 25.0)
+    movement_strength = round(oi_score + volume_score + flow_score + momentum_score)
+
+    last = candles[-1]
+    candle_range = max(float(last["high"]) - float(last["low"]), 1e-12)
+    body_ratio = min(1.0, abs(float(last["close"]) - float(last["open"])) / candle_range)
+    if side == "LONG":
+        close_location = (float(last["close"]) - float(last["low"])) / candle_range
+        extension = max(0.0, (float(last["close"]) - breakout_level) / max(atr, 1e-12))
+    else:
+        close_location = (float(last["high"]) - float(last["close"])) / candle_range
+        extension = max(0.0, (breakout_level - float(last["close"])) / max(atr, 1e-12))
+    body_score = min(30.0, max(0.0, body_ratio) * 30.0)
+    close_score = min(30.0, max(0.0, close_location) * 30.0)
+    extension_score = max(0.0, 40.0 * (1.0 - extension / 0.90))
+    entry_quality = round(min(100.0, body_score + close_score + extension_score))
+    return min(100, max(0, movement_strength)), min(100, max(0, entry_quality))
+
 def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
     """Return a final signal only after closed-candle, OI, flow and breakout checks."""
     candles = snapshot["candles"]
@@ -329,9 +362,13 @@ def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
         stop = entry + risk
         tp1, tp2 = entry - risk, entry - risk * 2
 
+    # Movement strength and entry location are independent diagnostics.
+    movement_strength, entry_quality = score_signal_components(
+        candles, side, oi_change, price_change, taker_ratio, volume_ratio,
+        atr, prior_high if side == "LONG" else prior_low,
+    )
     # Funding crowding is reported, not used as a blind directional veto.
-    confidence = min(95, 70 + int(max(0, volume_ratio - 1.15) * 8)
-                     + int(min(abs(oi_change), 2.0) * 3))
+    confidence = movement_strength
     return Signal(
         symbol=snapshot["symbol"],
         side=side,
@@ -346,6 +383,8 @@ def evaluate_snapshot(snapshot: Dict[str, Any]) -> Optional[Signal]:
         funding_rate=funding,
         confidence=confidence,
         candle_close_time=last["close_time"],
+        movement_strength=movement_strength,
+        entry_quality=entry_quality,
     )
 
 
@@ -406,5 +445,6 @@ def format_signal(signal: Signal) -> str:
         f"نسبت خرید تهاجمی: {signal.taker_buy_ratio:.1%}\n"
         f"حجم نسبت به میانگین: {signal.volume_ratio:.2f}x\n"
         f"Funding (snapshot اولیه): {signal.funding_rate:.5%}\n"
-        f"امتیاز فنی: {signal.confidence}/100 (درصد احتمال برد نیست)"
+        f"قدرت حرکت: {signal.movement_strength}/100 (امتیاز فنی، نه احتمال برد)\\n"
+        f"کیفیت نقطه ورود: {signal.entry_quality}/100 (امتیاز مستقل؛ نه احتمال برد)"
     )
