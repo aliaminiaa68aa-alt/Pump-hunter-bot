@@ -6,7 +6,7 @@ from datetime import datetime
 from html.parser import HTMLParser
 from typing import Any, Callable
 import requests
-from oi_engine.alert_ingest import parse_forwarded_oi_alert
+from oi_engine.alert_ingest import parse_forwarded_oi_alert, parse_oi_alert_direction
 
 PUBLIC_CHANNEL = "oi_detector"
 PUBLIC_CHANNEL_URL = "https://t.me/s/{channel}"
@@ -131,6 +131,7 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
             "chat": {"username": post["channel"]},
         }}
         symbol = parse_forwarded_oi_alert(update)
+        source_side = parse_oi_alert_direction(update)
         if not symbol:
             preview = post["text"][:240].replace("\\n", " ")
             print(
@@ -165,6 +166,7 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
             "source_channel": post["channel"],
             "source_message_id": post["message_id"],
             "source_text": post["text"][:3000],
+            "source_side": source_side,
             "status": "در حال رصد",
             "reason": "هشدار عمومی Open Interest دریافت شد؛ منتظر تأیید Coinalyze هستیم",
         }
