@@ -131,6 +131,12 @@ def main() -> None:
     # 15m OHLCV fallback as the scanner so outcome tracking can still progress.
     outcome_journal = monitor_journal(outcome_journal, fetcher=client.fetch_ohlcv_candles)
     save_outcome_journal(outcome_journal)
+    outcome_statuses = {}
+    for trade in outcome_journal.get("trades", {}).values():
+        status = trade.get("status", "UNKNOWN")
+        outcome_statuses[status] = outcome_statuses.get(status, 0) + 1
+    provider_errors = sum(bool(trade.get("last_error")) for trade in outcome_journal.get("trades", {}).values())
+    print(f"Outcome monitor: statuses={outcome_statuses}, provider_errors={provider_errors}")
     added = 0
     public_channel = os.getenv("OI_PUBLIC_CHANNEL", "oi_detector").strip()
     public_last_id = int(watch_state.get("public_channel_last_id", 0))
