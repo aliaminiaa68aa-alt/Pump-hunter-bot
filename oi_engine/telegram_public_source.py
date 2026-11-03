@@ -132,6 +132,13 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
         }}
         symbol = parse_forwarded_oi_alert(update)
         source_side = parse_oi_alert_direction(update)
+        if symbol and source_side not in {"LONG", "SHORT"}:
+            print(
+                f"Public Telegram OI alert skipped: message_id={post['message_id']} "
+                "reason=missing or ambiguous LONG/SHORT marker"
+            )
+            next_id = post["message_id"]
+            continue
         if not symbol:
             preview = post["text"][:240].replace("\\n", " ")
             print(
