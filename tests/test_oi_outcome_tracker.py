@@ -56,6 +56,32 @@ class OutcomeTrackerTests(unittest.TestCase):
         monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: second)
         self.assertEqual(journal["trades"][key]["status"], "CLOSED_TP2")
 
+    def test_stopped_trade_tracks_if_original_targets_are_reached_later(self):
+        journal, key = self.journal("LONG")
+        stop_candle = [candle(900000, 100, 101, 97, 98)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: stop_candle)
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "CLOSED_SL")
+        self.assertEqual(record["post_stop_tracking"], "ACTIVE")
+
+        later = [candle(1800000, 99, 105, 98.5, 104)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: later)
+        self.assertEqual(record["status"], "CLOSED_SL")
+        self.assertTrue(record["post_stop_tp1_reached"])
+        self.assertTrue(record["post_stop_tp2_reached"])
+        self.assertGreater(record["post_stop_mfe_pct"], 0)
+
+    def test_post_stop_tracking_is_supported_for_short(self):
+        journal, key = self.journal("SHORT")
+        stop_candle = [candle(900000, 103, 103, 99, 102)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: stop_candle)
+        record = journal["trades"][key]
+        later = [candle(1800000, 101, 101.5, 95, 96)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: later)
+        self.assertTrue(record["post_stop_tp1_reached"])
+        self.assertTrue(record["post_stop_tp2_reached"])
+        self.assertEqual(record["status"], "CLOSED_SL")
+
     def test_gap_through_stop_uses_open_price(self):
         journal, key = self.journal()
         gap = [candle(900000, 97, 99, 96, 98)]
