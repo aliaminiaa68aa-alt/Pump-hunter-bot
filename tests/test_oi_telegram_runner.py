@@ -69,7 +69,7 @@ class TelegramRunnerTests(unittest.TestCase):
             self.assertEqual(tracked["signal"]["symbol"], "TESTUSDT")
             self.assertEqual(tracked["status"], "OPEN")
             send.assert_called_once()
-            self.assertIn("TESTUSDT:LONG", state.read_text(encoding="utf-8"))
+            self.assertIn("UNSPECIFIED:TESTUSDT:LONG", state.read_text(encoding="utf-8"))
             saved = json.loads(watch.read_text(encoding="utf-8"))
             self.assertEqual(saved["public_channel_last_id"], 123)
             self.assertIn("TESTUSDT", saved["symbols"])
@@ -105,7 +105,7 @@ class TelegramRunnerTests(unittest.TestCase):
             _, _, _, send = self._run_main(
                 directory,
                 ([(sample_signal(), sample_metrics())], {"TESTUSDT": {"status": "تأیید LONG"}}),
-                sent_state={"TESTUSDT:LONG": 900000},
+                sent_state={"UNSPECIFIED:TESTUSDT:LONG": 900000},
             )
             send.assert_not_called()
 
