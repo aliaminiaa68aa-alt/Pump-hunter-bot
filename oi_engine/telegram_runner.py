@@ -10,7 +10,7 @@ from typing import Any, Dict
 import requests
 
 from oi_engine.telegram_public_source import poll_public_channel_alerts
-from oi_engine.alert_ingest import _is_crypto_candidate
+from oi_engine.alert_ingest import _is_crypto_candidate, parse_oi_alert_direction
 from oi_engine.coinalyze_client import CoinalyzeClient
 from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal
 from oi_engine.outcome_tracker import make_trade_record, monitor_journal
@@ -127,6 +127,14 @@ def main() -> None:
     watchlist = watch_state.get("symbols", {})
     if not isinstance(watchlist, dict):
         watchlist = {}
+    # Migrate older cached alerts: recover direction from their original source text.
+    # Never infer a side when the source marker is absent or ambiguous.
+    for record in watchlist.values():
+        if isinstance(record, dict) and record.get("source_side") not in {"LONG", "SHORT"}:
+            source_text = record.get("source_text", "")
+            recovered_side = parse_oi_alert_direction({"channel_post": {"text": source_text}})
+            if recovered_side:
+                record["source_side"] = recovered_side
 
     client = CoinalyzeClient(api_key=api_key)
     # Binance Futures returns HTTP 451 on this runner; use the same Coinalyze
