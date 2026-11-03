@@ -51,4 +51,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .oi_state
-          key: pump-hunter-state-${{ github.run_id }}
+          key: oi-channel-state-${{ github.run_id }}
