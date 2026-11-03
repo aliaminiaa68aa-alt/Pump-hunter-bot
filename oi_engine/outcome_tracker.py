@@ -162,10 +162,20 @@ def monitor_journal(
                     risk = abs(entry - float(signal["stop_loss"]))
                     fill = stop_fill
                     signed = (fill - entry) if side == "LONG" else (entry - fill)
+                    ambiguous_targets = bool(tp1_hit or tp2_hit)
                     record.setdefault("events", []).append({
                         "event": "SL", "time_ms": close_ms, "fill": fill,
                         "r_multiple": signed / risk if risk else None,
+                        "ambiguous_same_candle": ambiguous_targets,
+                        "same_candle_targets": [
+                            name for name, touched in (("TP1", tp1_hit), ("TP2", tp2_hit))
+                            if touched
+                        ],
                     })
+                    if ambiguous_targets:
+                        record["ambiguous_stop_target_candles"] = (
+                            int(record.get("ambiguous_stop_target_candles", 0)) + 1
+                        )
                     record["status"] = "CLOSED_SL"
                     record["exit_time_ms"] = close_ms
                     record["post_stop_last_checked_ms"] = close_ms + 1
@@ -223,3 +233,57 @@ def monitor_journal(
             trades.pop(key, None)
     journal["updated_at_ms"] = now
     return journal
+
+
+def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize observed outcomes without treating ambiguous OHLC candles as certain."""
+    trades = list(journal.get("trades", {}).values())
+    report: Dict[str, Any] = {
+        "total": len(trades), "statuses": {}, "tp1_before_sl": 0,
+        "sl_before_tp1": 0, "sl_then_later_tp1": 0, "sl_then_later_tp2": 0,
+        "tp2_reached": 0, "ambiguous_stop_target": 0, "provider_errors": 0,
+        "groups": {}, "by_engine_side": {},
+    }
+    groups: Dict[str, List[dict]] = {}
+    for record in trades:
+        status = str(record.get("status", "UNKNOWN"))
+        report["statuses"][status] = report["statuses"].get(status, 0) + 1
+        events = sorted(record.get("events", []), key=lambda event: int(event.get("time_ms", 0)))
+        names = [event.get("event") for event in events]
+        first_tp1 = next((i for i, name in enumerate(names) if name == "TP1"), None)
+        first_sl = next((i for i, name in enumerate(names) if name == "SL"), None)
+        if first_tp1 is not None and (first_sl is None or first_tp1 < first_sl):
+            report["tp1_before_sl"] += 1
+            outcome = "tp1_before_sl"
+        elif first_sl is not None:
+            report["sl_before_tp1"] += 1
+            outcome = "sl_before_tp1"
+        else:
+            outcome = status.lower()
+        if record.get("post_stop_tp1_reached"):
+            report["sl_then_later_tp1"] += 1
+        if record.get("post_stop_tp2_reached"):
+            report["sl_then_later_tp2"] += 1
+        if "TP2" in names or record.get("post_stop_tp2_reached"):
+            report["tp2_reached"] += 1
+        if any(event.get("ambiguous_same_candle") for event in events):
+            report["ambiguous_stop_target"] += 1
+        if record.get("last_error") or record.get("post_stop_error"):
+            report["provider_errors"] += 1
+        signal = record.get("signal", {})
+        metrics = {"movement_strength": signal.get("movement_strength"),
+                   "entry_quality": signal.get("entry_quality")}
+        groups.setdefault(outcome, []).append(metrics)
+        engine = str(signal.get("engine", signal.get("strategy", "OI")))
+        side = str(signal.get("side", "UNKNOWN"))
+        key = f"{engine}:{side}"
+        bucket = report["by_engine_side"].setdefault(key, {"total": 0, "statuses": {}})
+        bucket["total"] += 1
+        bucket["statuses"][status] = bucket["statuses"].get(status, 0) + 1
+    for name, rows in groups.items():
+        summary = {"count": len(rows)}
+        for field in ("movement_strength", "entry_quality"):
+            values = [float(row[field]) for row in rows if row.get(field) is not None]
+            summary[field + "_avg"] = round(sum(values) / len(values), 2) if values else None
+        report["groups"][name] = summary
+    return report
