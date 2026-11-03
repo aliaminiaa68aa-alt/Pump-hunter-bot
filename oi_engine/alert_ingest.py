@@ -33,7 +33,7 @@ def parse_oi_alert_direction(update: Dict[str, Any]) -> Optional[str]:
         return None
     # Real @oi_detector posts include a title before the marker, e.g.
     # "🚨 Crypto Open Interest ... 🔥 🔥 🟢 #SAGA ...".
-    marker = re.search(r"(?:^|\\s)(?:🔥\\s*)*(🟢|🔴)\\s*#[A-Z0-9]{2,12}(?=\\s|$)", body, re.I)
+    marker = re.search(r"(?:^|\s)(?:🔥\s*)*(🟢|🔴)\s*#[A-Z0-9]{2,12}(?=\s|$)", body, re.I)
     if not marker:
         return None
     return "LONG" if marker.group(1) == "🟢" else "SHORT"
