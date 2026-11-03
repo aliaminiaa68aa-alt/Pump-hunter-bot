@@ -120,8 +120,6 @@ def main() -> None:
     state = load_state()
     watch_state = load_watchlist_state()
     outcome_journal = load_outcome_journal()
-    outcome_journal = monitor_journal(outcome_journal)
-    save_outcome_journal(outcome_journal)
     # Start from the public-channel source only. Do not ingest Telegram forwards,
     # direct channel updates delivered to the bot, or any legacy alert inbox.
     watchlist = watch_state.get("symbols", {})
@@ -129,6 +127,10 @@ def main() -> None:
         watchlist = {}
 
     client = CoinalyzeClient(api_key=api_key)
+    # Binance Futures returns HTTP 451 on this runner; use the same Coinalyze
+    # 15m OHLCV fallback as the scanner so outcome tracking can still progress.
+    outcome_journal = monitor_journal(outcome_journal, fetcher=client.fetch_ohlcv_candles)
+    save_outcome_journal(outcome_journal)
     added = 0
     public_channel = os.getenv("OI_PUBLIC_CHANNEL", "oi_detector").strip()
     public_last_id = int(watch_state.get("public_channel_last_id", 0))
