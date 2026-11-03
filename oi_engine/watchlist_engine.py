@@ -92,7 +92,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     )
                 record["data_source"] = "Coinalyze 15m fallback (Binance HTTP 451)"
             signal, pending_setup, setup_reason = advance_pullback_setup(
-                snapshot, record.get("pending_setup")
+                snapshot, record.get("pending_setup"), record.get("source_side")
             )
             if signal is None:
                 record["pending_setup"] = pending_setup
