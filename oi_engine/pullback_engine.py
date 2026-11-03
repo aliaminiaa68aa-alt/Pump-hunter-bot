@@ -88,16 +88,16 @@ def advance_pullback_setup(
     if not touched or not confirmed:
         return None, pending, "هنوز پولبک و کندل برگشتی معتبر شکل نگرفته"
     if not directional_flow:
-        return None, None, "پولبک رخ داد اما جریان سفارش هم‌جهت نبود؛ setup رد شد"
+        return None, pending, "پولبک رخ داد اما جریان سفارش هنوز هم‌جهت نیست؛ تا پایان مهلت منتظر تأیید معتبر می‌مانیم"
 
     oi_change = (float(oi_values[-1]) / float(oi_values[-2]) - 1.0) * 100.0
     if oi_change < 0.35:
-        return None, None, f"پولبک تأیید شد اما رشد OI کافی نیست ({oi_change:+.2f}%)"
+        return None, pending, f"پولبک رخ داد اما رشد OI این کندل کافی نیست ({oi_change:+.2f}%)؛ setup تا پایان مهلت حفظ شد"
     quote_volume = float(last["quote_volume"])
     baseline = candles[-21:-1]
     average_volume = sum(float(c["quote_volume"]) for c in baseline) / len(baseline)
     if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 1.15:
-        return None, None, "پولبک تأیید شد اما حجم کندل برگشتی کافی نیست"
+        return None, pending, "پولبک رخ داد اما حجم کندل برگشتی کافی نیست؛ setup تا پایان مهلت حفظ شد"
 
     entry = float(last["close"])
     min_risk = entry * MIN_STOP_PCT / 100.0
@@ -105,7 +105,7 @@ def advance_pullback_setup(
         stop = entry - min_risk if side == "LONG" else entry + min_risk
         risk = min_risk
     if risk > atr * MAX_STOP_ATR:
-        return None, None, "حد ضرر پشت ساختار بیش از حد دور است؛ setup رد شد"
+        return None, pending, "ریسک این کندل برای ورود بیش از حد دور است؛ setup حفظ شد تا فرصت پولبک معتبر بعدی بررسی شود"
 
     tp1 = entry + risk if side == "LONG" else entry - risk
     tp2 = entry + 2.0 * risk if side == "LONG" else entry - 2.0 * risk
