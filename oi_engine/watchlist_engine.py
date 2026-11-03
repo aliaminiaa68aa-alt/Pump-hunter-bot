@@ -35,16 +35,29 @@ def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
 
 
 def source_oi_priority(source_text: str) -> Dict[str, Any]:
-    """Extract upstream 15m/1h OI expansion as ranking context, never as an entry gate."""
+    """Extract labeled upstream OI changes for ranking only, never as an entry gate."""
+    import re
+
     values = {}
     if not isinstance(source_text, str):
         source_text = ""
     for timeframe in ("15m", "1h"):
-        match = __import__("re").search(
-            rf"([+-]?\d+(?:\.\d+)?)%\s*\([^)]*{timeframe}\)",
-            source_text,
-            __import__("re").I,
+        # Prefer explicit timeframe + OI labels, e.g.
+        # "15m: OI +5.30%, price +2.17%" or "OI (15m): +5.30%".
+        patterns = (
+            rf"(?:^|\\b){timeframe}\\s*[:：-]\\s*OI\\s*[:=]?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*%",
+            rf"\\bOI\\s*(?:change\\s*)?(?:\\[\\s*{timeframe}\\s*\\]|\\(\\s*{timeframe}\\s*\\)|{timeframe})\\s*[:=]?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*%",
+            rf"\\bOI\\s*[:=]?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*%\\s*\\(\\s*{timeframe}\\s*\\)",
         )
+        match = next((m for pattern in patterns if (m := re.search(pattern, source_text, re.I))), None)
+        # Older compact feed: "🟩+5.30% 🟩+2.17% (15m)".
+        # Its first percentage is OI; the second is price.
+        if not match:
+            match = re.search(
+                rf"([+-]?\\d+(?:\\.\\d+)?)%\\s+[🟩🟥🟢🔴]?\\s*[+-]?\\d+(?:\\.\\d+)?%\\s*\\(\\s*{timeframe}\\s*\\)",
+                source_text,
+                re.I,
+            )
         if match:
             try:
                 value = float(match.group(1))
