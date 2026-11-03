@@ -41,7 +41,7 @@ def source_oi_priority(source_text: str) -> Dict[str, Any]:
         source_text = ""
     for timeframe in ("15m", "1h"):
         match = __import__("re").search(
-            rf"([+-]?\\d+(?:\\.\\d+)?)%\\s*\\([^)]*{timeframe}\\)",
+            rf"([+-]?\d+(?:\.\d+)?)%\s*\([^)]*{timeframe}\)",
             source_text,
             __import__("re").I,
         )
@@ -93,9 +93,9 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     priority_15m = metrics.get("source_oi_15m_pct")
     priority_1h = metrics.get("source_oi_1h_pct")
     priority_text = (
-        f"\\nاولویت رشد OI هشدار: {metrics.get('oi_priority_tier', '🟡 معمولی')} "
+        f"\nاولویت رشد OI هشدار: {metrics.get('oi_priority_tier', '🟡 معمولی')} "
         f"(امتیاز {metrics.get('oi_priority_score', 0):.2f}/20)"
-        f"\\nOI منبع: 15m={priority_15m if priority_15m is not None else 'ناموجود'}%، "
+        f"\nOI منبع: 15m={priority_15m if priority_15m is not None else 'ناموجود'}%، "
         f"1h={priority_1h if priority_1h is not None else 'ناموجود'}%"
     )
     return (
