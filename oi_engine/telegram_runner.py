@@ -131,6 +131,36 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
     return {symbol: watchlist[symbol] for symbol in selected}, selected[-1]
 
 
+def summarize_scan_diagnostics(watchlist, scanned_batch):
+    """Build compact counters explaining where the current scan batch stands."""
+    statuses = {}
+    reasons = {"coinalyze_rejected": 0, "pending_pullback": 0, "setup_invalidated_or_expired": 0, "data_errors": 0}
+    for record in scanned_batch.values():
+        status = str(record.get("status", "نامشخص"))
+        statuses[status] = statuses.get(status, 0) + 1
+        reason = str(record.get("reason", ""))
+        if "Coinalyze رد کرد" in reason:
+            reasons["coinalyze_rejected"] += 1
+        if "پولبک" in status or "پولبک" in reason or "شکست" in reason:
+            reasons["pending_pullback"] += 1
+        if any(word in reason for word in ("باطل", "منقضی", "مهلت پولبک", "setup پاک شد")):
+            reasons["setup_invalidated_or_expired"] += 1
+        if "خطا" in status:
+            reasons["data_errors"] += 1
+    high_priority = sum(
+        1 for record in watchlist.values()
+        if isinstance(record, dict) and float(record.get("oi_priority_score", 0.0)) > 0.0
+    )
+    return {
+        "watchlist_total": len(watchlist),
+        "high_oi_priority": high_priority,
+        "scanned": len(scanned_batch),
+        "not_scanned_this_cycle": max(0, len(watchlist) - len(scanned_batch)),
+        "statuses": statuses,
+        "reasons": reasons,
+    }
+
+
 def main() -> None:
     token = os.getenv("BOT_TOKEN")
     chat_id = os.getenv("CHAT_ID")
@@ -232,6 +262,8 @@ def main() -> None:
         "scan_cursor": next_scan_cursor or str(watch_state.get("scan_cursor", "")),
         "updated_at": int(time.time()),
     })
+    diagnostics = summarize_scan_diagnostics(watchlist, scanned_batch)
+    print(f"OI scan diagnostics: {diagnostics}")
     print(
         f"Alert-driven OI scan complete: watchlist={len(watchlist)}, "
         f"new_public_channel_alerts={added}, confirmed={len(confirmed)}, telegram_sent={sent}, "
