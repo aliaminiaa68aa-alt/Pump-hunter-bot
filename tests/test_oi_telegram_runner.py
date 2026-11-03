@@ -63,6 +63,11 @@ class TelegramRunnerTests(unittest.TestCase):
                 directory,
                 ([(sample_signal(), sample_metrics())], {"TESTUSDT": {"status": "تأیید LONG"}}),
             )
+            journal = json.loads((Path(directory) / "trade_outcomes.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(journal["trades"]), 1)
+            tracked = next(iter(journal["trades"].values()))
+            self.assertEqual(tracked["signal"]["symbol"], "TESTUSDT")
+            self.assertEqual(tracked["status"], "OPEN")
             send.assert_called_once()
             self.assertIn("TESTUSDT:LONG", state.read_text(encoding="utf-8"))
             saved = json.loads(watch.read_text(encoding="utf-8"))
