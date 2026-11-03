@@ -21,6 +21,22 @@ def _is_crypto_candidate(symbol: str) -> bool:
     return symbol.endswith("USDT") and symbol[:-4] not in NON_CRYPTO_BASES
 
 
+
+def parse_oi_alert_direction(update: Dict[str, Any]) -> Optional[str]:
+    """Read @oi_detector's colored marker: green=LONG, red=SHORT."""
+    channel_post = update.get("channel_post")
+    message = channel_post or update.get("message") or {}
+    if not isinstance(message, dict):
+        return None
+    body = message.get("text") or message.get("caption") or ""
+    if not isinstance(body, str):
+        return None
+    marker = re.search(r"^\\s*(?:🔥\\s*)*(🟢|🔴)", body)
+    if not marker:
+        return None
+    return "LONG" if marker.group(1) == "🟢" else "SHORT"
+
+
 def parse_forwarded_oi_alert(update: Dict[str, Any]) -> Optional[str]:
     """Return a normalized crypto USDT symbol from a forwarded message or channel post.
 
