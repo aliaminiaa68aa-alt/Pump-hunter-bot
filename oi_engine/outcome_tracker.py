@@ -252,7 +252,12 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         names = [event.get("event") for event in events]
         first_tp1 = next((i for i, name in enumerate(names) if name == "TP1"), None)
         first_sl = next((i for i, name in enumerate(names) if name == "SL"), None)
-        if first_tp1 is not None and (first_sl is None or first_tp1 < first_sl):
+        first_sl_ambiguous = (
+            first_sl is not None and bool(events[first_sl].get("ambiguous_same_candle"))
+        )
+        if first_sl_ambiguous:
+            outcome = "ambiguous_stop_target"
+        elif first_tp1 is not None and (first_sl is None or first_tp1 < first_sl):
             report["tp1_before_sl"] += 1
             outcome = "tp1_before_sl"
         elif first_sl is not None:
