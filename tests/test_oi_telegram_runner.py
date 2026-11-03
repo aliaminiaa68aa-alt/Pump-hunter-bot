@@ -160,6 +160,14 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(set(visited), set(watchlist))
         self.assertEqual(cursor, "COIN23USDT")
 
+    def test_prunes_non_crypto_symbols_from_legacy_watchlist(self):
+        kept = telegram_runner.prune_watchlist({
+            "BTCUSDT": {"last_alert": 999990},
+            "UVXYUSDT": {"last_alert": 999990},
+            "COSTUSDT": {"last_alert": 999990},
+        }, now=1000000)
+        self.assertEqual(list(kept), ["BTCUSDT"])
+
     def test_prunes_expired_watchlist_symbols(self):
         now = 1000000
         kept = telegram_runner.prune_watchlist({
