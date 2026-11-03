@@ -21,7 +21,7 @@ class PublicTelegramSourceTests(unittest.TestCase):
 
     def test_new_public_post_is_added_and_cursor_moves(self):
         posts = [{
-            "message_id": 20, "date": 1000, "text": "OI alert TESTUSDT.P +2%",
+            "message_id": 20, "date": 1000, "text": "🟢 OI alert TESTUSDT.P +2%",
             "channel": "oi_detector",
         }]
         watchlist = {}
@@ -31,6 +31,7 @@ class PublicTelegramSourceTests(unittest.TestCase):
         self.assertEqual(added, 1)
         self.assertIn("TESTUSDT", watchlist)
         self.assertEqual(watchlist["TESTUSDT"]["source"], "telegram_public_preview")
+        self.assertEqual(watchlist["TESTUSDT"]["source_side"], "LONG")
 
     def test_alert_is_added_even_when_watchlist_already_has_four_symbols(self):
         posts = [{
