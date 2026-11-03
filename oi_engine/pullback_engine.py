@@ -68,22 +68,36 @@ def advance_pullback_setup(
     level = float(pending["level"])
     tolerance = atr * PULLBACK_TOLERANCE_ATR
     invalidation = atr * INVALIDATION_ATR
+    # Track the full post-breakout pullback structure, not just the final
+    # confirmation candle. This prevents a later shallow candle from moving
+    # the stop inside an earlier valid swing extreme.
+    pending = dict(pending)
     if side == "LONG":
-        touched = float(last["low"]) <= level + tolerance
-        valid_depth = float(last["low"]) >= level - invalidation
+        pullback_extreme = min(
+            float(pending.get("pullback_extreme", last["low"])),
+            float(last["low"]),
+        )
+        pending["pullback_extreme"] = pullback_extreme
+        touched = pullback_extreme <= level + tolerance
+        valid_depth = pullback_extreme >= level - invalidation
         confirmed = float(last["close"]) > level and float(last["close"]) > float(last["open"])
         directional_flow = float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.53
-        stop = float(last["low"]) - atr * STOP_BUFFER_ATR
+        stop = pullback_extreme - atr * STOP_BUFFER_ATR
         risk = float(last["close"]) - stop
     else:
-        touched = float(last["high"]) >= level - tolerance
-        valid_depth = float(last["high"]) <= level + invalidation
+        pullback_extreme = max(
+            float(pending.get("pullback_extreme", last["high"])),
+            float(last["high"]),
+        )
+        pending["pullback_extreme"] = pullback_extreme
+        touched = pullback_extreme >= level - tolerance
+        valid_depth = pullback_extreme <= level + invalidation
         confirmed = float(last["close"]) < level and float(last["close"]) < float(last["open"])
         directional_flow = float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.47
-        stop = float(last["high"]) + atr * STOP_BUFFER_ATR
+        stop = pullback_extreme + atr * STOP_BUFFER_ATR
         risk = stop - float(last["close"])
 
-    if touched and not valid_depth:
+    if not valid_depth:
         return None, None, "پولبک بیش از حد عمیق شد؛ setup باطل شد"
     if not touched or not confirmed:
         return None, pending, "هنوز پولبک و کندل برگشتی معتبر شکل نگرفته"
