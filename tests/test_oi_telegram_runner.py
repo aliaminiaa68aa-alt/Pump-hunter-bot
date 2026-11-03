@@ -31,6 +31,9 @@ class FakeClient:
     def resolve_market(self, symbol):
         return symbol
 
+    def fetch_ohlcv_candles(self, symbol, start_ms, end_ms):
+        return []
+
 
 class TelegramRunnerTests(unittest.TestCase):
     def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None):
