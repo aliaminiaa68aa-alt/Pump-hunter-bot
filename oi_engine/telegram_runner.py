@@ -13,7 +13,7 @@ from oi_engine.telegram_public_source import poll_public_channel_alerts
 from oi_engine.alert_ingest import _is_crypto_candidate, parse_oi_alert_direction
 from oi_engine.coinalyze_client import CoinalyzeClient
 from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal, source_oi_priority
-from oi_engine.outcome_tracker import make_trade_record, monitor_journal
+from oi_engine.outcome_tracker import make_trade_record, monitor_journal, summarize_outcomes
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
@@ -213,6 +213,7 @@ def main() -> None:
         outcome_statuses[status] = outcome_statuses.get(status, 0) + 1
     provider_errors = sum(bool(trade.get("last_error")) for trade in outcome_journal.get("trades", {}).values())
     print(f"Outcome monitor: statuses={outcome_statuses}, provider_errors={provider_errors}")
+    print(f"Outcome report: {json.dumps(summarize_outcomes(outcome_journal), ensure_ascii=False, sort_keys=True)}")
     added = 0
     public_channel = os.getenv("OI_PUBLIC_CHANNEL", "oi_detector").strip()
     public_last_id = int(watch_state.get("public_channel_last_id", 0))
