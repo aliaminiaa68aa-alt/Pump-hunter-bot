@@ -107,12 +107,15 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         key=lambda symbol: float(watchlist[symbol].get("oi_priority_score", 0.0)),
         reverse=True,
     )
-    # Recheck the top two OI-expansion candidates on every cycle. Rotate all
-    # remaining slots so a strong alert cannot permanently starve older alerts.
-    hot_count = min(2, count, len(ranked))
-    hot = ranked[:hot_count]
-    rotating = ranked[hot_count:]
-    rotating_slots = count - hot_count
+    # Keep only genuinely OI-prioritized candidates hot. When no source OI
+    # score exists (legacy records / ordinary alerts), preserve full round-robin
+    # scanning so the same first symbols are not revisited on every cycle.
+    hot = [
+        symbol for symbol in ranked
+        if float(watchlist[symbol].get("oi_priority_score", 0.0)) > 0.0
+    ][:min(2, count)]
+    rotating = [symbol for symbol in ranked if symbol not in hot]
+    rotating_slots = count - len(hot)
     if rotating_slots <= 0 or not rotating:
         selected = hot
     else:
