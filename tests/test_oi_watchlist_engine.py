@@ -73,6 +73,24 @@ class WatchlistTests(unittest.TestCase):
         self.assertIn("تأیید مرحله دوم Coinalyze", message)
         self.assertNotIn("تأیید مستقل Coinalyze", message)
 
+    def test_coinalyze_rejection_preserves_pending_pullback_for_retry(self):
+        pending = {
+            "side": "LONG", "level": 1.0,
+            "breakout_close_time": 900000,
+            "expires_at_close_time": 4500000,
+            "breakout_atr": 0.02,
+        }
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value={}), \\
+             patch("oi_engine.watchlist_engine.advance_pullback_setup",
+                   return_value=(signal(), None, "پولبک تأیید شد")):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {"status": "منتظر پولبک", "pending_setup": pending}},
+                FakeClient(metrics(taker=0.49)), now=1000
+            )
+        self.assertEqual(found, [])
+        self.assertEqual(updated["ABCUSDT"]["status"], "نزدیک شرایط ورود")
+        self.assertEqual(updated["ABCUSDT"]["pending_setup"], pending)
+
     def test_confirmed_status(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",return_value={}), \
              patch("oi_engine.watchlist_engine.advance_pullback_setup",return_value=(signal(), None, "پولبک تأیید شد")):
