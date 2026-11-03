@@ -115,10 +115,25 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         if float(watchlist[symbol].get("oi_priority_score", 0.0)) > 0.0
     ][:min(2, count)]
     rotating = [symbol for symbol in ranked if symbol not in hot]
-    rotating_slots = count - len(hot)
-    if rotating_slots <= 0 or not rotating:
-        selected = hot
-    else:
+    # Pending pullbacks are time-sensitive; scan the earliest expiry first.
+    pending = sorted(
+        (symbol for symbol in symbols
+         if isinstance(watchlist[symbol].get("pending_setup"), dict)),
+        key=lambda symbol: int(
+            watchlist[symbol]["pending_setup"].get("expires_at_close_time", 0)
+        ),
+    )[:count]
+    selected = list(pending)
+    remaining_slots = count - len(selected)
+    hot = [
+        symbol for symbol in ranked
+        if symbol not in selected
+        and float(watchlist[symbol].get("oi_priority_score", 0.0)) > 0.0
+    ][:min(2, remaining_slots)]
+    selected.extend(hot)
+    rotating = [symbol for symbol in ranked if symbol not in selected]
+    rotating_slots = count - len(selected)
+    if rotating_slots > 0 and rotating:
         try:
             start = (rotating.index(last_scanned_symbol) + 1) % len(rotating)
         except ValueError:
@@ -127,7 +142,7 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
             rotating[(start + offset) % len(rotating)]
             for offset in range(min(rotating_slots, len(rotating)))
         ]
-        selected = hot + rotating_selected
+        selected.extend(rotating_selected)
     return {symbol: watchlist[symbol] for symbol in selected}, selected[-1]
 
 
