@@ -12,7 +12,7 @@ import requests
 from oi_engine.telegram_public_source import poll_public_channel_alerts
 from oi_engine.alert_ingest import _is_crypto_candidate, parse_oi_alert_direction
 from oi_engine.coinalyze_client import CoinalyzeClient
-from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal
+from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal, source_oi_priority
 from oi_engine.outcome_tracker import make_trade_record, monitor_journal
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
@@ -97,16 +97,34 @@ def _has_supported_perpetual(client: CoinalyzeClient, symbol: str) -> bool:
 
 
 def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIST_SYMBOLS):
-    """Select a rotating batch while retaining every alert in the full watchlist."""
+    """Keep the strongest OI candidates hot while rotating the rest fairly."""
     symbols = list(watchlist)
     if not symbols:
         return {}, ""
-    try:
-        start = (symbols.index(last_scanned_symbol) + 1) % len(symbols)
-    except ValueError:
-        start = 0
     count = min(max(1, int(limit)), len(symbols))
-    selected = [symbols[(start + offset) % len(symbols)] for offset in range(count)]
+    ranked = sorted(
+        symbols,
+        key=lambda symbol: float(watchlist[symbol].get("oi_priority_score", 0.0)),
+        reverse=True,
+    )
+    # Recheck the top two OI-expansion candidates on every cycle. Rotate all
+    # remaining slots so a strong alert cannot permanently starve older alerts.
+    hot_count = min(2, count, len(ranked))
+    hot = ranked[:hot_count]
+    rotating = ranked[hot_count:]
+    rotating_slots = count - hot_count
+    if rotating_slots <= 0 or not rotating:
+        selected = hot
+    else:
+        try:
+            start = (rotating.index(last_scanned_symbol) + 1) % len(rotating)
+        except ValueError:
+            start = 0
+        rotating_selected = [
+            rotating[(start + offset) % len(rotating)]
+            for offset in range(min(rotating_slots, len(rotating)))
+        ]
+        selected = hot + rotating_selected
     return {symbol: watchlist[symbol] for symbol in selected}, selected[-1]
 
 
@@ -171,8 +189,15 @@ def main() -> None:
         "scan_cursor": str(watch_state.get("scan_cursor", "")),
         "updated_at": int(time.time()),
     })
-    # Keep the complete alert queue, but scan only a rotating batch so API usage
-    # stays bounded. Every retained symbol gets its turn on subsequent runs.
+    # Parse source OI expansion for every alert before selecting the scan batch.
+    # These values only prioritize scanning; they do not authorize entries.
+    for symbol, record in watchlist.items():
+        if isinstance(record, dict):
+            priority = source_oi_priority(record.get("source_text", ""))
+            record.update(priority)
+
+    # Keep the complete alert queue. Revisit the two strongest OI candidates
+    # every cycle and rotate the remaining slots to preserve fair coverage.
     batch, next_scan_cursor = select_watchlist_batch(
         watchlist, str(watch_state.get("scan_cursor", ""))
     )
