@@ -109,7 +109,7 @@ class TelegramRunnerTests(unittest.TestCase):
             )
             send.assert_not_called()
 
-    def test_confirmed_short_is_context_only_in_spot_mode(self):
+    def test_confirmed_short_is_sent_and_tracked(self):
         short = Signal("TESTUSDT", "SHORT", 100.0, 102.0, 98.0, 96.0,
                        0.8, -0.3, 0.40, 1.4, 0.0001, 82, 900000)
         with tempfile.TemporaryDirectory() as directory:
@@ -119,8 +119,11 @@ class TelegramRunnerTests(unittest.TestCase):
             )
             journal_path = Path(directory) / "trade_outcomes.json"
             journal = json.loads(journal_path.read_text(encoding="utf-8"))
-            send.assert_not_called()
-            self.assertEqual(journal["trades"], {})
+            send.assert_called_once()
+            self.assertEqual(len(journal["trades"]), 1)
+            tracked = next(iter(journal["trades"].values()))
+            self.assertEqual(tracked["signal"]["side"], "SHORT")
+            self.assertEqual(tracked["status"], "OPEN")
 
     def test_no_signal_does_not_send_telegram_message(self):
         with tempfile.TemporaryDirectory() as directory:
