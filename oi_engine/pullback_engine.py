@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
 
-from oi_engine.signal_engine import Signal, _atr, evaluate_snapshot
+from oi_engine.signal_engine import Signal, _atr, evaluate_snapshot, score_signal_components
 
 
 PULLBACK_TOLERANCE_ATR = 0.25
@@ -125,14 +125,18 @@ def advance_pullback_setup(
     tp2 = entry + 2.0 * risk if side == "LONG" else entry - 2.0 * risk
     taker_ratio = float(last["taker_buy_quote"]) / quote_volume
     price_change = (entry / float(candles[-2]["close"]) - 1.0) * 100.0
-    confidence = min(95, 75 + int(min(oi_change, 2.0) * 4)
-                     + int(max(0.0, quote_volume / average_volume - 1.15) * 5))
+    movement_strength, entry_quality = score_signal_components(
+        candles, side, oi_change, price_change, taker_ratio,
+        quote_volume / average_volume, atr, level,
+    )
+    confidence = movement_strength
     signal = Signal(
         symbol=snapshot["symbol"], side=side, entry=entry, stop_loss=stop,
         take_profit_1=tp1, take_profit_2=tp2, oi_change_pct=oi_change,
         price_change_pct=price_change, taker_buy_ratio=taker_ratio,
         volume_ratio=quote_volume / average_volume,
         funding_rate=float(snapshot.get("funding_rate", 0.0)),
-        confidence=min(95, confidence), candle_close_time=close_time,
+        confidence=confidence, candle_close_time=close_time,
+        movement_strength=movement_strength, entry_quality=entry_quality,
     )
     return signal, None, "پولبک و کندل برگشتی تأیید شدند"
