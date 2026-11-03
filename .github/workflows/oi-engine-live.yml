@@ -13,7 +13,7 @@ concurrency:
 jobs:
   scan-and-notify:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 6
     permissions:
       contents: read
     steps:
