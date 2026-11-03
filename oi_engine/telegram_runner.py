@@ -63,16 +63,21 @@ def save_outcome_journal(journal: Dict[str, Any]) -> None:
     _save_json(OUTCOME_PATH, journal)
 
 
-def send_telegram(token: str, chat_id: str, message: str) -> None:
+def send_telegram(token: str, chat_id: str, message: str, reply_to_message_id: int | None = None) -> int | None:
     response = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        data={"chat_id": chat_id, "text": message},
+        data={
+            "chat_id": chat_id, "text": message,
+            **({"reply_to_message_id": int(reply_to_message_id)} if reply_to_message_id else {}),
+        },
         timeout=20,
     )
     response.raise_for_status()
     payload = response.json()
     if not payload.get("ok"):
         raise RuntimeError(f"Telegram rejected message: {payload}")
+    result = payload.get("result") or {}
+    return int(result["message_id"]) if result.get("message_id") is not None else None
 
 
 def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[str, Any]:
@@ -205,7 +210,37 @@ def main() -> None:
     client = CoinalyzeClient(api_key=api_key)
     # Binance Futures returns HTTP 451 on this runner; use the same Coinalyze
     # 15m OHLCV fallback as the scanner so outcome tracking can still progress.
+    previous_events = {
+        trade_id: {
+            "events": len(record.get("events", [])),
+            "post_stop_tp1": bool(record.get("post_stop_tp1_reached")),
+            "post_stop_tp2": bool(record.get("post_stop_tp2_reached")),
+        }
+        for trade_id, record in outcome_journal.get("trades", {}).items()
+    }
     outcome_journal = monitor_journal(outcome_journal, fetcher=client.fetch_ohlcv_candles)
+    for trade_id, record in outcome_journal.get("trades", {}).items():
+        anchor_id = record.get("telegram_message_id")
+        if not anchor_id:
+            continue
+        before = previous_events.get(trade_id, {"events": 0, "post_stop_tp1": False, "post_stop_tp2": False})
+        for event in record.get("events", [])[int(before["events"]):]:
+            name = event.get("event")
+            labels = {
+                "TP1": "🎯 تارگت اول خورد",
+                "TP2": "🏆 تارگت دوم خورد؛ معامله به پایان رسید",
+                "SL": "🛑 حد ضرر خورد",
+            }
+            if name in labels:
+                ambiguity = " (در همین کندل تارگت هم لمس شده؛ ترتیب دقیق داخل کندل مشخص نیست)" if event.get("ambiguous_same_candle") else ""
+                send_telegram(token, chat_id, labels[name] + "\\nارز: " + str(record["signal"]["symbol"]) + ambiguity,
+                              reply_to_message_id=int(anchor_id))
+        if record.get("post_stop_tp1_reached") and not before["post_stop_tp1"]:
+            send_telegram(token, chat_id, "ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.",
+                          reply_to_message_id=int(anchor_id))
+        if record.get("post_stop_tp2_reached") and not before["post_stop_tp2"]:
+            send_telegram(token, chat_id, "ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت دوم رسید.",
+                          reply_to_message_id=int(anchor_id))
     save_outcome_journal(outcome_journal)
     outcome_statuses = {}
     for trade in outcome_journal.get("trades", {}).values():
@@ -259,8 +294,10 @@ def main() -> None:
         candle_id = int(signal.candle_close_time)
         if state.get(key) == candle_id:
             continue
-        send_telegram(token, chat_id, format_confirmed_signal(signal, metrics))
+        message_id = send_telegram(token, chat_id, format_confirmed_signal(signal, metrics))
         trade_record = make_trade_record(signal, metrics, int(time.time() * 1000))
+        trade_record["telegram_chat_id"] = str(chat_id)
+        trade_record["telegram_message_id"] = message_id
         outcome_journal.setdefault("trades", {}).setdefault(trade_record["trade_id"], trade_record)
         save_outcome_journal(outcome_journal)
         state[key] = candle_id
