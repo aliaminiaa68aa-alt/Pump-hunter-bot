@@ -45,16 +45,16 @@ def source_oi_priority(source_text: str) -> Dict[str, Any]:
         # Prefer explicit timeframe + OI labels, e.g.
         # "15m: OI +5.30%, price +2.17%" or "OI (15m): +5.30%".
         patterns = (
-            rf"(?:^|\\b){timeframe}\\s*[:：-]\\s*OI\\s*[:=]?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*%",
-            rf"\\bOI\\s*(?:change\\s*)?(?:\\[\\s*{timeframe}\\s*\\]|\\(\\s*{timeframe}\\s*\\)|{timeframe})\\s*[:=]?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*%",
-            rf"\\bOI\\s*[:=]?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*%\\s*\\(\\s*{timeframe}\\s*\\)",
+            rf"(?:^|\b){timeframe}\s*[:：-]\s*OI\s*[:=]?\s*([+-]?\d+(?:\.\d+)?)\s*%",
+            rf"\bOI\s*(?:change\s*)?(?:\[\s*{timeframe}\s*\]|\(\s*{timeframe}\s*\)|{timeframe})\s*[:=]?\s*([+-]?\d+(?:\.\d+)?)\s*%",
+            rf"\bOI\s*[:=]?\s*([+-]?\d+(?:\.\d+)?)\s*%\s*\(\s*{timeframe}\s*\)",
         )
         match = next((m for pattern in patterns if (m := re.search(pattern, source_text, re.I))), None)
         # Older compact feed: "🟩+5.30% 🟩+2.17% (15m)".
         # Its first percentage is OI; the second is price.
         if not match:
             match = re.search(
-                rf"([+-]?\\d+(?:\\.\\d+)?)%\\s+[🟩🟥🟢🔴]?\\s*[+-]?\\d+(?:\\.\\d+)?%\\s*\\(\\s*{timeframe}\\s*\\)",
+                rf"([+-]?\d+(?:\.\d+)?)%\s+[🟩🟥🟢🔴]?\s*[+-]?\d+(?:\.\d+)?%\s*\(\s*{timeframe}\s*\)",
                 source_text,
                 re.I,
             )
