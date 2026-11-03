@@ -41,7 +41,8 @@ def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> 
         "trade_id": trade_id,
         "signal": data,
         "source": {
-            "provider": "Binance + Coinalyze",
+            "provider": metrics.get("provider", "Coinalyze + signal-engine market feed"),
+            "data_as_of": metrics.get("as_of"),
             "coinalyze_oi_change_15m_pct": metrics.get("oi_change_15m_window_pct"),
             "coinalyze_taker_buy_ratio": metrics.get("taker_buy_ratio"),
             "funding_rate_raw": metrics.get("funding_rate"),
@@ -127,6 +128,10 @@ def monitor_journal(
                     })
                     record["status"] = "CLOSED_SL"
                     record["exit_time_ms"] = close_ms
+                    record["mae_pct"] = max(
+                        float(record.get("mae_pct", 0.0)),
+                        abs(fill - entry) / entry * 100.0 if entry else 0.0,
+                    )
                     break
 
                 high, low = float(candle[2]), float(candle[3])
