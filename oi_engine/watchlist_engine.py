@@ -60,7 +60,7 @@ def source_oi_priority(source_text: str) -> Dict[str, Any]:
         score += min(10.0, max(0.0, oi_15m) * 1.2)
     if oi_1h is not None:
         score += min(10.0, max(0.0, oi_1h) * 0.6)
-    tier = ("🔥 بسیار قوی" if score >= 12 else
+    tier = ("🔥 بسیار قوی" if score >= 10 else
             "🟢 قوی" if score >= 6 else
             "🟡 معمولی")
     return {
