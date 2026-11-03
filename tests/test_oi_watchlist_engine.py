@@ -80,7 +80,7 @@ class WatchlistTests(unittest.TestCase):
             "expires_at_close_time": 4500000,
             "breakout_atr": 0.02,
         }
-        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value={}), \\
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value={}), \
              patch("oi_engine.watchlist_engine.advance_pullback_setup",
                    return_value=(signal(), None, "پولبک تأیید شد")):
             found, updated = scan_watchlist(
