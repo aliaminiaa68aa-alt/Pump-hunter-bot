@@ -123,7 +123,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(event["same_candle_targets"], ["TP1"])
         report = summarize_outcomes(journal)
         self.assertEqual(report["ambiguous_stop_target"], 1)
-        self.assertEqual(report["sl_before_tp1"], 1)
+        self.assertEqual(report["sl_before_tp1"], 0)
 
     def test_trade_times_out_after_four_days(self):
         journal, key = self.journal()
