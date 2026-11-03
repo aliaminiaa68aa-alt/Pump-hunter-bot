@@ -37,7 +37,7 @@ def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
 def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> Dict[str, Any]:
     data = signal.to_dict() if hasattr(signal, "to_dict") else dict(signal)
     data["engine"] = metrics.get("engine", data.get("engine", "UNSPECIFIED"))
-    trade_id = f"{data['symbol']}:{data['side']}:{int(data['candle_close_time'])}"
+    trade_id = f"{data['engine']}:{data['symbol']}:{data['side']}:{int(data['candle_close_time'])}"
     return {
         "trade_id": trade_id,
         "signal": data,
