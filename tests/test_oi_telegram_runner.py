@@ -165,6 +165,33 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(next_cursor, "COIN4USDT")
         self.assertEqual(len(watchlist), 11)
 
+    def test_pending_pullbacks_are_scanned_before_hot_oi_and_rotation(self):
+        watchlist = {
+            "HOT1USDT": {"oi_priority_score": 12.0},
+            "HOT2USDT": {"oi_priority_score": 9.0},
+            "PENDING_LATEUSDT": {"pending_setup": {"expires_at_close_time": 9000}},
+            "PENDING_SOONUSDT": {"pending_setup": {"expires_at_close_time": 3000}},
+            **{f"ROT{i}USDT": {} for i in range(8)},
+        }
+        batch, cursor = telegram_runner.select_watchlist_batch(watchlist)
+        self.assertEqual(list(batch)[:2], ["PENDING_SOONUSDT", "PENDING_LATEUSDT"])
+        self.assertEqual(list(batch)[2:4], ["HOT1USDT", "HOT2USDT"])
+        self.assertEqual(len(batch), 8)
+        self.assertEqual(len(set(batch)), 8)
+
+    def test_pending_pullback_uses_slot_before_oi_hot_candidate(self):
+        watchlist = {
+            "HOT1USDT": {"oi_priority_score": 12.0},
+            "HOT2USDT": {"oi_priority_score": 9.0},
+            "PENDINGUSDT": {"pending_setup": {"expires_at_close_time": 3000}},
+            **{f"ROT{i}USDT": {} for i in range(8)},
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist)
+        self.assertIn("PENDINGUSDT", batch)
+        self.assertIn("HOT1USDT", batch)
+        self.assertIn("HOT2USDT", batch)
+        self.assertEqual(len(batch), 8)
+
     def test_twenty_four_symbols_are_all_scanned_once_across_three_batches(self):
         watchlist = {f"COIN{i:02d}USDT": {"status": "در حال رصد"} for i in range(24)}
         cursor = ""
