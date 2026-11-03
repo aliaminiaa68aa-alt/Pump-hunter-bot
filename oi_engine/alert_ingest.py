@@ -13,7 +13,7 @@ SYMBOL_PATTERNS = (
 # These are explicitly outside this crypto-only scanner's scope.
 NON_CRYPTO_BASES = {
     "AAPL", "AMD", "COST", "BYD", "XLE", "UVXY", "HIMS", "HK1810",
-    "RIVN", "CSOPSKHYNIX2L",
+    "RIVN", "CSOPSKHYNIX2L", "SMCI", "GME", "TER", "ALAB",
 }
 
 
