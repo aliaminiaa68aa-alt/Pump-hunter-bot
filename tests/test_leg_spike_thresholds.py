@@ -38,11 +38,19 @@ class LegSpikeThresholdTests(unittest.TestCase):
         self.assertTrue(passed)
         self.assertIn("ranking", reason)
 
-    def test_final_entry_keeps_4h_oi_as_validated_context_not_directional_gate(self):
+    def test_4h_oi_is_validated_context_not_a_directional_gate(self):
         self.assertTrue(Bot.leg_spike_final_oi_context_available(-5.87))
         self.assertTrue(Bot.leg_spike_final_oi_context_available(0.0))
         self.assertFalse(Bot.leg_spike_final_oi_context_available(None))
         self.assertFalse(Bot.leg_spike_final_oi_context_available(float("nan")))
+        self.assertFalse(Bot.leg_spike_final_oi_context_available(float("inf")))
+
+    def test_oi_growth_gate_rejects_non_finite_values_but_accepts_negative_4h(self):
+        self.assertTrue(Bot.leg_spike_oi_growth_gate(0.069, -5.87)[0])
+        self.assertFalse(Bot.leg_spike_oi_growth_gate(float("nan"), 1.0)[0])
+        self.assertFalse(Bot.leg_spike_oi_growth_gate(float("inf"), 1.0)[0])
+        self.assertFalse(Bot.leg_spike_oi_growth_gate(0.1, float("nan"))[0])
+        self.assertFalse(Bot.leg_spike_oi_growth_gate(0.1, float("inf"))[0])
 
     def test_leg_spike_rejects_non_positive_short_term_oi(self):
         self.assertFalse(Bot.leg_spike_oi_growth_gate(0.0, 2.0)[0])
