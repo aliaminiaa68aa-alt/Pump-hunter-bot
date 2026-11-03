@@ -298,8 +298,14 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         if record.get("last_error") or record.get("post_stop_error"):
             report["provider_errors"] += 1
         signal = record.get("signal", {})
-        metrics = {"movement_strength": signal.get("movement_strength"),
-                   "entry_quality": signal.get("entry_quality")}
+        metrics = {
+            "movement_strength": signal.get("movement_strength"),
+            "entry_quality": signal.get("entry_quality"),
+            "mae_before_tp1_pct": record.get("mae_before_tp1_pct"),
+        }
+        if record.get("tp1_candle_excursion_ambiguous"):
+            report.setdefault("tp1_excursion_ambiguous", 0)
+            report["tp1_excursion_ambiguous"] += 1
         groups.setdefault(outcome, []).append(metrics)
         engine = str(signal.get("engine", signal.get("strategy", "UNSPECIFIED")))
         side = str(signal.get("side", "UNKNOWN"))
@@ -309,7 +315,7 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         bucket["statuses"][status] = bucket["statuses"].get(status, 0) + 1
     for name, rows in groups.items():
         summary = {"count": len(rows)}
-        for field in ("movement_strength", "entry_quality"):
+        for field in ("movement_strength", "entry_quality", "mae_before_tp1_pct"):
             values = [float(row[field]) for row in rows if row.get(field) is not None]
             summary[field + "_avg"] = round(sum(values) / len(values), 2) if values else None
         report["groups"][name] = summary
