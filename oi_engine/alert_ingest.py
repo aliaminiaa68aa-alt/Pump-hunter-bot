@@ -31,7 +31,7 @@ def parse_oi_alert_direction(update: Dict[str, Any]) -> Optional[str]:
     body = message.get("text") or message.get("caption") or ""
     if not isinstance(body, str):
         return None
-    marker = re.search(r"^\\s*(?:🔥\\s*)*(🟢|🔴)", body)
+    marker = re.search(r"^\s*(?:🔥\s*)*(🟢|🔴)", body)
     if not marker:
         return None
     return "LONG" if marker.group(1) == "🟢" else "SHORT"
