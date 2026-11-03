@@ -290,7 +290,7 @@ def main() -> None:
 
     sent = 0
     for signal, metrics in confirmed:
-        key = f"{signal.symbol}:{signal.side}"
+        key = f"{metrics.get('engine', 'UNSPECIFIED')}:{signal.symbol}:{signal.side}"
         candle_id = int(signal.candle_close_time)
         if state.get(key) == candle_id:
             continue
