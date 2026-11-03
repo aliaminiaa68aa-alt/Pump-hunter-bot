@@ -36,6 +36,7 @@ class TelegramRunnerTests(unittest.TestCase):
     def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None):
         state_path = Path(directory) / "sent_signals.json"
         watch_path = Path(directory) / "watchlist.json"
+        outcome_path = Path(directory) / "trade_outcomes.json"
         if sent_state is not None:
             state_path.write_text(json.dumps(sent_state), encoding="utf-8")
         if initial_watchlist is not None:
@@ -43,6 +44,7 @@ class TelegramRunnerTests(unittest.TestCase):
         env = {"BOT_TOKEN": "token", "CHAT_ID": "chat", "COINALYZE_API_KEY": "key"}
         with patch.object(telegram_runner, "STATE_PATH", state_path), \
              patch.object(telegram_runner, "WATCHLIST_PATH", watch_path), \
+             patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
              patch.dict(os.environ, env), \
              patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
              patch.object(telegram_runner, "poll_public_channel_alerts", return_value=public_result) as poll, \
@@ -69,6 +71,7 @@ class TelegramRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory) / "sent_signals.json"
             watch_path = Path(directory) / "watchlist.json"
+            outcome_path = Path(directory) / "trade_outcomes.json"
             env = {"BOT_TOKEN": "token", "CHAT_ID": "chat", "COINALYZE_API_KEY": "key"}
             def ingest(channel, cursor, watchlist, **kwargs):
                 watchlist["NEWUSDT"] = {"status": "در حال رصد", "last_alert": 2000000}
@@ -80,6 +83,7 @@ class TelegramRunnerTests(unittest.TestCase):
                 return [], batch
             with patch.object(telegram_runner, "STATE_PATH", state_path), \
                  patch.object(telegram_runner, "WATCHLIST_PATH", watch_path), \
+                 patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
                  patch.dict(os.environ, env), \
                  patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
                  patch.object(telegram_runner, "poll_public_channel_alerts", side_effect=ingest), \
