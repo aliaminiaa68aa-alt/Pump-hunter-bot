@@ -17,6 +17,7 @@ MIN_STOP_PCT = 0.20
 def advance_pullback_setup(
     snapshot: Dict[str, Any],
     pending: Optional[Dict[str, Any]] = None,
+    required_side: Optional[str] = None,
 ) -> Tuple[Optional[Signal], Optional[Dict[str, Any]], str]:
     """Create a pending setup on breakout; emit only after a later retest candle confirms."""
     candles = snapshot.get("candles") or []
@@ -30,10 +31,17 @@ def advance_pullback_setup(
     if atr <= 0:
         return None, pending, "ATR معتبر نیست"
 
+    if required_side not in {None, "LONG", "SHORT"}:
+        required_side = None
+    if pending is not None and required_side is not None and pending.get("side") != required_side:
+        return None, None, "جهت هشدار جدید با setup قبلی متفاوت است؛ setup قبلی پاک شد"
+
     if pending is None:
         breakout = evaluate_snapshot(snapshot)
         if breakout is None:
             return None, None, "شکست اولیه هنوز تأیید نشده"
+        if required_side is not None and breakout.side != required_side:
+            return None, None, f"جهت موتور {breakout.side} با جهت کانال {required_side} هم‌خوان نیست؛ سیگنال رد شد"
         prior = candles[-6:-1]
         level = (max(float(c["high"]) for c in prior) if breakout.side == "LONG"
                  else min(float(c["low"]) for c in prior))
