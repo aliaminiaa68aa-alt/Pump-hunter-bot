@@ -77,9 +77,10 @@ class SignalEngineTests(unittest.TestCase):
         self.assertIsNotNone(strong)
         self.assertNotEqual(strong.movement_strength, strong.entry_quality)
         stretched = make_snapshot("LONG")
-        stretched["candles"][-1]["close"] = 104.0
-        stretched["candles"][-1]["high"] = 104.1
-        stretched["candles"][-1]["open"] = 101.0
+        stretched["candles"][-1]["close"] = 103.0
+        stretched["candles"][-1]["high"] = 103.1
+        stretched["candles"][-1]["low"] = 100.8
+        stretched["candles"][-1]["open"] = 102.9
         stretched["candles"][-1]["quote_volume"] = 200000.0
         stretched["candles"][-1]["taker_buy_quote"] = 120000.0
         late_entry = evaluate_snapshot(stretched)
