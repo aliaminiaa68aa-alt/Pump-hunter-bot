@@ -144,6 +144,32 @@ class CoinalyzeClient:
         history = row.get("history", []) if row else []
         return history if isinstance(history, list) else []
 
+    def fetch_ohlcv_candles(self, binance_symbol: str, start_ms: int, end_ms: int) -> List[list]:
+        """Fetch closed 15m OHLCV candles for outcome tracking via Coinalyze."""
+        market_symbol = self.resolve_market(binance_symbol)
+        history = self._history(
+            "ohlcv-history", market_symbol,
+            int(start_ms) // 1000, int(end_ms) // 1000,
+        )
+        candles = []
+        for row in history:
+            try:
+                open_time = int(row["t"]) * 1000
+                open_price = float(row["o"])
+                high = float(row["h"])
+                low = float(row["l"])
+                close = float(row["c"])
+                values = (open_price, high, low, close)
+                if (not all(math.isfinite(value) for value in values)
+                        or min(values) <= 0 or high < low):
+                    continue
+                candles.append([
+                    open_time, str(open_price), str(high), str(low), str(close), "0"
+                ])
+            except (KeyError, TypeError, ValueError, OverflowError):
+                continue
+        return sorted(candles, key=lambda item: int(item[0]))
+
     def fetch_metrics(self, binance_symbol: str, now: Optional[int] = None) -> Dict[str, Any]:
         """Fetch a bounded Coinalyze derivatives snapshot for one Binance USDT perp."""
         market_symbol = self.resolve_market(binance_symbol)
