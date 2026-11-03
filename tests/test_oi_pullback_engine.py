@@ -86,6 +86,37 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertGreater(signal.stop_loss, signal.entry)
         self.assertLess(signal.take_profit_2, signal.take_profit_1)
 
+    def test_weak_order_flow_keeps_setup_alive_for_next_retest(self):
+        data = snapshot("LONG")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "LONG")
+        data["candles"][-1]["taker_buy_quote"] = 100000
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNone(signal)
+        self.assertEqual(next_pending, pending)
+        self.assertIn("setup", reason)
+
+    def test_weak_oi_keeps_setup_alive_for_next_retest(self):
+        data = snapshot("LONG")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "LONG")
+        data["oi_values"] = [100.0, 100.0, 100.1]
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNone(signal)
+        self.assertEqual(next_pending, pending)
+        self.assertIn("حفظ شد", reason)
+
+    def test_weak_retest_volume_keeps_setup_alive_for_next_retest(self):
+        data = snapshot("LONG")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "LONG")
+        data["candles"][-1]["quote_volume"] = 100000
+        data["candles"][-1]["taker_buy_quote"] = 60000
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNone(signal)
+        self.assertEqual(next_pending, pending)
+        self.assertIn("حفظ شد", reason)
+
     def test_setup_expires_after_four_15m_candles(self):
         data = snapshot("LONG")
         _, pending, _ = advance_pullback_setup(data)
