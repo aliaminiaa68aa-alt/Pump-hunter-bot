@@ -44,6 +44,8 @@ class OutcomeTrackerTests(unittest.TestCase):
         record = journal["trades"][key]
         self.assertEqual(record["status"], "CLOSED_SL")
         self.assertEqual([e["event"] for e in record["events"]], ["SL"])
+        self.assertEqual(record["mfe_pct"], 0.0)
+        self.assertEqual(record["mae_pct"], 2.0)
 
     def test_short_tp1_then_tp2(self):
         journal, key = self.journal("SHORT")
