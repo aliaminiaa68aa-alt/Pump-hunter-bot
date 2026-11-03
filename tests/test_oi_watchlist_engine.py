@@ -20,9 +20,9 @@ class FakeClient:
 class WatchlistTests(unittest.TestCase):
     def test_source_oi_priority_parses_labeled_timeframe_rows_not_price_changes(self):
         source = (
-            "OI / Price change:\\n"
-            "5m: OI +0.20%, price -0.80%\\n"
-            "15m: OI +5.30%, price +2.17%\\n"
+            "OI / Price change:\n"
+            "5m: OI +0.20%, price -0.80%\n"
+            "15m: OI +5.30%, price +2.17%\n"
             "1h: OI +8.47%, price +4.92%"
         )
         result = source_oi_priority(source)
