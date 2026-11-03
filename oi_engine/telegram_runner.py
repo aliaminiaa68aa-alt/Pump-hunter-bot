@@ -10,6 +10,7 @@ from typing import Any, Dict
 import requests
 
 from oi_engine.telegram_public_source import poll_public_channel_alerts
+from oi_engine.alert_ingest import _is_crypto_candidate
 from oi_engine.coinalyze_client import CoinalyzeClient
 from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal
 from oi_engine.outcome_tracker import make_trade_record, monitor_journal
@@ -78,7 +79,8 @@ def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[s
     timestamp = int(now if now is not None else time.time())
     return {
         symbol: record for symbol, record in watchlist.items()
-        if timestamp - int(record.get("last_alert", record.get("first_seen", timestamp)))
+        if _is_crypto_candidate(symbol)
+        and timestamp - int(record.get("last_alert", record.get("first_seen", timestamp)))
         <= WATCHLIST_TTL_SECONDS
     }
 
