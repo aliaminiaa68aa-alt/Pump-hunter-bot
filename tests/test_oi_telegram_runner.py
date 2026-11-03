@@ -216,14 +216,14 @@ class TelegramRunnerTests(unittest.TestCase):
                 captured.update(batch)
                 return [], batch
             env = {"BOT_TOKEN": "token", "CHAT_ID": "chat", "COINALYZE_API_KEY": "key"}
-            with patch.object(telegram_runner, "STATE_PATH", state_path), \\
-                 patch.object(telegram_runner, "WATCHLIST_PATH", watch_path), \\
-                 patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \\
-                 patch.dict(os.environ, env), \\
-                 patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \\
-                 patch.object(telegram_runner, "poll_public_channel_alerts", return_value=(10, 0)), \\
-                 patch.object(telegram_runner, "scan_watchlist", side_effect=scan), \\
-                 patch.object(telegram_runner, "send_telegram"), \\
+            with patch.object(telegram_runner, "STATE_PATH", state_path), \
+                 patch.object(telegram_runner, "WATCHLIST_PATH", watch_path), \
+                 patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
+                 patch.dict(os.environ, env), \
+                 patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
+                 patch.object(telegram_runner, "poll_public_channel_alerts", return_value=(10, 0)), \
+                 patch.object(telegram_runner, "scan_watchlist", side_effect=scan), \
+                 patch.object(telegram_runner, "send_telegram"), \
                  patch.object(telegram_runner.time, "time", return_value=2000000):
                 telegram_runner.main()
             self.assertEqual(captured["BTCUSDT"].get("source_side"), "LONG")
