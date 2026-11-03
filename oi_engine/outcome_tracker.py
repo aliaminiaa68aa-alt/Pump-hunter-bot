@@ -111,16 +111,12 @@ def monitor_journal(
                 close_ms = open_ms + INTERVAL_MS - 1
                 if close_ms >= now:
                     continue
-                high, low = float(candle[2]), float(candle[3])
-                mfe, mae = _price_extremes(side, entry, high, low)
-                record["mfe_pct"] = max(float(record.get("mfe_pct", 0.0)), mfe)
-                record["mae_pct"] = max(float(record.get("mae_pct", 0.0)), mae)
-
                 stop_hit, tp1_hit, tp2_hit, stop_fill, tp1_fill, tp2_fill = _touches(side, candle, signal)
                 event_names = {event["event"] for event in record.get("events", [])}
 
                 # OHLC cannot reveal intrabar order. If a stop and any target
-                # coexist in one candle, assume the stop happened first.
+                # coexist in one candle, assume the stop happened first and do
+                # not credit later unknown intrabar extremes to MFE/MAE.
                 if stop_hit:
                     risk = abs(entry - float(signal["stop_loss"]))
                     fill = stop_fill
@@ -132,6 +128,11 @@ def monitor_journal(
                     record["status"] = "CLOSED_SL"
                     record["exit_time_ms"] = close_ms
                     break
+
+                high, low = float(candle[2]), float(candle[3])
+                mfe, mae = _price_extremes(side, entry, high, low)
+                record["mfe_pct"] = max(float(record.get("mfe_pct", 0.0)), mfe)
+                record["mae_pct"] = max(float(record.get("mae_pct", 0.0)), mae)
 
                 if tp1_hit and "TP1" not in event_names:
                     risk = abs(entry - float(signal["stop_loss"]))
