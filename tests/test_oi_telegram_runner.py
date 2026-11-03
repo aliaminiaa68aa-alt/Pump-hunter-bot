@@ -110,27 +110,27 @@ class TelegramRunnerTests(unittest.TestCase):
             poll.assert_not_called()
 
     def test_watchlist_batch_rotates_without_dropping_symbols(self):
-        watchlist = {f"COIN{i}USDT": {"status": "در حال رصد"} for i in range(7)}
+        watchlist = {f"COIN{i}USDT": {"status": "در حال رصد"} for i in range(11)}
         first, cursor = telegram_runner.select_watchlist_batch(watchlist)
         second, next_cursor = telegram_runner.select_watchlist_batch(watchlist, cursor)
-        self.assertEqual(list(first), ["COIN0USDT", "COIN1USDT", "COIN2USDT", "COIN3USDT", "COIN4USDT"])
-        self.assertEqual(list(second), ["COIN5USDT", "COIN6USDT", "COIN0USDT", "COIN1USDT", "COIN2USDT"])
-        self.assertEqual(cursor, "COIN4USDT")
-        self.assertEqual(next_cursor, "COIN2USDT")
-        self.assertEqual(len(watchlist), 7)
+        self.assertEqual(list(first), [f"COIN{i}USDT" for i in range(8)])
+        self.assertEqual(list(second), ["COIN8USDT", "COIN9USDT", "COIN10USDT", "COIN0USDT", "COIN1USDT", "COIN2USDT", "COIN3USDT", "COIN4USDT"])
+        self.assertEqual(cursor, "COIN7USDT")
+        self.assertEqual(next_cursor, "COIN4USDT")
+        self.assertEqual(len(watchlist), 11)
 
-    def test_twenty_symbols_are_all_scanned_once_across_four_batches(self):
-        watchlist = {f"COIN{i:02d}USDT": {"status": "در حال رصد"} for i in range(20)}
+    def test_twenty_four_symbols_are_all_scanned_once_across_three_batches(self):
+        watchlist = {f"COIN{i:02d}USDT": {"status": "در حال رصد"} for i in range(24)}
         cursor = ""
         visited = []
-        for _ in range(4):
+        for _ in range(3):
             batch, cursor = telegram_runner.select_watchlist_batch(watchlist, cursor)
-            self.assertEqual(len(batch), 5)
+            self.assertEqual(len(batch), 8)
             visited.extend(batch)
-        self.assertEqual(len(visited), 20)
-        self.assertEqual(len(set(visited)), 20)
+        self.assertEqual(len(visited), 24)
+        self.assertEqual(len(set(visited)), 24)
         self.assertEqual(set(visited), set(watchlist))
-        self.assertEqual(cursor, "COIN19USDT")
+        self.assertEqual(cursor, "COIN23USDT")
 
     def test_prunes_expired_watchlist_symbols(self):
         now = 1000000
