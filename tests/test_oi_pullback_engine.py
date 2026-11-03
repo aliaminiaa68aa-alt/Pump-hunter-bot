@@ -34,7 +34,7 @@ def add_retest(data, side):
                "taker_buy_quote":120000,"close_time":prev_close_time+900000}
     else:
         row = {"open_time":prev_close_time+1,"open":99.9,"high":100.0,"low":99.3,
-               "close":99.7,"volume":1500,"quote_volume":200000,
+               "close":99.3,"volume":1500,"quote_volume":200000,
                "taker_buy_quote":80000,"close_time":prev_close_time+900000}
     data["candles"].append(row)
     data["oi_values"] = [100.2,101.0,101.8]
