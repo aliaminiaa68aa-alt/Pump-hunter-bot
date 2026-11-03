@@ -152,7 +152,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             # Run OI/BOS independently; it must not wait for a pullback.
             bos_signal = None
             try:
-                bos_signal = evaluate_snapshot(snapshot)
+                bos_signal = evaluate_snapshot(snapshot, record.get("source_side"))
             except (KeyError, TypeError, ValueError, MarketDataError):
                 bos_signal = None
             previous_pending_setup = record.get("pending_setup")
