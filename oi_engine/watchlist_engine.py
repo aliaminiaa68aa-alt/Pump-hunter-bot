@@ -189,6 +189,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 )
                 continue
             record.pop("pending_setup", None)
+            metrics["engine"] = "PULLBACK"
             record["status"] = f"تأیید {signal.side}"
             record["reason"] = "تأیید موتور 15m و Coinalyze"
             confirmed.append((signal, metrics))
