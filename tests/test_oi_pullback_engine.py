@@ -93,7 +93,8 @@ class PullbackEngineTests(unittest.TestCase):
         data["candles"][-1]["taker_buy_quote"] = 100000
         signal, next_pending, reason = advance_pullback_setup(data, pending)
         self.assertIsNone(signal)
-        self.assertEqual(next_pending, pending)
+        self.assertEqual({k: v for k, v in next_pending.items() if k != "pullback_extreme"}, pending)
+        self.assertAlmostEqual(next_pending["pullback_extreme"], 100.4)
         self.assertIn("setup", reason)
 
     def test_weak_oi_keeps_setup_alive_for_next_retest(self):
@@ -103,7 +104,8 @@ class PullbackEngineTests(unittest.TestCase):
         data["oi_values"] = [100.0, 100.0, 100.1]
         signal, next_pending, reason = advance_pullback_setup(data, pending)
         self.assertIsNone(signal)
-        self.assertEqual(next_pending, pending)
+        self.assertEqual({k: v for k, v in next_pending.items() if k != "pullback_extreme"}, pending)
+        self.assertAlmostEqual(next_pending["pullback_extreme"], 100.4)
         self.assertIn("حفظ شد", reason)
 
     def test_weak_retest_volume_keeps_setup_alive_for_next_retest(self):
@@ -114,7 +116,8 @@ class PullbackEngineTests(unittest.TestCase):
         data["candles"][-1]["taker_buy_quote"] = 60000
         signal, next_pending, reason = advance_pullback_setup(data, pending)
         self.assertIsNone(signal)
-        self.assertEqual(next_pending, pending)
+        self.assertEqual({k: v for k, v in next_pending.items() if k != "pullback_extreme"}, pending)
+        self.assertAlmostEqual(next_pending["pullback_extreme"], 100.4)
         self.assertIn("حفظ شد", reason)
 
 
