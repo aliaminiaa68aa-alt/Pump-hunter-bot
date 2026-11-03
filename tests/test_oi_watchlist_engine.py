@@ -76,13 +76,14 @@ class WatchlistTests(unittest.TestCase):
         extreme["predicted_funding_rate"] = -0.089197
         message = format_confirmed_signal(signal(), extreme)
         self.assertIn("Funding (snapshot اولیه):", message)
-        self.assertIn("Funding (Coinalyze): -2.88060%", message)
-        self.assertIn("Funding پیش‌بینی‌شده (Coinalyze): -8.91970%", message)
-        self.assertIn("Funding گزارش‌شده بسیار غیرعادی است", message)
+        self.assertIn("Funding خام (Coinalyze): -0.028806 (خام؛ واحد/بازه نامشخص)", message)
+        self.assertIn("Funding پیش‌بینی‌شده خام (Coinalyze): -0.089197 (خام؛ واحد/بازه نامشخص)", message)
+        self.assertIn("مقادیر Funding از Coinalyze خام‌اند", message)
 
-    def test_normal_funding_does_not_add_extreme_warning(self):
+    def test_funding_is_always_labeled_raw_until_units_are_verified(self):
         message = format_confirmed_signal(signal(), metrics())
-        self.assertNotIn("Funding گزارش‌شده بسیار غیرعادی است", message)
+        self.assertIn("Funding خام (Coinalyze): 0.0001 (خام؛ واحد/بازه نامشخص)", message)
+        self.assertIn("مقادیر Funding از Coinalyze خام‌اند", message)
 
 if __name__ == "__main__":
     unittest.main()
