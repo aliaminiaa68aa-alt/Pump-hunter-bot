@@ -132,13 +132,14 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
         }}
         symbol = parse_forwarded_oi_alert(update)
         source_side = parse_oi_alert_direction(update)
+        # Every valid crypto OI alert must enter the watchlist. A colored
+        # LONG/SHORT marker is useful context, but its absence must not discard
+        # the alert: the independent market engine evaluates BOTH directions.
         if symbol and source_side not in {"LONG", "SHORT"}:
             print(
-                f"Public Telegram OI alert skipped: message_id={post['message_id']} "
-                "reason=missing or ambiguous LONG/SHORT marker"
+                f"Public Telegram OI alert has no explicit side: message_id={post['message_id']} "
+                f"symbol={symbol}; both LONG and SHORT will be evaluated"
             )
-            next_id = post["message_id"]
-            continue
         if not symbol:
             preview = post["text"][:240].replace("\\n", " ")
             print(
