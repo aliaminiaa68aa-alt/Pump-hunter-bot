@@ -3,8 +3,7 @@ name: Pump Hunter
 on:
   push:
     branches: [main]
-  # Restore the independent full-universe pump scanner.
-  # It complements the alert-driven OI engine; it does not replace it.
+  # The only live strategy is OI PRE-PUMP.
   workflow_dispatch:
   schedule:
     - cron: "*/5 * * * *"
@@ -40,7 +39,7 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Compile-check bot syntax
         run: python -m py_compile Bot.py
-      - name: Run independent spot and futures strategy scans
+      - name: Run the single OI PRE-PUMP strategy
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
