@@ -134,6 +134,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: candles)
         record = journal["trades"][key]
         self.assertAlmostEqual(record["mae_before_tp1_pct"], 0.5)
+        self.assertAlmostEqual(record["mfe_before_tp1_pct"], 0.5)
         self.assertTrue(record["tp1_candle_excursion_ambiguous"])
         self.assertEqual(record["status"], "TP1_HIT")
 
