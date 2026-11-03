@@ -34,23 +34,30 @@ def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
 
 
 def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
-    def pct(value: Any) -> str:
-        return "ناموجود" if value is None else f"{float(value):.5%}"
+    def raw_funding(value: Any) -> str:
+        if value is None:
+            return "ناموجود"
+        try:
+            number = float(value)
+            if not math.isfinite(number):
+                return "نامعتبر"
+            return f"{number:.8g} (خام؛ واحد/بازه نامشخص)"
+        except (TypeError, ValueError):
+            return "نامعتبر"
+
     ratio = metrics.get("long_short_ratio")
     long_liq, short_liq = metrics.get("long_liquidations"), metrics.get("short_liquidations")
     funding = metrics.get("funding_rate")
+    predicted_funding = metrics.get("predicted_funding_rate")
     funding_warning = ""
-    try:
-        if funding is not None and math.isfinite(float(funding)) and abs(float(funding)) >= 0.01:
-            funding_warning = "\n⚠️ Funding گزارش‌شده بسیار غیرعادی است؛ واحد و مبنای زمانی آن را قبل از هر تصمیم بررسی کن."
-    except (TypeError, ValueError):
-        funding_warning = "\n⚠️ مقدار Funding معتبر نیست؛ در تصمیم ورود به آن اتکا نکن."
+    if funding is not None or predicted_funding is not None:
+        funding_warning = "\n⚠️ مقادیر Funding از Coinalyze خام‌اند؛ تا تأیید واحد و بازه زمانی، درصد تلقی نکن و مبنای ورود قرار نده."
     return (
         format_signal(signal) + "\n\nتأیید مرحله دوم Coinalyze"
         + f"\nتغییر OI: {metrics['oi_change_15m_window_pct']:+.2f}%"
         + f"\nنسبت خرید تهاجمی: {metrics['taker_buy_ratio']:.1%}"
-        + f"\nFunding (Coinalyze): {pct(funding)}"
-        + f"\nFunding پیش‌بینی‌شده (Coinalyze): {pct(metrics.get('predicted_funding_rate'))}"
+        + f"\nFunding خام (Coinalyze): {raw_funding(funding)}"
+        + f"\nFunding پیش‌بینی‌شده خام (Coinalyze): {raw_funding(predicted_funding)}"
         + f"\nنسبت حساب‌های Long/Short: {'ناموجود' if ratio is None else f'{float(ratio):.3f}'}"
         + f"\nلیکویید Long: {'ناموجود' if long_liq is None else f'{float(long_liq):,.0f}'}"
         + f"\nلیکویید Short: {'ناموجود' if short_liq is None else f'{float(short_liq):,.0f}'}"
