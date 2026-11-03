@@ -171,6 +171,15 @@ def main() -> None:
 
     sent = 0
     for signal, metrics in confirmed:
+        # This bot's execution objective is spot buying only. Keep SHORT
+        # confirmations in the watchlist diagnostics, but never publish them
+        # as actionable trades or add them to the spot outcome journal.
+        if signal.side != "LONG":
+            print(
+                f"Confirmed {signal.side} context only: {signal.symbol}; "
+                "spot-only mode suppresses actionable short messages"
+            )
+            continue
         key = f"{signal.symbol}:{signal.side}"
         candle_id = int(signal.candle_close_time)
         if state.get(key) == candle_id:
