@@ -52,7 +52,7 @@ class PublicTelegramSourceTests(unittest.TestCase):
             "channel": "oi_detector",
         }]
         watchlist = {}
-        with patch("oi_engine.telegram_public_source.fetch_public_channel_posts", return_value=posts), \\
+        with patch("oi_engine.telegram_public_source.fetch_public_channel_posts", return_value=posts), \
              patch("builtins.print") as log:
             cursor, added = poll_public_channel_alerts("oi_detector", 22, watchlist, now=1000)
         self.assertEqual(cursor, 23)
