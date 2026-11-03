@@ -54,6 +54,8 @@ def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> 
         "events": [],
         "mfe_pct": 0.0,
         "mae_pct": 0.0,
+        "mae_before_tp1_pct": 0.0,
+        "tp1_candle_excursion_ambiguous": False,
         "last_error": None,
     }
 
@@ -159,6 +161,13 @@ def monitor_journal(
                 # coexist in one candle, assume the stop happened first and do
                 # not credit later unknown intrabar extremes to MFE/MAE.
                 if stop_hit:
+                    if "TP1" not in event_names and not tp1_hit:
+                        stop_adverse = (abs(stop_fill - entry) / entry * 100.0) if entry else 0.0
+                        record["mae_before_tp1_pct"] = max(
+                            float(record.get("mae_before_tp1_pct", 0.0)), stop_adverse
+                        )
+                    elif tp1_hit:
+                        record["tp1_candle_excursion_ambiguous"] = True
                     risk = abs(entry - float(signal["stop_loss"]))
                     fill = stop_fill
                     signed = (fill - entry) if side == "LONG" else (entry - fill)
@@ -194,6 +203,19 @@ def monitor_journal(
                 mfe, mae = _price_extremes(side, entry, high, low)
                 record["mfe_pct"] = max(float(record.get("mfe_pct", 0.0)), mfe)
                 record["mae_pct"] = max(float(record.get("mae_pct", 0.0)), mae)
+
+                if "TP1" not in event_names:
+                    if tp1_hit:
+                        record["tp1_candle_excursion_ambiguous"] = True
+                    else:
+                        adverse_before_tp1 = (
+                            (entry - low) / entry * 100.0 if side == "LONG"
+                            else (high - entry) / entry * 100.0
+                        )
+                        record["mae_before_tp1_pct"] = max(
+                            float(record.get("mae_before_tp1_pct", 0.0)),
+                            max(0.0, adverse_before_tp1),
+                        )
 
                 if tp1_hit and "TP1" not in event_names:
                     risk = abs(entry - float(signal["stop_loss"]))
