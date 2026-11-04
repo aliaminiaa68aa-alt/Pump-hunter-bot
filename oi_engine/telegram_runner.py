@@ -85,13 +85,18 @@ def _event_price_result(signal: Dict[str, Any], event: Dict[str, Any]) -> str:
     return ""
 
 
-def send_telegram(token: str, chat_id: str, message: str, reply_to_message_id: int | None = None) -> int | None:
+def send_telegram(
+    token: str, chat_id: str, message: str,
+    reply_to_message_id: int | None = None, parse_mode: str | None = None,
+) -> int | None:
+    data = {
+        "chat_id": chat_id, "text": message,
+        **({"reply_to_message_id": int(reply_to_message_id)} if reply_to_message_id else {}),
+        **({"parse_mode": parse_mode} if parse_mode else {}),
+    }
     response = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        data={
-            "chat_id": chat_id, "text": message,
-            **({"reply_to_message_id": int(reply_to_message_id)} if reply_to_message_id else {}),
-        },
+        data=data,
         timeout=20,
     )
     response.raise_for_status()
@@ -331,7 +336,7 @@ def main() -> None:
         candle_id = int(signal.candle_close_time)
         if state.get(key) == candle_id:
             continue
-        message_id = send_telegram(token, chat_id, format_confirmed_signal(signal, metrics))
+        message_id = send_telegram(token, chat_id, format_confirmed_signal(signal, metrics), parse_mode="HTML")
         trade_record = make_trade_record(signal, metrics, int(time.time() * 1000))
         trade_record["telegram_chat_id"] = str(chat_id)
         trade_record["telegram_message_id"] = message_id if isinstance(message_id, int) else None
