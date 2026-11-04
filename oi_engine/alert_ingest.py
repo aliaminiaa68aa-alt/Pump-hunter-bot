@@ -14,13 +14,22 @@ SYMBOL_PATTERNS = (
 NON_CRYPTO_BASES = {
     "AAPL", "AMD", "COST", "BYD", "XLE", "UVXY", "HIMS", "HK1810",
     "RIVN", "CSOPSKHYNIX2L", "SMCI", "GME", "TER", "ALAB",
-    # Tokenized equity contracts observed in the live OI source feed.
+    # Tokenized equity and ETF contracts observed in the live OI source feed.
     "PLTR", "MSFT", "GEV", "ASTS", "NVO", "GDX", "LITE", "FWDI",
+    "KLAC", "DJT", "MCD", "SOXS", "SNXX", "INTW", "XBI",
+}
+
+# Stablecoins are crypto assets, but are not suitable pump candidates.
+NON_PUMP_BASES = {
+    "USDC", "BUSD", "FDUSD", "TUSD", "DAI", "USDE", "USDD", "PYUSD", "USDP",
 }
 
 
 def _is_crypto_candidate(symbol: str) -> bool:
-    return symbol.endswith("USDT") and symbol[:-4] not in NON_CRYPTO_BASES
+    if not symbol.endswith("USDT"):
+        return False
+    base = symbol[:-4]
+    return base not in NON_CRYPTO_BASES and base not in NON_PUMP_BASES
 
 
 
