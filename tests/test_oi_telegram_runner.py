@@ -41,19 +41,19 @@ class TelegramRunnerTests(unittest.TestCase):
         short_signal = {"entry": 100.0, "side": "SHORT", "take_profit_1": 98.0, "stop_loss": 102.0}
         self.assertEqual(
             telegram_runner._event_price_result(long_signal, {"event": "TP1", "fill": 102.0}),
-            "\\nسود قیمتی: +2.00%",
+            "\nسود قیمتی: +2.00%",
         )
         self.assertEqual(
             telegram_runner._event_price_result(long_signal, {"event": "SL", "fill": 98.0}),
-            "\\nضرر قیمتی: -2.00%",
+            "\nضرر قیمتی: -2.00%",
         )
         self.assertEqual(
             telegram_runner._event_price_result(short_signal, {"event": "TP1", "fill": 98.0}),
-            "\\nسود قیمتی: +2.00%",
+            "\nسود قیمتی: +2.00%",
         )
         self.assertEqual(
             telegram_runner._event_price_result(short_signal, {"event": "SL", "fill": 102.0}),
-            "\\nضرر قیمتی: -2.00%",
+            "\nضرر قیمتی: -2.00%",
         )
 
     def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None):
