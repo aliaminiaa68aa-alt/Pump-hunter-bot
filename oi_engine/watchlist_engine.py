@@ -113,6 +113,13 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         "━━━━━━━━━━━━━━\n"
         f"📊 OI ۱۵دقیقه: <b>{oi_text}</b>  |  جریان {taker_text}\n"
         f"⚙️ حجم: {signal.volume_ratio:.1f}x  |  روش: {engine}"
+        + (
+            f"\n🔎 قیمت Gate هنگام ارسال: <code>{float(metrics['entry_check_market_price']):.8g}</code>"
+            f"  |  فاصله از ورود: <b>{float(metrics['entry_check_deviation_pct']):+.2f}%</b>"
+            if metrics.get("entry_check_market_price") is not None
+            and metrics.get("entry_check_deviation_pct") is not None
+            else ""
+        )
     )
 
 
