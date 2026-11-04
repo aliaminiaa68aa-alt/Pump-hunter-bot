@@ -14,6 +14,8 @@ SYMBOL_PATTERNS = (
 NON_CRYPTO_BASES = {
     "AAPL", "AMD", "COST", "BYD", "XLE", "UVXY", "HIMS", "HK1810",
     "RIVN", "CSOPSKHYNIX2L", "SMCI", "GME", "TER", "ALAB",
+    # Tokenized equity contracts observed in the live OI source feed.
+    "PLTR", "MSFT", "GEV", "ASTS",
 }
 
 

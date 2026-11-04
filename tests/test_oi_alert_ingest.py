@@ -35,7 +35,7 @@ class AlertIngestTests(unittest.TestCase):
         self.assertIsNone(parse_forwarded_oi_alert({"message": {"forward_date": 1, "text": "OI Alert BTC"}}))
 
     def test_equity_and_etf_symbols_are_rejected(self):
-        for ticker in ("AAPL", "AMD", "COST", "BYD", "XLE", "UVXY", "HIMS", "HK1810", "RIVN", "CSOPSKHYNIX2L"):
+        for ticker in ("AAPL", "AMD", "COST", "BYD", "XLE", "UVXY", "HIMS", "HK1810", "RIVN", "CSOPSKHYNIX2L", "PLTR", "MSFT", "GEV", "ASTS"):
             with self.subTest(ticker=ticker):
                 update = {"channel_post": {
                     "text": f"🚨 Crypto Open Interest #{ticker} $10.00 • OI [15m]"
