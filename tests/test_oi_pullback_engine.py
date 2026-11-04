@@ -20,6 +20,12 @@ def snapshot(side="LONG"):
         last.update({"open":99, "high":99.2, "low":96, "close":97,
                      "quote_volume":200000, "taker_buy_quote":80000})
     candles[-2]["close"] = 100
+    if side == "LONG":
+        # Give the fixture a credible multi-candle bullish flow before breakout.
+        for candle in candles[-4:-1]:
+            candle.update({"open":100.0, "high":100.5, "low":99.9,
+                           "close":100.2, "quote_volume":100000,
+                           "taker_buy_quote":60000})
     return {"symbol":"TESTUSDT", "candles":candles,
             "oi_values":[100,100.2,101],
             "oi_timestamp":candles[-1]["close_time"], "funding_rate":0.0001}
