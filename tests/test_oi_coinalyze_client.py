@@ -188,7 +188,7 @@ class CoinalyzeClientTests(unittest.TestCase):
             return [{"symbol": "BTCUSDT_PERP.A", "history": history[endpoint]}]
 
         client._get = fake_get
-        result = client.fetch_metrics("BTCUSDT", now=start + 24 * 900)
+        result = client.fetch_metrics("BTCUSDT", now=start + 60 * 900)
         self.assertAlmostEqual(result["oi_change_15m_window_pct"], 1.0)
         self.assertAlmostEqual(result["taker_buy_ratio"], 0.6)
         snapshot = result["market_snapshot"]
