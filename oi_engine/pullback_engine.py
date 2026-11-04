@@ -54,8 +54,8 @@ def advance_pullback_setup(
     """Create a pending setup on breakout; emit only after a later retest candle confirms."""
     candles = snapshot.get("candles") or []
     oi_values = snapshot.get("oi_values") or []
-    if len(candles) < 22 or len(oi_values) < 3:
-        return None, pending, "داده کافی برای پولبک موجود نیست"
+    if len(candles) < 55 or len(oi_values) < 3:
+        return None, pending, f"برای EMA50 حداقل 55 کندل بسته‌شده لازم است ({len(candles)}/55)"
 
     last = candles[-1]
     close_time = int(last["close_time"])
@@ -170,6 +170,8 @@ def advance_pullback_setup(
     if risk < min_risk:
         stop = entry - min_risk if side == "LONG" else entry + min_risk
         risk = min_risk
+    # Re-check the final stop after applying the minimum-distance floor.
+    # A widened stop must never bypass the maximum ATR risk guard.
     if risk > atr * MAX_STOP_ATR:
         return None, pending, "ریسک این کندل برای ورود بیش از حد دور است؛ setup حفظ شد تا فرصت پولبک معتبر بعدی بررسی شود"
 
