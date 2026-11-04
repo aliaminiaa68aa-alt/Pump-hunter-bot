@@ -224,7 +224,7 @@ class TelegramRunnerTests(unittest.TestCase):
             self.assertEqual(len(journal["trades"]), 1)
             tracked = next(iter(journal["trades"].values()))
             self.assertEqual(tracked["signal"]["side"], "SHORT")
-            self.assertEqual(tracked["status"], "OPEN")
+            self.assertEqual(tracked["status"], "WAITING_ENTRY")
 
     def test_no_signal_does_not_send_telegram_message(self):
         with tempfile.TemporaryDirectory() as directory:
