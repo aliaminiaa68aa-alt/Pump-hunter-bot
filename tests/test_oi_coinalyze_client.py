@@ -27,7 +27,7 @@ class CoinalyzeClientTests(unittest.TestCase):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
         client._get = lambda endpoint, params=None: [
             {"symbol": "BTC", "asset_category": "CRYPTO"},
-            {"symbol": "ETH", "asset_category": "CRYPTO"},
+            {"symbol": "ETH/USDT", "asset_category": "CRYPTO"},
             {"symbol": "QCOM", "asset_category": "EQUITY"},
             {"symbol": "SNXX", "asset_category": "ETF"},
         ] if endpoint == "assets" else []
