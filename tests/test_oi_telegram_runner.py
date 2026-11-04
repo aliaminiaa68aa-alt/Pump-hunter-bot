@@ -28,6 +28,9 @@ def sample_metrics():
 
 
 class FakeClient:
+    def is_crypto_asset(self, base_asset):
+        return True
+
     def resolve_market(self, symbol):
         return symbol
 
@@ -319,6 +322,24 @@ class TelegramRunnerTests(unittest.TestCase):
             "COSTUSDT": {"last_alert": 999990},
         }, now=1000000)
         self.assertEqual(list(kept), ["BTCUSDT"])
+
+    def test_dynamic_asset_category_filter_removes_unlisted_equities(self):
+        class AssetClient:
+            def get_crypto_asset_symbols(self):
+                return {"BTC", "ETH"}
+        kept = telegram_runner.prune_watchlist_by_asset_category({
+            "BTCUSDT": {"last_alert": 999990},
+            "QCOMUSDT": {"last_alert": 999990},
+            "SAMSUNGUSDT": {"last_alert": 999990},
+        }, AssetClient())
+        self.assertEqual(list(kept), ["BTCUSDT"])
+
+    def test_non_crypto_asset_is_rejected_before_perpetual_lookup(self):
+        client = FakeClient()
+        client.is_crypto_asset = lambda base: False
+        client.resolve_market = Mock(side_effect=AssertionError("should not resolve equity market"))
+        self.assertFalse(telegram_runner._has_supported_perpetual(client, "QCOMUSDT"))
+        client.resolve_market.assert_not_called()
 
     def test_prunes_expired_watchlist_symbols(self):
         now = 1000000
