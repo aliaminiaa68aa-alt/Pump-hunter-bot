@@ -9,9 +9,13 @@ from oi_engine.signal_engine import Signal, _atr, evaluate_snapshot, score_signa
 PULLBACK_TOLERANCE_ATR = 0.25
 INVALIDATION_ATR = 0.60
 SETUP_LIFETIME_CANDLES = 4
-STOP_BUFFER_ATR = 0.15
+STOP_BUFFER_ATR = 0.22
 MAX_STOP_ATR = 1.50
 MIN_STOP_PCT = 0.20
+MAX_ENTRY_EXTENSION_ATR = 0.45
+MIN_ENTRY_QUALITY = 65
+MIN_REJECTION_BODY_RATIO = 0.30
+MIN_REJECTION_CLOSE_LOCATION = 0.68
 FLOW_LOOKBACK_CANDLES = 3
 
 
@@ -112,7 +116,15 @@ def advance_pullback_setup(
         pending["pullback_extreme"] = pullback_extreme
         touched = pullback_extreme <= level + tolerance
         valid_depth = pullback_extreme >= level - invalidation
-        confirmed = float(last["close"]) > level and float(last["close"]) > float(last["open"])
+        candle_range = max(float(last["high"]) - float(last["low"]), 1e-12)
+        body_ratio = abs(float(last["close"]) - float(last["open"])) / candle_range
+        close_location = (float(last["close"]) - float(last["low"])) / candle_range
+        confirmed = (
+            float(last["close"]) > level
+            and float(last["close"]) > float(last["open"])
+            and body_ratio >= MIN_REJECTION_BODY_RATIO
+            and close_location >= MIN_REJECTION_CLOSE_LOCATION
+        )
         aggregate_flow, directional_candle_share = _recent_order_flow(candles, side)
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
@@ -132,7 +144,15 @@ def advance_pullback_setup(
         pending["pullback_extreme"] = pullback_extreme
         touched = pullback_extreme >= level - tolerance
         valid_depth = pullback_extreme <= level + invalidation
-        confirmed = float(last["close"]) < level and float(last["close"]) < float(last["open"])
+        candle_range = max(float(last["high"]) - float(last["low"]), 1e-12)
+        body_ratio = abs(float(last["close"]) - float(last["open"])) / candle_range
+        close_location = (float(last["high"]) - float(last["close"])) / candle_range
+        confirmed = (
+            float(last["close"]) < level
+            and float(last["close"]) < float(last["open"])
+            and body_ratio >= MIN_REJECTION_BODY_RATIO
+            and close_location >= MIN_REJECTION_CLOSE_LOCATION
+        )
         aggregate_flow, directional_candle_share = _recent_order_flow(candles, side)
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
@@ -149,6 +169,17 @@ def advance_pullback_setup(
         return None, None, "پولبک بیش از حد عمیق شد؛ setup باطل شد"
     if not touched or not confirmed:
         return None, pending, "هنوز پولبک و کندل برگشتی معتبر شکل نگرفته"
+    # Do not chase a confirmation candle that has already travelled too far
+    # from the broken structure. Keep the setup alive for a fresh retest.
+    entry_extension = (
+        (float(last["close"]) - level) / atr if side == "LONG"
+        else (level - float(last["close"])) / atr
+    )
+    if entry_extension > MAX_ENTRY_EXTENSION_ATR:
+        return None, pending, (
+            f"کندل تأیید از نقطه ورود دور شده ({entry_extension:.2f} ATR)؛ "
+            "ورود تعقیبی ممنوع، منتظر پولبک تازه می‌مانیم"
+        )
     if not directional_flow:
         return None, pending, (
             f"پولبک رخ داد اما تأیید چندکندلی/EMA کامل نیست "
@@ -183,6 +214,11 @@ def advance_pullback_setup(
         candles, side, oi_change, price_change, taker_ratio,
         quote_volume / average_volume, atr, level,
     )
+    if entry_quality < MIN_ENTRY_QUALITY:
+        return None, pending, (
+            f"کیفیت محل ورود پایین است ({entry_quality}/100؛ حداقل "
+            f"{MIN_ENTRY_QUALITY})؛ setup حفظ شد تا فرصت بهتر بررسی شود"
+        )
     confidence = movement_strength
     signal = Signal(
         symbol=snapshot["symbol"], side=side, entry=entry, stop_loss=stop,
