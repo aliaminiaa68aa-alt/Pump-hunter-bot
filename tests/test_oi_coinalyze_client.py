@@ -87,10 +87,10 @@ class CoinalyzeClientTests(unittest.TestCase):
         candles = [
             {"t": start + i * 900, "o": 100+i, "h": 102+i, "l": 99+i,
              "c": 101+i, "v": 1000, "bv": 600}
-            for i in range(24)
+            for i in range(60)
         ]
         oi = [{"t": start + i * 900, "c": 100000 + i * 100}
-              for i in range(24)]
+              for i in range(60)]
 
         requested_endpoints = []
         def fake_get(endpoint, params=None):
@@ -111,11 +111,11 @@ class CoinalyzeClientTests(unittest.TestCase):
             return [{"symbol": "BTCUSDT_PERP.A", "history": history[endpoint]}]
 
         client._get = fake_get
-        result = client.fetch_metrics("BTCUSDT", now=202000)
+        result = client.fetch_metrics("BTCUSDT", now=start + 60 * 900)
         snapshot = result["market_snapshot"]
         self.assertIsNotNone(snapshot)
         self.assertNotIn("funding-rate-history", requested_endpoints)
-        self.assertEqual(len(snapshot["candles"]), 24)
+        self.assertEqual(len(snapshot["candles"]), 60)
         self.assertEqual(len(snapshot["oi_values"]), 3)
         last = snapshot["candles"][-1]
         expected_typical_price = (last["open"] + last["high"] + last["low"] + last["close"]) / 4
@@ -132,10 +132,10 @@ class CoinalyzeClientTests(unittest.TestCase):
         candles = [
             {"t": start + i * 900, "o": 100+i, "h": 102+i, "l": 99+i,
              "c": 101+i, "v": 1000, "bv": 600}
-            for i in range(24)
+            for i in range(60)
         ]
         oi = [{"t": start + i * 900, "c": 100000 + i * 100}
-              for i in range(24)]
+              for i in range(60)]
         requested = []
         def fake_get(endpoint, params=None):
             requested.append(endpoint)
@@ -148,7 +148,7 @@ class CoinalyzeClientTests(unittest.TestCase):
             raise AssertionError(f"Unexpected supplementary endpoint: {endpoint}")
 
         client._get = fake_get
-        result = client.fetch_metrics("BTCUSDT", now=start + 24 * 900)
+        result = client.fetch_metrics("BTCUSDT", now=start + 60 * 900)
         self.assertEqual(requested, ["funding-rate", "open-interest-history", "ohlcv-history"])
         self.assertIsNotNone(result["market_snapshot"])
         self.assertIsNone(result["current_open_interest_usd"])
@@ -165,11 +165,11 @@ class CoinalyzeClientTests(unittest.TestCase):
         candles = [
             {"t": start + i * 900, "o": 100, "h": 102, "l": 99,
              "c": 101, "v": 100, "bv": 90 if i == 23 else 60}
-            for i in range(24)
+            for i in range(60)
         ]
         # Latest price candle has no matching OI sample yet.
-        oi = [{"t": start + i * 900, "c": (100 if i == 21 else 101 if i == 22 else 90 + i)}
-              for i in range(23)]
+        oi = [{"t": start + i * 900, "c": (100 if i == 57 else 101 if i == 58 else 90 + i)}
+              for i in range(59)]
 
         def fake_get(endpoint, params=None):
             if endpoint == "open-interest":
@@ -192,8 +192,8 @@ class CoinalyzeClientTests(unittest.TestCase):
         self.assertAlmostEqual(result["oi_change_15m_window_pct"], 1.0)
         self.assertAlmostEqual(result["taker_buy_ratio"], 0.6)
         snapshot = result["market_snapshot"]
-        self.assertEqual(snapshot["candles"][-1]["open_time"], (start + 22 * 900) * 1000)
-        self.assertEqual(snapshot["oi_timestamp"], (start + 23 * 900) * 1000 - 1)
+        self.assertEqual(snapshot["candles"][-1]["open_time"], (start + 58 * 900) * 1000)
+        self.assertEqual(snapshot["oi_timestamp"], (start + 59 * 900) * 1000 - 1)
         self.assertEqual(result["long_short_ratio"], 1.2)
         self.assertEqual(result["long_liquidations"], 1200.0)
         self.assertTrue(result["data_quality"]["complete"])
@@ -206,10 +206,10 @@ class CoinalyzeClientTests(unittest.TestCase):
         candles = [
             {"t": start + i * 900, "o": 100+i, "h": 102+i, "l": 99+i,
              "c": 101+i, "v": 1000, "bv": 600}
-            for i in range(24)
+            for i in range(60)
         ]
         oi = [{"t": start + i * 900, "c": 100000 + i * 100}
-              for i in range(24)]
+              for i in range(60)]
 
         def fake_get(endpoint, params=None):
             if endpoint == "open-interest":
@@ -229,7 +229,7 @@ class CoinalyzeClientTests(unittest.TestCase):
         client._get = fake_get
         # The latest common candle closed at start + 24*900; the snapshot
         # is 901 seconds old, just beyond the one-interval tolerance.
-        result = client.fetch_metrics("BTCUSDT", now=start + 24 * 900 + 901)
+        result = client.fetch_metrics("BTCUSDT", now=start + 60 * 900 + 901)
         self.assertIsNone(result["market_snapshot"])
         self.assertIsNone(result["oi_change_15m_window_pct"])
         self.assertIsNone(result["taker_buy_ratio"])
