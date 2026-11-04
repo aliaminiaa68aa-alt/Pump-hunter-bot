@@ -101,13 +101,25 @@ class WatchlistTests(unittest.TestCase):
         self.assertEqual(updated["ABCUSDT"]["status"], "نزدیک شرایط ورود")
         self.assertEqual(updated["ABCUSDT"]["pending_setup"], pending)
 
-    def test_confirmed_status(self):
-        with patch("oi_engine.watchlist_engine.fetch_snapshot",return_value={}), \
-             patch("oi_engine.watchlist_engine.evaluate_snapshot",return_value=signal()), \
-             patch("oi_engine.watchlist_engine.advance_pullback_setup",return_value=(None, {"side":"SHORT"}, "منتظر پولبک")):
-            found, updated=scan_watchlist({"ABCUSDT":{"status":"در حال رصد","source_side":"SHORT"}},FakeClient(metrics()),now=1000)
-        self.assertEqual(len(found),1)
-        self.assertEqual(updated["ABCUSDT"]["status"],"تأیید LONG")
+    def test_bos_is_blocked_while_pullback_setup_is_pending(self):
+        pending = {
+            "side": "SHORT", "level": 1.0,
+            "breakout_close_time": 900000,
+            "expires_at_close_time": 4500000,
+            "breakout_atr": 0.02,
+        }
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value={}), \
+             patch("oi_engine.watchlist_engine.evaluate_snapshot", return_value=signal()), \
+             patch("oi_engine.watchlist_engine.advance_pullback_setup",
+                   return_value=(None, pending, "منتظر پولبک")):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {"status": "در حال رصد"}},
+                FakeClient(metrics()), now=1000
+            )
+        self.assertEqual(found, [])
+        self.assertEqual(updated["ABCUSDT"]["pending_setup"], pending)
+        self.assertEqual(updated["ABCUSDT"]["status"], "منتظر پولبک و تأیید")
+
     def test_no_entry_keeps_watch_status(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",return_value={}), \
              patch("oi_engine.watchlist_engine.evaluate_snapshot",return_value=None), \

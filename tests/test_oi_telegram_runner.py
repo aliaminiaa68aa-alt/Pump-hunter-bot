@@ -36,6 +36,46 @@ class FakeClient:
 
 
 class TelegramRunnerTests(unittest.TestCase):
+    def test_opposite_signal_blocked_on_same_stop_candle_but_allowed_on_newer_close(self):
+        journal = {
+            "trades": {
+                "old-long": {
+                    "status": "CLOSED_SL",
+                    "signal": {"symbol": "TESTUSDT", "side": "LONG"},
+                    "events": [{"event": "SL", "time_ms": 900000}],
+                }
+            }
+        }
+        same_candle_short = Signal(
+            "TESTUSDT", "SHORT", 100.0, 102.0, 98.0, 96.0,
+            0.8, -0.3, 0.40, 1.4, 0.0001, 82, 900000
+        )
+        next_candle_short = Signal(
+            "TESTUSDT", "SHORT", 100.0, 102.0, 98.0, 96.0,
+            0.8, -0.3, 0.40, 1.4, 0.0001, 82, 1800000
+        )
+        self.assertTrue(telegram_runner.blocked_by_same_candle_opposite_stop(
+            same_candle_short, journal
+        ))
+        self.assertFalse(telegram_runner.blocked_by_same_candle_opposite_stop(
+            next_candle_short, journal
+        ))
+
+    def test_same_side_signal_is_not_blocked_by_previous_stop(self):
+        journal = {
+            "trades": {
+                "old-long": {
+                    "status": "CLOSED_SL",
+                    "signal": {"symbol": "TESTUSDT", "side": "LONG"},
+                    "events": [{"event": "SL", "time_ms": 900000}],
+                }
+            }
+        }
+        next_long = sample_signal()
+        self.assertFalse(telegram_runner.blocked_by_same_candle_opposite_stop(
+            next_long, journal
+        ))
+
     def test_trade_update_reports_signed_price_percentage_for_long_and_short(self):
         long_signal = {"entry": 100.0, "side": "LONG", "take_profit_1": 102.0, "stop_loss": 98.0}
         short_signal = {"entry": 100.0, "side": "SHORT", "take_profit_1": 98.0, "stop_loss": 102.0}
