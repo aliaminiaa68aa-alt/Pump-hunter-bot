@@ -104,8 +104,7 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
     # The public preview normally exposes only its latest 20 posts. If our saved
     # cursor is older than that window, page backwards before advancing the cursor.
     while (
-        last_message_id
-        and posts
+        posts
         and oldest_visible_id > last_message_id
         and oldest_visible_date >= timestamp - MAX_ALERT_AGE_SECONDS
         and backfill_pages < MAX_BACKFILL_PAGES
@@ -137,7 +136,7 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
             f"backfill_pages={backfill_pages} cursor_before={last_message_id} "
             f"page_range={posts[0]['message_id']}-{posts[-1]['message_id']}"
         )
-        if (last_message_id and oldest_visible_id > last_message_id
+        if (oldest_visible_id > last_message_id
                 and oldest_visible_date >= timestamp - MAX_ALERT_AGE_SECONDS):
             print(
                 f"WARNING: public Telegram backfill limit reached: cursor={last_message_id}, "
