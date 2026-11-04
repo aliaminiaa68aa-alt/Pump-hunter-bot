@@ -120,9 +120,11 @@ class OutcomeTrackerTests(unittest.TestCase):
 
     def test_gap_through_stop_uses_open_price(self):
         journal, key = self.journal()
-        gap = [candle(900000, 97, 99, 96, 98)]
-        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: gap)
-        event = journal["trades"][key]["events"][0]
+        entry_touch = [candle(900000, 100, 100.5, 99.5, 100)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: entry_touch)
+        gap = [candle(1800000, 97, 99, 96, 98)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: gap)
+        event = journal["trades"][key]["events"][-1]
         self.assertEqual(event["event"], "SL")
         self.assertEqual(event["fill"], 97.0)
 
