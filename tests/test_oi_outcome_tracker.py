@@ -132,7 +132,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         fetcher = lambda *args: calls.append(args) or []
         monitor_journal(journal, now_ms=1799999, fetcher=fetcher)
         self.assertEqual(calls, [])
-        self.assertEqual(journal["trades"][key]["status"], "OPEN")
+        self.assertEqual(journal["trades"][key]["status"], "WAITING_ENTRY")
         monitor_journal(journal, now_ms=1800000, fetcher=fetcher)
         self.assertEqual(len(calls), 1)
 
@@ -153,7 +153,7 @@ class OutcomeTrackerTests(unittest.TestCase):
             raise RuntimeError("provider unavailable")
         monitor_journal(journal, now_ms=1800000, fetcher=fail)
         record = journal["trades"][key]
-        self.assertEqual(record["status"], "OPEN")
+        self.assertEqual(record["status"], "WAITING_ENTRY")
         self.assertIn("provider unavailable", record["last_error"])
 
     def test_signal_scores_are_preserved_and_reported_by_outcome(self):
@@ -199,7 +199,43 @@ class OutcomeTrackerTests(unittest.TestCase):
         journal, key = self.journal()
         monitor_journal(journal, now_ms=900000 + 96 * 60 * 60 * 1000,
                         fetcher=lambda *_: [])
-        self.assertEqual(journal["trades"][key]["status"], "TIMED_OUT")
+        self.assertEqual(journal["trades"][key]["status"], "EXPIRED_NO_ENTRY")
+
+
+    def test_signal_waits_until_entry_is_reached(self):
+        journal, key = self.journal()
+        before_entry = [candle(900000, 101, 103, 100.5, 102)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: before_entry)
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "WAITING_ENTRY")
+        self.assertFalse(any(e["event"] == "ENTRY" for e in record["events"]))
+        self.assertEqual(record["mfe_pct"], 0.0)
+        self.assertEqual(record["mae_pct"], 0.0)
+
+    def test_entry_is_recorded_only_when_candle_reaches_level(self):
+        journal, key = self.journal()
+        touched = [candle(900000, 101, 102, 99.5, 100.5)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: touched)
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "TP1_HIT")
+        self.assertEqual(record["entry_fill_price"], 100.0)
+        self.assertEqual(record["events"][0]["event"], "ENTRY")
+
+    def test_summary_win_rate_uses_only_entered_and_decided_trades(self):
+        entered = make_trade_record(signal(), {}, 900000)
+        entered["events"] = [
+            {"event": "ENTRY", "time_ms": 900001, "fill": 100.0},
+            {"event": "TP1", "time_ms": 1000000, "fill": 102.0},
+        ]
+        entered["status"] = "TP1_HIT"
+        waiting = make_trade_record({**signal(), "candle_close_time": 1800000}, {}, 1800000)
+        report = summarize_outcomes({"trades": {
+            entered["trade_id"]: entered, waiting["trade_id"]: waiting
+        }})
+        self.assertEqual(report["entry_touched"], 1)
+        self.assertEqual(report["not_entered"], 1)
+        self.assertEqual(report["entry_touched_decided"], 1)
+        self.assertEqual(report["entry_touched_win_rate_pct"], 100.0)
 
 
 if __name__ == "__main__":
