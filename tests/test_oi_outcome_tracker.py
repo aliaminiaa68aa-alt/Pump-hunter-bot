@@ -47,6 +47,42 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(record["mfe_pct"], 0.0)
         self.assertEqual(record["mae_pct"], 2.0)
 
+    def test_long_moves_remaining_stop_to_entry_after_tp1(self):
+        journal, key = self.journal("LONG")
+        first = [candle(900000, 100, 103, 99.5, 102.5)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: first)
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "TP1_HIT")
+        self.assertTrue(record["breakeven_stop_active"])
+        self.assertEqual(record["breakeven_stop_price"], 100.0)
+
+        next_candle = [candle(1800000, 101, 101.5, 99.8, 100.2)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: next_candle)
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "CLOSED_SL")
+        stop_event = record["events"][-1]
+        self.assertEqual(stop_event["event"], "SL")
+        self.assertEqual(stop_event["fill"], 100.0)
+        self.assertEqual(stop_event["r_multiple"], 0.0)
+
+    def test_short_moves_remaining_stop_to_entry_after_tp1(self):
+        journal, key = self.journal("SHORT")
+        first = [candle(900000, 100, 100.5, 97, 97.5)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: first)
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "TP1_HIT")
+        self.assertTrue(record["breakeven_stop_active"])
+        self.assertEqual(record["breakeven_stop_price"], 100.0)
+
+        next_candle = [candle(1800000, 99, 100.2, 98.5, 99.8)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: next_candle)
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "CLOSED_SL")
+        stop_event = record["events"][-1]
+        self.assertEqual(stop_event["event"], "SL")
+        self.assertEqual(stop_event["fill"], 100.0)
+        self.assertEqual(stop_event["r_multiple"], 0.0)
+
     def test_short_tp1_then_tp2(self):
         journal, key = self.journal("SHORT")
         first = [candle(900000, 100, 101, 97, 97.5)]
