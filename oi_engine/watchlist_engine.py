@@ -159,12 +159,9 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                         "enough aligned 15m OHLCV/OI history for a safe fallback"
                     )
                 record["data_source"] = "Coinalyze 15m fallback (Binance HTTP 451)"
-            # Run OI/BOS independently; it must not wait for a pullback.
+            # A BOS is only the trigger for a pending setup. Never send a
+            # final entry on the breakout close; wait for pullback confirmation.
             bos_signal = None
-            try:
-                bos_signal = evaluate_snapshot(snapshot, record.get("source_side"))
-            except (KeyError, TypeError, ValueError, MarketDataError):
-                bos_signal = None
             previous_pending_setup = record.get("pending_setup")
             pullback_signal, pending_setup, setup_reason = advance_pullback_setup(
                 snapshot, previous_pending_setup, record.get("source_side")
