@@ -51,8 +51,10 @@ def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> 
         },
         "sent_at_ms": int(sent_at_ms),
         "last_checked_ms": int(data["candle_close_time"]) + 1,
-        "status": "OPEN",
+        "status": "WAITING_ENTRY",
         "events": [],
+        "entry_fill_price": None,
+        "entry_time_ms": None,
         "mfe_pct": 0.0,
         "mae_pct": 0.0,
         "mae_before_tp1_pct": 0.0,
@@ -145,16 +147,17 @@ def monitor_journal(
                 record["post_stop_error"] = f"{type(exc).__name__}: {exc}"
             continue
 
-        if status in {"CLOSED_TP2", "TIMED_OUT"}:
+        if status in {"CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY"}:
             continue
         side = signal["side"]
-        entry = float(signal["entry"])
+        entry = float(record.get("entry_fill_price") or signal["entry"])
         try:
             cursor = int(record.get("last_checked_ms", int(signal["candle_close_time"]) + 1))
             # No closed candle can exist yet; keep timeout handling but skip the provider call.
             if now < cursor + INTERVAL_MS:
                 if now - int(record["sent_at_ms"]) >= MAX_ACTIVE_HOURS * 60 * 60 * 1000:
-                    record["status"] = "TIMED_OUT"
+                    record["status"] = ("EXPIRED_NO_ENTRY" if status == "WAITING_ENTRY"
+                                        else "TIMED_OUT")
                     record["exit_time_ms"] = now
                 continue
             candles = fetcher(signal["symbol"], cursor, now)
@@ -165,6 +168,22 @@ def monitor_journal(
                 if close_ms >= now:
                     continue
                 event_names = {event["event"] for event in record.get("events", [])}
+                if record.get("status") == "WAITING_ENTRY":
+                    entry_level = float(signal["entry"])
+                    high, low, open_price = float(candle[2]), float(candle[3]), float(candle[1])
+                    if not (low <= entry_level <= high):
+                        record["last_checked_ms"] = close_ms + 1
+                        continue
+                    fill = (min(open_price, entry_level) if side == "LONG"
+                            else max(open_price, entry_level))
+                    record["entry_fill_price"] = fill
+                    record["entry_time_ms"] = close_ms
+                    record["status"] = "OPEN"
+                    record.setdefault("events", []).append({
+                        "event": "ENTRY", "time_ms": close_ms, "fill": fill,
+                    })
+                    entry = fill
+                    event_names.add("ENTRY")
                 # After TP1, the remaining position is protected at breakeven.
                 # The TP1 candle itself is still evaluated against the original
                 # stop because OHLC cannot establish intrabar event ordering.
@@ -274,14 +293,16 @@ def monitor_journal(
 
             if now - int(record["sent_at_ms"]) >= MAX_ACTIVE_HOURS * 60 * 60 * 1000:
                 if record.get("status") not in {"CLOSED_SL", "CLOSED_TP2"}:
-                    record["status"] = "TIMED_OUT"
+                    record["status"] = ("EXPIRED_NO_ENTRY"
+                                        if record.get("status") == "WAITING_ENTRY"
+                                        else "TIMED_OUT")
                     record["exit_time_ms"] = now
         except Exception as exc:
             record["last_error"] = f"{type(exc).__name__}: {exc}"
     # Bound history without deleting unresolved trades.
     closed = [
         (key, value) for key, value in trades.items()
-        if value.get("status") in {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT"}
+        if value.get("status") in {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY"}
     ]
     if len(closed) > 500:
         for key, _ in sorted(closed, key=lambda item: item[1].get("sent_at_ms", 0))[:-500]:
@@ -297,6 +318,8 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         "total": len(trades), "statuses": {}, "tp1_before_sl": 0,
         "sl_before_tp1": 0, "sl_then_later_tp1": 0, "sl_then_later_tp2": 0,
         "tp2_reached": 0, "ambiguous_stop_target": 0, "provider_errors": 0,
+        "entry_touched": 0, "not_entered": 0, "entry_touched_decided": 0,
+        "entry_touched_win_rate_pct": None,
         "groups": {}, "by_engine_side": {},
     }
     groups: Dict[str, List[dict]] = {}
@@ -305,6 +328,11 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         report["statuses"][status] = report["statuses"].get(status, 0) + 1
         events = sorted(record.get("events", []), key=lambda event: int(event.get("time_ms", 0)))
         names = [event.get("event") for event in events]
+        entered = "ENTRY" in names
+        if entered:
+            report["entry_touched"] += 1
+        else:
+            report["not_entered"] += 1
         first_tp1 = next((i for i, name in enumerate(names) if name == "TP1"), None)
         first_sl = next((i for i, name in enumerate(names) if name == "SL"), None)
         first_sl_ambiguous = (
@@ -312,12 +340,18 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         )
         if first_sl_ambiguous:
             outcome = "ambiguous_stop_target"
+            if entered:
+                report["entry_touched_decided"] += 1
         elif first_tp1 is not None and (first_sl is None or first_tp1 < first_sl):
             report["tp1_before_sl"] += 1
             outcome = "tp1_before_sl"
+            if entered:
+                report["entry_touched_decided"] += 1
         elif first_sl is not None:
             report["sl_before_tp1"] += 1
             outcome = "sl_before_tp1"
+            if entered:
+                report["entry_touched_decided"] += 1
         else:
             outcome = status.lower()
         if record.get("post_stop_tp1_reached"):
@@ -347,6 +381,10 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         bucket = report["by_engine_side"].setdefault(key, {"total": 0, "statuses": {}})
         bucket["total"] += 1
         bucket["statuses"][status] = bucket["statuses"].get(status, 0) + 1
+    if report["entry_touched_decided"]:
+        report["entry_touched_win_rate_pct"] = round(
+            report["tp1_before_sl"] / report["entry_touched_decided"] * 100.0, 2
+        )
     for name, rows in groups.items():
         summary = {"count": len(rows)}
         for field in ("movement_strength", "entry_quality", "mae_before_tp1_pct", "mfe_before_tp1_pct"):
