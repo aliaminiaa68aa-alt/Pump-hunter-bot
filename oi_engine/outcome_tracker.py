@@ -156,8 +156,19 @@ def monitor_journal(
                 close_ms = open_ms + INTERVAL_MS - 1
                 if close_ms >= now:
                     continue
-                stop_hit, tp1_hit, tp2_hit, stop_fill, tp1_fill, tp2_fill = _touches(side, candle, signal)
                 event_names = {event["event"] for event in record.get("events", [])}
+                # After TP1, the remaining position is protected at breakeven.
+                # The TP1 candle itself is still evaluated against the original
+                # stop because OHLC cannot establish intrabar event ordering.
+                active_signal = signal
+                if "TP1" in event_names:
+                    active_signal = dict(signal)
+                    active_signal["stop_loss"] = entry
+                    record["breakeven_stop_active"] = True
+                    record["breakeven_stop_price"] = entry
+                stop_hit, tp1_hit, tp2_hit, stop_fill, tp1_fill, tp2_fill = _touches(
+                    side, candle, active_signal
+                )
 
                 # OHLC cannot reveal intrabar order. If a stop and any target
                 # coexist in one candle, assume the stop happened first and do
@@ -237,6 +248,8 @@ def monitor_journal(
                         "r_multiple": signed / risk if risk else None,
                     })
                     record["status"] = "TP1_HIT"
+                    record["breakeven_stop_active"] = True
+                    record["breakeven_stop_price"] = entry
 
                 if tp2_hit:
                     risk = abs(entry - float(signal["stop_loss"]))
