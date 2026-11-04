@@ -228,10 +228,12 @@ def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
                   open_price, oi_previous, oi_latest, prior_high, prior_low)
         if not all(math.isfinite(value) for value in values):
             return ["داده قیمت، حجم یا OI غیرمتناهی است"]
-        if (avg_volume <= 0 or last_volume <= 0 or close <= 0
-                or previous_close <= 0 or oi_previous <= 0 or oi_latest <= 0
-                or taker_buy_quote < 0 or taker_buy_quote > last_volume):
-            return ["داده قیمت، حجم یا OI نامعتبر است"]
+        if avg_volume <= 0 or last_volume <= 0:
+            return ["حجم مبنا یا حجم کندل نامعتبر است"]
+        if taker_buy_quote < 0 or taker_buy_quote > last_volume:
+            return ["داده جریان خرید نامعتبر است؛ نسبت خرید تهاجمی باید بین 0 تا 100٪ باشد"]
+        if close <= 0 or previous_close <= 0 or oi_previous <= 0 or oi_latest <= 0:
+            return ["داده قیمت یا OI نامعتبر است"]
         volume_ratio = last_volume / avg_volume
         taker_ratio = taker_buy_quote / last_volume
         oi_change = (oi_latest / oi_previous - 1.0) * 100.0
@@ -254,14 +256,14 @@ def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
     if taker_ratio < 0.52:
         long_fail.append(f"خرید تهاجمی پایین است ({taker_ratio:.1%}؛ حداقل 52%)")
     if not (active_volume or long_break):
-        long_fail.append(f"نه حجم فعال است ({volume_ratio:.2f}x؛ حداقل 1.05x) و نه شکست سقف تأیید شده")
+        long_fail.append(f"حجم پایین است ({volume_ratio:.2f}x؛ حداقل 1.05x) و شکست سقف هم تأیید نشده")
 
     if price_change > -0.05:
         short_fail.append(f"تغییر قیمت SHORT کافی نیست ({price_change:+.2f}%؛ حداکثر -0.05%)")
     if taker_ratio > 0.48:
         short_fail.append(f"فروش تهاجمی کافی نیست ({taker_ratio:.1%}؛ حداکثر 48%)")
     if not (active_volume or short_break):
-        short_fail.append(f"نه حجم فعال است ({volume_ratio:.2f}x؛ حداقل 1.05x) و نه شکست کف تأیید شده")
+        short_fail.append(f"حجم پایین است ({volume_ratio:.2f}x؛ حداقل 1.05x) و شکست کف هم تأیید نشده")
 
     if long_fail:
         reasons.append("LONG: " + "، ".join(long_fail))
