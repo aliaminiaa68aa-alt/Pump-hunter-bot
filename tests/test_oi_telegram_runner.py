@@ -76,6 +76,47 @@ class TelegramRunnerTests(unittest.TestCase):
             next_long, journal
         ))
 
+    def test_same_symbol_active_trade_blocks_repeated_same_side_signal(self):
+        journal = {
+            "trades": {
+                "active-short": {
+                    "status": "OPEN",
+                    "signal": {"symbol": "TESTUSDT", "side": "SHORT"},
+                    "events": [],
+                }
+            }
+        }
+        repeated_short = Signal(
+            "TESTUSDT", "SHORT", 99.0, 101.0, 97.0, 95.0,
+            0.8, -0.3, 0.40, 0.4, 0.0001, 70, 1800000
+        )
+        self.assertTrue(telegram_runner.blocked_by_active_symbol_trade(repeated_short, journal))
+
+    def test_same_symbol_active_trade_blocks_opposite_side_signal(self):
+        journal = {
+            "trades": {
+                "active-short": {
+                    "status": "TP1_HIT",
+                    "signal": {"symbol": "TESTUSDT", "side": "SHORT"},
+                    "events": [{"event": "TP1", "time_ms": 1000000}],
+                }
+            }
+        }
+        new_long = sample_signal()
+        self.assertTrue(telegram_runner.blocked_by_active_symbol_trade(new_long, journal))
+
+    def test_closed_trade_does_not_block_new_signal(self):
+        journal = {
+            "trades": {
+                "closed-short": {
+                    "status": "CLOSED_SL",
+                    "signal": {"symbol": "TESTUSDT", "side": "SHORT"},
+                    "events": [{"event": "SL", "time_ms": 1000000}],
+                }
+            }
+        }
+        self.assertFalse(telegram_runner.blocked_by_active_symbol_trade(sample_signal(), journal))
+
     def test_trade_update_reports_signed_price_percentage_for_long_and_short(self):
         long_signal = {"entry": 100.0, "side": "LONG", "take_profit_1": 102.0, "stop_loss": 98.0}
         short_signal = {"entry": 100.0, "side": "SHORT", "take_profit_1": 98.0, "stop_loss": 102.0}
