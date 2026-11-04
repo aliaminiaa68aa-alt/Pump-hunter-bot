@@ -189,7 +189,7 @@ def summarize_scan_diagnostics(watchlist, scanned_batch):
         if "Coinalyze رد کرد" in reason:
             reasons["coinalyze_rejected"] += 1
         if (isinstance(record.get("pending_setup"), dict)
-                or status in {"منتظر پولبک و تأیید", "نزدیک شرایط ورود"}):
+                or status == "منتظر پولبک و تأیید"):
             reasons["pending_pullback"] += 1
         if any(word in reason for word in ("باطل", "منقضی", "مهلت پولبک", "setup پاک شد")):
             reasons["setup_invalidated_or_expired"] += 1
