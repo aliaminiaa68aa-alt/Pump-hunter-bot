@@ -43,7 +43,7 @@ def fetch_gate_last_trade(
     try:
         response = session.get(
             f"{BASE_URL}/futures/usdt/trades",
-            params={"contract": contract, "limit": 1},
+            params={"contract": contract, "limit": 10},
             timeout=8,
         )
         response.raise_for_status()
@@ -53,18 +53,23 @@ def fetch_gate_last_trade(
 
     if not isinstance(payload, list) or not payload:
         raise EntryPriceError(f"Gate returned no recent trades for {contract}")
-    row = payload[0]
-    if not isinstance(row, dict) or str(row.get("contract", "")).upper() != contract:
-        raise EntryPriceError(f"Gate returned an unexpected trade for {contract}")
 
-    try:
-        price = float(row["price"])
-        trade_time = float(row["create_time"])
-    except (KeyError, TypeError, ValueError, OverflowError) as exc:
-        raise EntryPriceError(f"Gate trade data is missing price/time for {contract}") from exc
-
-    if not math.isfinite(price) or price <= 0 or not math.isfinite(trade_time) or trade_time <= 0:
-        raise EntryPriceError(f"Gate trade data is invalid for {contract}")
+    valid_trades = []
+    for row in payload:
+        if not isinstance(row, dict) or str(row.get("contract", "")).upper() != contract:
+            continue
+        try:
+            price = float(row["price"])
+            trade_time = float(row["create_time"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if (math.isfinite(price) and price > 0
+                and math.isfinite(trade_time) and trade_time > 0):
+            valid_trades.append((trade_time, price))
+    if not valid_trades:
+        raise EntryPriceError(f"Gate returned no valid matching trades for {contract}")
+    # Do not depend on the API's undocumented row ordering.
+    trade_time, price = max(valid_trades, key=lambda item: item[0])
 
     current = float(now if now is not None else time.time())
     age = current - trade_time
