@@ -90,6 +90,7 @@ class WatchlistTests(unittest.TestCase):
             "breakout_atr": 0.02,
         }
         with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value={}), \
+             patch("oi_engine.watchlist_engine.evaluate_snapshot", return_value=None), \
              patch("oi_engine.watchlist_engine.advance_pullback_setup",
                    return_value=(signal(), None, "پولبک تأیید شد")):
             found, updated = scan_watchlist(
@@ -102,12 +103,14 @@ class WatchlistTests(unittest.TestCase):
 
     def test_confirmed_status(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",return_value={}), \
-             patch("oi_engine.watchlist_engine.advance_pullback_setup",return_value=(signal(), None, "پولبک تأیید شد")):
-            found, updated=scan_watchlist({"ABCUSDT":{"status":"در حال رصد"}},FakeClient(metrics()),now=1000)
+             patch("oi_engine.watchlist_engine.evaluate_snapshot",return_value=signal()), \
+             patch("oi_engine.watchlist_engine.advance_pullback_setup",return_value=(None, {"side":"SHORT"}, "منتظر پولبک")):
+            found, updated=scan_watchlist({"ABCUSDT":{"status":"در حال رصد","source_side":"SHORT"}},FakeClient(metrics()),now=1000)
         self.assertEqual(len(found),1)
         self.assertEqual(updated["ABCUSDT"]["status"],"تأیید LONG")
     def test_no_entry_keeps_watch_status(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",return_value={}), \
+             patch("oi_engine.watchlist_engine.evaluate_snapshot",return_value=None), \
              patch("oi_engine.watchlist_engine.advance_pullback_setup",return_value=(None, None, "هنوز setup نداریم")):
             found, updated=scan_watchlist({"ABCUSDT":{"status":"در حال رصد"}},FakeClient(metrics()),now=1000)
         self.assertEqual(found,[])
