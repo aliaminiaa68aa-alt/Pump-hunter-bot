@@ -156,23 +156,8 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["oi_priority_score"] = metrics["oi_priority_score"]
             record["oi_priority_tier"] = metrics["oi_priority_tier"]
             record["coinalyze"] = metrics
-            bos_confirmed = False
-            if (pullback_signal is None and previous_pending_setup is None
-                    and bos_signal is not None
-                    and coinalyze_confirms(bos_signal, metrics)):
-                bos_metrics = dict(metrics)
-                bos_metrics["engine"] = "OI_BOS"
-                candles_for_atr = snapshot.get("candles") or []
-                atr_15m = _atr(candles_for_atr) if candles_for_atr else 0.0
-                stop_distance = abs(bos_signal.entry - bos_signal.stop_loss)
-                bos_metrics["atr_15m"] = atr_15m if atr_15m > 0 else None
-                bos_metrics["stop_distance_pct"] = stop_distance / bos_signal.entry * 100.0
-                bos_metrics["stop_distance_atr"] = stop_distance / atr_15m if atr_15m > 0 else None
-                confirmed.append((bos_signal, bos_metrics))
-                bos_confirmed = True
-                record.pop("pending_setup", None)
-                record["status"] = f"تأیید {bos_signal.side}"
-                record["reason"] = "تأیید سیگنال مستقل OI و Coinalyze"
+            # A BOS is only a setup trigger, never an immediate market entry.
+            # Every directional entry must pass the later retest/rejection path below.
             if pullback_signal is not None:
                 if coinalyze_confirms(pullback_signal, metrics):
                     pullback_metrics = dict(metrics)
@@ -191,7 +176,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     record["pending_setup"] = pending_setup or previous_pending_setup
                     record["status"] = "نزدیک شرایط ورود"
                     record["reason"] = "سیگنال پولبک منتظر تأیید OI/جریان سفارش است"
-            elif not bos_confirmed:
+            else:
                 record["pending_setup"] = pending_setup
                 record["status"] = "منتظر پولبک و تأیید" if pending_setup else "در حال رصد"
                 if pending_setup:
@@ -200,9 +185,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     reasons = diagnose_snapshot(snapshot)
                     record["reason"] = "رد شرایط ورود: " + " | ".join(reasons[:3])
                 else:
-                    record["reason"] = "سیگنال مستقل تشکیل شد اما تأیید Coinalyze کامل نیست"
-            if bos_signal is not None and not coinalyze_confirms(bos_signal, metrics):
-                record["reason"] = record.get("reason", "") + " | تأیید OI_BOS در Coinalyze کامل نشد"
+                    record["reason"] = "شکست/شتاب اولیه دیده شد اما ورود بدون پولبک و تأیید صادر نمی‌شود"
         except (CoinalyzeError, MarketDataError, OSError, ValueError, KeyError) as exc:
             record["status"] = "خطای دریافت داده"
             record["reason"] = f"{type(exc).__name__}: {exc}"
