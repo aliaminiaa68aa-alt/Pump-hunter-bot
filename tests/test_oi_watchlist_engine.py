@@ -113,12 +113,32 @@ class WatchlistTests(unittest.TestCase):
              patch("oi_engine.watchlist_engine.advance_pullback_setup",
                    return_value=(None, pending, "منتظر پولبک")):
             found, updated = scan_watchlist(
-                {"ABCUSDT": {"status": "در حال رصد"}},
+                {"ABCUSDT": {"status": "در حال رصد", "pending_setup": pending}},
                 FakeClient(metrics()), now=1000
             )
         self.assertEqual(found, [])
         self.assertEqual(updated["ABCUSDT"]["pending_setup"], pending)
         self.assertEqual(updated["ABCUSDT"]["status"], "منتظر پولبک و تأیید")
+
+    def test_confirmed_bos_is_not_suppressed_by_a_new_setup_created_this_scan(self):
+        newly_created = {
+            "side": "LONG", "level": 1.0,
+            "breakout_close_time": 900000,
+            "expires_at_close_time": 4500000,
+            "breakout_atr": 0.02,
+        }
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value={}), \
+             patch("oi_engine.watchlist_engine.evaluate_snapshot", return_value=signal()), \
+             patch("oi_engine.watchlist_engine.advance_pullback_setup",
+                   return_value=(None, newly_created, "شکست LONG ثبت شد؛ منتظر پولبک")):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {"status": "در حال رصد"}},
+                FakeClient(metrics()), now=1000
+            )
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][1]["engine"], "OI_BOS")
+        self.assertEqual(updated["ABCUSDT"]["status"], "تأیید LONG")
+        self.assertNotIn("pending_setup", updated["ABCUSDT"])
 
     def test_no_entry_keeps_watch_status(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",return_value={}), \

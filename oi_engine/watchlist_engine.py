@@ -158,7 +158,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["coinalyze"] = metrics
             bos_confirmed = False
             if (pullback_signal is None and previous_pending_setup is None
-                    and pending_setup is None and bos_signal is not None
+                    and bos_signal is not None
                     and coinalyze_confirms(bos_signal, metrics)):
                 bos_metrics = dict(metrics)
                 bos_metrics["engine"] = "OI_BOS"
@@ -198,7 +198,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     record["reason"] = setup_reason
                 elif bos_signal is None:
                     reasons = diagnose_snapshot(snapshot)
-                    record["reason"] = setup_reason or ("رد شرایط: " + " | ".join(reasons[:3]))
+                    record["reason"] = "رد شرایط ورود: " + " | ".join(reasons[:3])
                 else:
                     record["reason"] = "سیگنال مستقل تشکیل شد اما تأیید Coinalyze کامل نیست"
             if bos_signal is not None and not coinalyze_confirms(bos_signal, metrics):

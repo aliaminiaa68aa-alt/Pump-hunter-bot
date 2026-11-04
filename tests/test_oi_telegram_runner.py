@@ -215,6 +215,15 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(result["reasons"]["coinalyze_rejected"], 1)
         self.assertEqual(result["reasons"]["pending_pullback"], 1)
 
+    def test_scan_diagnostics_do_not_call_unconfirmed_breakouts_pending_pullbacks(self):
+        watchlist = {"AUSDT": {}, "BUSDT": {}}
+        scanned = {
+            "AUSDT": {"status": "در حال رصد", "reason": "شکست اولیه هنوز تأیید نشده"},
+            "BUSDT": {"status": "منتظر پولبک و تأیید", "reason": "منتظر پولبک"},
+        }
+        result = telegram_runner.summarize_scan_diagnostics(watchlist, scanned)
+        self.assertEqual(result["reasons"]["pending_pullback"], 1)
+
     def test_watchlist_batch_rotates_without_dropping_symbols(self):
         watchlist = {f"COIN{i}USDT": {"status": "در حال رصد"} for i in range(11)}
         first, cursor = telegram_runner.select_watchlist_batch(watchlist)
