@@ -179,9 +179,10 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             if bos_signal is not None and coinalyze_confirms(bos_signal, metrics):
                 bos_metrics = dict(metrics)
                 bos_metrics["engine"] = "OI_BOS"
-                atr_15m = _atr(snapshot["candles"])
+                candles_for_atr = snapshot.get("candles") or []
+                atr_15m = _atr(candles_for_atr) if candles_for_atr else 0.0
                 stop_distance = abs(bos_signal.entry - bos_signal.stop_loss)
-                bos_metrics["atr_15m"] = atr_15m
+                bos_metrics["atr_15m"] = atr_15m if atr_15m > 0 else None
                 bos_metrics["stop_distance_pct"] = stop_distance / bos_signal.entry * 100.0
                 bos_metrics["stop_distance_atr"] = stop_distance / atr_15m if atr_15m > 0 else None
                 confirmed.append((bos_signal, bos_metrics))
@@ -189,9 +190,10 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 if coinalyze_confirms(pullback_signal, metrics):
                     pullback_metrics = dict(metrics)
                     pullback_metrics["engine"] = "PULLBACK"
-                    atr_15m = _atr(snapshot["candles"])
+                    candles_for_atr = snapshot.get("candles") or []
+                    atr_15m = _atr(candles_for_atr) if candles_for_atr else 0.0
                     stop_distance = abs(pullback_signal.entry - pullback_signal.stop_loss)
-                    pullback_metrics["atr_15m"] = atr_15m
+                    pullback_metrics["atr_15m"] = atr_15m if atr_15m > 0 else None
                     pullback_metrics["stop_distance_pct"] = stop_distance / pullback_signal.entry * 100.0
                     pullback_metrics["stop_distance_atr"] = stop_distance / atr_15m if atr_15m > 0 else None
                     confirmed.append((pullback_signal, pullback_metrics))
