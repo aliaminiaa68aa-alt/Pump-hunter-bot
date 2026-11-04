@@ -103,11 +103,11 @@ class PullbackEngineTests(unittest.TestCase):
         # After the bearish breakout, buyers dominate the next three closed
         # candles. The final candle alone must not override that pressure.
         rows = [
-            {"open":97.0,"high":100.0,"low":96.8,"close":99.7,
+            {"open":97.0,"high":99.9,"low":96.8,"close":99.7,
              "quote_volume":300000,"taker_buy_quote":210000},
-            {"open":99.7,"high":100.2,"low":99.5,"close":100.0,
+            {"open":99.7,"high":100.0,"low":99.5,"close":100.0,
              "quote_volume":250000,"taker_buy_quote":175000},
-            {"open":100.0,"high":100.1,"low":99.2,"close":99.3,
+            {"open":100.0,"high":99.8,"low":99.2,"close":99.3,
              "quote_volume":200000,"taker_buy_quote":90000},
         ]
         for row in rows:
@@ -129,9 +129,9 @@ class PullbackEngineTests(unittest.TestCase):
         rows = [
             {"open":103.0,"high":103.2,"low":100.0,"close":100.4,
              "quote_volume":300000,"taker_buy_quote":90000},
-            {"open":100.4,"high":100.6,"low":99.7,"close":100.0,
+            {"open":100.4,"high":100.6,"low":99.95,"close":100.0,
              "quote_volume":250000,"taker_buy_quote":75000},
-            {"open":100.0,"high":100.8,"low":99.9,"close":100.7,
+            {"open":100.0,"high":100.8,"low":99.95,"close":100.7,
              "quote_volume":200000,"taker_buy_quote":120000},
         ]
         for row in rows:
