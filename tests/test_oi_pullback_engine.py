@@ -97,6 +97,56 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertAlmostEqual(next_pending["pullback_extreme"], 100.4)
         self.assertIn("setup", reason)
 
+    def test_short_is_blocked_when_recent_closed_candles_show_buy_pressure(self):
+        data = snapshot("SHORT")
+        _, pending, _ = advance_pullback_setup(data)
+        # After the bearish breakout, buyers dominate the next three closed
+        # candles. The final candle alone must not override that pressure.
+        rows = [
+            {"open":97.0,"high":100.0,"low":96.8,"close":99.7,
+             "quote_volume":300000,"taker_buy_quote":210000},
+            {"open":99.7,"high":100.2,"low":99.5,"close":100.0,
+             "quote_volume":250000,"taker_buy_quote":175000},
+            {"open":100.0,"high":100.1,"low":99.2,"close":99.3,
+             "quote_volume":200000,"taker_buy_quote":90000},
+        ]
+        for row in rows:
+            previous = data["candles"][-1]["close_time"]
+            data["candles"].append({
+                **row, "open_time":previous+1,
+                "volume":1500, "close_time":previous+900000,
+            })
+        data["oi_values"] = [100.2,101.0,101.8]
+        data["oi_timestamp"] = data["candles"][-1]["close_time"]
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNone(signal)
+        self.assertIsNotNone(next_pending)
+        self.assertIn("جریان تجمیعی", reason)
+
+    def test_long_is_blocked_when_recent_closed_candles_show_sell_pressure(self):
+        data = snapshot("LONG")
+        _, pending, _ = advance_pullback_setup(data)
+        rows = [
+            {"open":103.0,"high":103.2,"low":100.0,"close":100.4,
+             "quote_volume":300000,"taker_buy_quote":90000},
+            {"open":100.4,"high":100.6,"low":99.7,"close":100.0,
+             "quote_volume":250000,"taker_buy_quote":75000},
+            {"open":100.0,"high":100.8,"low":99.9,"close":100.7,
+             "quote_volume":200000,"taker_buy_quote":120000},
+        ]
+        for row in rows:
+            previous = data["candles"][-1]["close_time"]
+            data["candles"].append({
+                **row, "open_time":previous+1,
+                "volume":1500, "close_time":previous+900000,
+            })
+        data["oi_values"] = [100.2,101.0,101.8]
+        data["oi_timestamp"] = data["candles"][-1]["close_time"]
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNone(signal)
+        self.assertIsNotNone(next_pending)
+        self.assertIn("جریان تجمیعی", reason)
+
     def test_weak_oi_keeps_setup_alive_for_next_retest(self):
         data = snapshot("LONG")
         _, pending, _ = advance_pullback_setup(data)
