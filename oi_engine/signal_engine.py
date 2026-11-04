@@ -228,8 +228,10 @@ def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
                   open_price, oi_previous, oi_latest, prior_high, prior_low)
         if not all(math.isfinite(value) for value in values):
             return ["داده قیمت، حجم یا OI غیرمتناهی است"]
-        if avg_volume <= 0 or last_volume <= 0:
-            return ["حجم مبنا یا حجم کندل نامعتبر است"]
+        if avg_volume <= 0:
+            return ["حجم مبنا نامعتبر است"]
+        if last_volume <= 0:
+            return ["داده جریان خرید نامعتبر است؛ حجم کندل باید مثبت باشد"]
         if taker_buy_quote < 0 or taker_buy_quote > last_volume:
             return ["داده جریان خرید نامعتبر است؛ نسبت خرید تهاجمی باید بین 0 تا 100٪ باشد"]
         if close <= 0 or previous_close <= 0 or oi_previous <= 0 or oi_latest <= 0:
