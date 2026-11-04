@@ -141,12 +141,13 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                         "enough aligned 15m OHLCV/OI history for a safe fallback"
                     )
                 record["data_source"] = "Coinalyze 15m fallback (Binance HTTP 451)"
-            # A BOS is only the trigger for a pending setup. Never send a
-            # final entry on the breakout close; wait for pullback confirmation.
-            bos_signal = None
+            # Evaluate a confirmed closed-candle OI signal independently of
+            # the direction label in the source channel. The channel is a
+            # discovery feed, not a LONG/SHORT instruction.
+            bos_signal = evaluate_snapshot(snapshot)
             previous_pending_setup = record.get("pending_setup")
             pullback_signal, pending_setup, setup_reason = advance_pullback_setup(
-                snapshot, previous_pending_setup, record.get("source_side")
+                snapshot, previous_pending_setup, None
             )
             if metrics is None:
                 metrics = client.fetch_metrics(symbol, now=timestamp)
