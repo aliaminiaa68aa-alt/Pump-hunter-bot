@@ -23,6 +23,25 @@ class CoinalyzeClientTests(unittest.TestCase):
         with self.assertRaisesRegex(CoinalyzeError, "COINALYZE_API_KEY"):
             CoinalyzeClient(api_key="")
 
+    def test_asset_catalogue_classifies_crypto_and_excludes_equity_assets(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client._get = lambda endpoint, params=None: [
+            {"symbol": "BTC", "asset_category": "CRYPTO"},
+            {"symbol": "ETH", "asset_category": "CRYPTO"},
+            {"symbol": "QCOM", "asset_category": "EQUITY"},
+            {"symbol": "SNXX", "asset_category": "ETF"},
+        ] if endpoint == "assets" else []
+        self.assertEqual(client.get_crypto_asset_symbols(), {"BTC", "ETH"})
+        self.assertTrue(client.is_crypto_asset("btc"))
+        self.assertFalse(client.is_crypto_asset("QCOM"))
+        self.assertFalse(client.is_crypto_asset("SNXX"))
+
+    def test_asset_catalogue_fails_closed_when_empty(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client._get = lambda endpoint, params=None: []
+        with self.assertRaisesRegex(CoinalyzeError, "assets response"):
+            client.get_crypto_asset_symbols()
+
     def test_resolves_binance_perpetual(self):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
         client.get_binance_exchange_codes = lambda: {"BINANCE"}
