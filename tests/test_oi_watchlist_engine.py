@@ -68,10 +68,19 @@ class WatchlistTests(unittest.TestCase):
         self.assertIn("Coinalyze 15m fallback", updated["ABCUSDT"]["data_source"])
         self.assertNotIn("market_snapshot", updated["ABCUSDT"]["coinalyze"])
 
-    def test_signal_labels_coinalyze_as_second_stage_not_always_independent(self):
+    def test_signal_message_is_compact_and_keeps_actionable_fields(self):
         message = format_confirmed_signal(signal(), metrics())
-        self.assertIn("تأیید مرحله دوم Coinalyze", message)
-        self.assertNotIn("تأیید مستقل Coinalyze", message)
+        self.assertIn("<b>LONG</b>", message)
+        self.assertIn("ABCUSDT", message)
+        self.assertIn("ورود:", message)
+        self.assertIn("حد ضرر:", message)
+        self.assertIn("هدف ۱:", message)
+        self.assertIn("هدف ۲:", message)
+        self.assertIn("OI ۱۵دقیقه:", message)
+        self.assertIn("جریان 60%", message)
+        self.assertNotIn("Funding", message)
+        self.assertNotIn("لیکویید", message)
+        self.assertNotIn("نسبت حساب‌های", message)
 
     def test_coinalyze_rejection_preserves_pending_pullback_for_retry(self):
         pending = {
@@ -105,20 +114,13 @@ class WatchlistTests(unittest.TestCase):
         self.assertEqual(updated["ABCUSDT"]["status"],"در حال رصد")
 
 
-    def test_extreme_coinalyze_funding_is_labeled_and_warned(self):
+    def test_raw_funding_is_not_shown_in_compact_signal_card(self):
         extreme = metrics()
         extreme["funding_rate"] = -0.028806
         extreme["predicted_funding_rate"] = -0.089197
         message = format_confirmed_signal(signal(), extreme)
-        self.assertIn("Funding (snapshot اولیه):", message)
-        self.assertIn("Funding خام (Coinalyze): -0.028806 (خام؛ واحد/بازه نامشخص)", message)
-        self.assertIn("Funding پیش‌بینی‌شده خام (Coinalyze): -0.089197 (خام؛ واحد/بازه نامشخص)", message)
-        self.assertIn("مقادیر Funding از Coinalyze خام‌اند", message)
-
-    def test_funding_is_always_labeled_raw_until_units_are_verified(self):
-        message = format_confirmed_signal(signal(), metrics())
-        self.assertIn("Funding خام (Coinalyze): 0.0001 (خام؛ واحد/بازه نامشخص)", message)
-        self.assertIn("مقادیر Funding از Coinalyze خام‌اند", message)
+        self.assertNotIn("Funding", message)
+        self.assertNotIn("واحد/بازه نامشخص", message)
 
 if __name__ == "__main__":
     unittest.main()
