@@ -140,10 +140,24 @@ def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[s
     return kept
 
 
+def prune_watchlist_by_asset_category(watchlist: Dict[str, Any], client: CoinalyzeClient) -> Dict[str, Any]:
+    """Remove cached symbols not explicitly categorized as crypto by Coinalyze."""
+    crypto_assets = client.get_crypto_asset_symbols()
+    return {
+        symbol: record for symbol, record in watchlist.items()
+        if isinstance(symbol, str)
+        and symbol.endswith("USDT")
+        and symbol[:-4].upper() in crypto_assets
+        and isinstance(record, dict)
+    }
+
+
 def _has_supported_perpetual(client: CoinalyzeClient, symbol: str) -> bool:
-    """Return False only for a genuine missing Binance perpetual mapping."""
+    """Reject non-crypto assets and symbols without a Binance USDT perpetual mapping."""
     from oi_engine.coinalyze_client import CoinalyzeError
     try:
+        if not symbol.endswith("USDT") or not client.is_crypto_asset(symbol[:-4]):
+            return False
         return bool(client.resolve_market(symbol))
     except CoinalyzeError as exc:
         if str(exc).startswith("No Binance USDT perpetual mapping"):
@@ -305,6 +319,18 @@ def main() -> None:
                 record["source_side"] = recovered_side
 
     client = CoinalyzeClient(api_key=api_key, include_optional_metrics=False)
+    try:
+        before_asset_filter = len(watchlist)
+        watchlist = prune_watchlist_by_asset_category(watchlist, client)
+        removed_equity_symbols = before_asset_filter - len(watchlist)
+        if removed_equity_symbols:
+            print(
+                f"Watchlist crypto asset filter removed {removed_equity_symbols} "
+                "non-crypto or unclassified perpetual symbols"
+            )
+    except Exception as exc:
+        # Keep static blacklist pruning active if the metadata endpoint is temporarily unavailable.
+        print(f"WARNING: Coinalyze asset-category filter unavailable: {type(exc).__name__}: {exc}")
     # Binance Futures returns HTTP 451 on this runner; use the same Coinalyze
     # 15m OHLCV fallback as the scanner so outcome tracking can still progress.
     previous_events = {

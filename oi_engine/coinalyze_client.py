@@ -47,6 +47,8 @@ class CoinalyzeClient:
         self.request_times = deque()
         self._future_markets_cache: Optional[List[dict]] = None
         self._binance_exchange_codes: Optional[set[str]] = None
+        self._assets_cache: Optional[List[dict]] = None
+        self._crypto_asset_symbols_cache: Optional[set[str]] = None
 
     def _throttle(self) -> None:
         now = self.clock()
@@ -81,6 +83,39 @@ class CoinalyzeClient:
             except ValueError as exc:
                 raise CoinalyzeError(f"Invalid JSON from Coinalyze {endpoint}") from exc
         raise CoinalyzeError(f"Coinalyze rate limit persisted for {endpoint}")
+
+    def get_assets(self) -> List[dict]:
+        """Return Coinalyze's asset catalogue, including its asset-category labels."""
+        if self._assets_cache is not None:
+            return self._assets_cache
+        payload = self._get("assets")
+        if not isinstance(payload, list) or not payload:
+            raise CoinalyzeError("Unexpected or empty Coinalyze assets response")
+        self._assets_cache = payload
+        return payload
+
+    def get_crypto_asset_symbols(self) -> set[str]:
+        """Return only assets explicitly categorized as CRYPTO by Coinalyze."""
+        if self._crypto_asset_symbols_cache is not None:
+            return self._crypto_asset_symbols_cache
+        symbols = set()
+        for item in self.get_assets():
+            if str(item.get("asset_category", "")).strip().upper() != "CRYPTO":
+                continue
+            symbol = str(item.get("symbol", "")).strip().upper()
+            if "/" in symbol:
+                symbol = symbol.split("/", 1)[0]
+            if symbol.endswith("USDT"):
+                symbol = symbol[:-4]
+            if symbol:
+                symbols.add(symbol)
+        if not symbols:
+            raise CoinalyzeError("Coinalyze assets catalogue contains no CRYPTO assets")
+        self._crypto_asset_symbols_cache = symbols
+        return symbols
+
+    def is_crypto_asset(self, base_asset: str) -> bool:
+        return str(base_asset).strip().upper() in self.get_crypto_asset_symbols()
 
     def get_future_markets(self) -> List[dict]:
         if self._future_markets_cache is not None:

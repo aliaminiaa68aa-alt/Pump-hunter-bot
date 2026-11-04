@@ -63,6 +63,26 @@ jobs:
           print(f"Coinalyze authentication OK; future markets available: {len(markets)}")
           PY
 
+      - name: Verify Coinalyze asset-category catalogue
+        env:
+          COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
+        run: |
+          python - <<'PY'
+          from oi_engine.coinalyze_client import CoinalyzeClient
+          client = CoinalyzeClient()
+          assets = client.get_assets()
+          crypto = client.get_crypto_asset_symbols()
+          if "BTC" not in crypto:
+              raise SystemExit("Coinalyze asset catalogue did not classify BTC as CRYPTO")
+          categories = {
+              str(item.get("symbol", "")).upper(): str(item.get("asset_category", ""))
+              for item in assets
+          }
+          for symbol in ("BTC", "QCOM", "SNXX", "GIGADEV", "CXMT", "SKDD", "SAMSUNG"):
+              print(f"Coinalyze asset category {symbol}: {categories.get(symbol, 'NOT_LISTED')}")
+          print(f"Coinalyze asset catalogue verified; crypto assets: {len(crypto)}")
+          PY
+
       - name: Smoke-test live BTCUSDT derivatives metrics
         env:
           COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}

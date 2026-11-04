@@ -34,8 +34,16 @@ class AlertIngestTests(unittest.TestCase):
     def test_unsupported_symbol_is_ignored(self):
         self.assertIsNone(parse_forwarded_oi_alert({"message": {"forward_date": 1, "text": "OI Alert BTC"}}))
 
+    def test_stablecoin_pairs_are_not_pump_candidates(self):
+        for ticker in ("USDC", "BUSD", "FDUSD", "TUSD", "DAI", "USDE", "USDD", "PYUSD", "USDP"):
+            with self.subTest(ticker=ticker):
+                update = {"channel_post": {
+                    "text": f"🚨 Crypto Open Interest #{ticker} $1.00 • OI [15m]"
+                }}
+                self.assertIsNone(parse_forwarded_oi_alert(update))
+
     def test_equity_and_etf_symbols_are_rejected(self):
-        for ticker in ("AAPL", "AMD", "COST", "BYD", "XLE", "UVXY", "HIMS", "HK1810", "RIVN", "CSOPSKHYNIX2L", "PLTR", "MSFT", "GEV", "ASTS", "NVO", "GDX", "LITE", "FWDI"):
+        for ticker in ("AAPL", "AMD", "COST", "BYD", "XLE", "UVXY", "HIMS", "HK1810", "RIVN", "CSOPSKHYNIX2L", "PLTR", "MSFT", "GEV", "ASTS", "NVO", "GDX", "LITE", "FWDI", "KLAC", "DJT", "MCD", "SOXS", "SNXX", "INTW", "XBI", "NET", "EWT", "CRDO", "QCOM", "SAMSUNG", "SAMSUNGEM", "GIGADEV", "CXMT", "SKDD", "SKUU", "SKHYNIX", "RAM", "MRNA", "ZHONGJI", "HANMI", "LGELECTRONICS", "NAVER", "KODEX200", "KO"):
             with self.subTest(ticker=ticker):
                 update = {"channel_post": {
                     "text": f"🚨 Crypto Open Interest #{ticker} $10.00 • OI [15m]"
