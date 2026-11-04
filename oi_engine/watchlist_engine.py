@@ -158,7 +158,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["coinalyze"] = metrics
             bos_confirmed = False
             if (pullback_signal is None and previous_pending_setup is None
-                    and pending_setup is None and bos_signal is not None
+                    and bos_signal is not None
                     and coinalyze_confirms(bos_signal, metrics)):
                 bos_metrics = dict(metrics)
                 bos_metrics["engine"] = "OI_BOS"
