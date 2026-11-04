@@ -6,7 +6,7 @@ import requests
 from typing import Any, Dict, List, Tuple
 
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
-from oi_engine.signal_engine import MarketDataError, Signal, diagnose_snapshot, evaluate_snapshot, fetch_snapshot, format_signal
+from oi_engine.signal_engine import MarketDataError, Signal, _atr, diagnose_snapshot, evaluate_snapshot, fetch_snapshot, format_signal
 from oi_engine.pullback_engine import advance_pullback_setup
 
 
@@ -111,8 +111,18 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         f"\nOI منبع: 15m={priority_15m if priority_15m is not None else 'ناموجود'}%، "
         f"1h={priority_1h if priority_1h is not None else 'ناموجود'}%"
     )
+    engine_names = {"OI_BOS": "شکست ساختار (BOS)", "PULLBACK": "پولبک"}
+    engine_text = engine_names.get(str(metrics.get("engine", "")), "نامشخص")
+    atr = metrics.get("atr_15m")
+    stop_pct = metrics.get("stop_distance_pct")
+    stop_atr = metrics.get("stop_distance_atr")
+    risk_text = (
+        f"\nموتور سیگنال: {engine_text}"
+        + (f"\nATR تایم‌فریم ۱۵دقیقه: {float(atr):.8g}" if atr is not None else "\nATR تایم‌فریم ۱۵دقیقه: ناموجود")
+        + (f"\nفاصله حد ضرر: {float(stop_pct):.2f}% | {float(stop_atr):.2f} ATR" if stop_pct is not None and stop_atr is not None else "\nفاصله حد ضرر: ناموجود")
+    )
     return (
-        format_signal(signal) + priority_text + "\n\nتأیید مرحله دوم Coinalyze"
+        format_signal(signal) + risk_text + priority_text + "\n\nتأیید مرحله دوم Coinalyze"
         + f"\nتغییر OI: {metrics['oi_change_15m_window_pct']:+.2f}%"
         + f"\nنسبت خرید تهاجمی: {metrics['taker_buy_ratio']:.1%}"
         + f"\nFunding خام (Coinalyze): {raw_funding(funding)}"
@@ -169,11 +179,21 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             if bos_signal is not None and coinalyze_confirms(bos_signal, metrics):
                 bos_metrics = dict(metrics)
                 bos_metrics["engine"] = "OI_BOS"
+                atr_15m = _atr(snapshot["candles"])
+                stop_distance = abs(bos_signal.entry - bos_signal.stop_loss)
+                bos_metrics["atr_15m"] = atr_15m
+                bos_metrics["stop_distance_pct"] = stop_distance / bos_signal.entry * 100.0
+                bos_metrics["stop_distance_atr"] = stop_distance / atr_15m if atr_15m > 0 else None
                 confirmed.append((bos_signal, bos_metrics))
             if pullback_signal is not None:
                 if coinalyze_confirms(pullback_signal, metrics):
                     pullback_metrics = dict(metrics)
                     pullback_metrics["engine"] = "PULLBACK"
+                    atr_15m = _atr(snapshot["candles"])
+                    stop_distance = abs(pullback_signal.entry - pullback_signal.stop_loss)
+                    pullback_metrics["atr_15m"] = atr_15m
+                    pullback_metrics["stop_distance_pct"] = stop_distance / pullback_signal.entry * 100.0
+                    pullback_metrics["stop_distance_atr"] = stop_distance / atr_15m if atr_15m > 0 else None
                     confirmed.append((pullback_signal, pullback_metrics))
                     record.pop("pending_setup", None)
                     record["status"] = f"تأیید {pullback_signal.side}"
