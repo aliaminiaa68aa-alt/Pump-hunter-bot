@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from oi_engine.telegram_public_source import _ChannelParser, fetch_public_channel_posts, poll_public_channel_alerts
 
@@ -20,14 +20,14 @@ class PublicTelegramSourceTests(unittest.TestCase):
         self.assertEqual(parser.posts[0]["date"], "2026-11-02T10:00:00+00:00")
 
     def test_fetch_public_channel_posts_uses_before_pagination_parameter(self):
-        response = unittest.mock.Mock()
+        response = Mock()
         response.text = '''
         <div class="tgme_widget_message js-widget_message" data-post="oi_detector/123">
           <div class="tgme_widget_message_text">TESTUSDT +2%</div>
           <div class="tgme_widget_message_footer"><time datetime="2026-11-02T10:00:00+00:00"></time></div>
         </div>
         '''
-        response.raise_for_status = unittest.mock.Mock()
+        response.raise_for_status = Mock()
         with patch("oi_engine.telegram_public_source.requests.get", return_value=response) as get:
             posts = fetch_public_channel_posts("oi_detector", before=124)
         self.assertEqual(posts[0]["message_id"], 123)
