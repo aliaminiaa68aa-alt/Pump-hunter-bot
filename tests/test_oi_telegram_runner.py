@@ -226,8 +226,8 @@ class TelegramRunnerTests(unittest.TestCase):
 
     def test_watchlist_batch_rotates_without_dropping_symbols(self):
         watchlist = {f"COIN{i}USDT": {"status": "در حال رصد"} for i in range(11)}
-        first, cursor = telegram_runner.select_watchlist_batch(watchlist)
-        second, next_cursor = telegram_runner.select_watchlist_batch(watchlist, cursor)
+        first, cursor = telegram_runner.select_watchlist_batch(watchlist, limit=8)
+        second, next_cursor = telegram_runner.select_watchlist_batch(watchlist, cursor, limit=8)
         self.assertEqual(list(first), [f"COIN{i}USDT" for i in range(8)])
         self.assertEqual(list(second), ["COIN8USDT", "COIN9USDT", "COIN10USDT", "COIN0USDT", "COIN1USDT", "COIN2USDT", "COIN3USDT", "COIN4USDT"])
         self.assertEqual(cursor, "COIN7USDT")
@@ -242,7 +242,7 @@ class TelegramRunnerTests(unittest.TestCase):
             "PENDING_SOONUSDT": {"pending_setup": {"expires_at_close_time": 3000}},
             **{f"ROT{i}USDT": {} for i in range(8)},
         }
-        batch, cursor = telegram_runner.select_watchlist_batch(watchlist)
+        batch, cursor = telegram_runner.select_watchlist_batch(watchlist, limit=8)
         self.assertEqual(list(batch)[:2], ["PENDING_SOONUSDT", "PENDING_LATEUSDT"])
         self.assertEqual(list(batch)[2:4], ["HOT1USDT", "HOT2USDT"])
         self.assertEqual(len(batch), 8)
@@ -255,7 +255,7 @@ class TelegramRunnerTests(unittest.TestCase):
             "PENDINGUSDT": {"pending_setup": {"expires_at_close_time": 3000}},
             **{f"ROT{i}USDT": {} for i in range(8)},
         }
-        batch, _ = telegram_runner.select_watchlist_batch(watchlist)
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=8)
         self.assertIn("PENDINGUSDT", batch)
         self.assertIn("HOT1USDT", batch)
         self.assertIn("HOT2USDT", batch)
@@ -274,7 +274,7 @@ class TelegramRunnerTests(unittest.TestCase):
             "HOT2USDT": {"oi_priority_score": 9.0},
             **{f"NEW{i}USDT": {} for i in range(6)},
         }
-        first, cursor = telegram_runner.select_watchlist_batch(watchlist)
+        first, cursor = telegram_runner.select_watchlist_batch(watchlist, limit=8)
         self.assertEqual(len(first), 8)
         self.assertEqual(sum("pending_setup" in record for record in first.values()), 4)
         self.assertIn("HOT1USDT", first)
@@ -284,7 +284,7 @@ class TelegramRunnerTests(unittest.TestCase):
         for record in first.values():
             if "pending_setup" in record:
                 record["last_checked"] = 100
-        second, _ = telegram_runner.select_watchlist_batch(watchlist, cursor)
+        second, _ = telegram_runner.select_watchlist_batch(watchlist, cursor, limit=8)
         second_pending = {
             symbol for symbol, record in second.items()
             if "pending_setup" in record
@@ -304,7 +304,7 @@ class TelegramRunnerTests(unittest.TestCase):
         cursor = ""
         visited = []
         for _ in range(3):
-            batch, cursor = telegram_runner.select_watchlist_batch(watchlist, cursor)
+            batch, cursor = telegram_runner.select_watchlist_batch(watchlist, cursor, limit=8)
             self.assertEqual(len(batch), 8)
             visited.extend(batch)
         self.assertEqual(len(visited), 24)
