@@ -98,12 +98,17 @@ class CoinalyzeClient:
         """Return only assets explicitly categorized as CRYPTO by Coinalyze."""
         if self._crypto_asset_symbols_cache is not None:
             return self._crypto_asset_symbols_cache
-        symbols = {
-            str(item.get("symbol", "")).strip().upper()
-            for item in self.get_assets()
-            if str(item.get("asset_category", "")).strip().upper() == "CRYPTO"
-            and item.get("symbol")
-        }
+        symbols = set()
+        for item in self.get_assets():
+            if str(item.get("asset_category", "")).strip().upper() != "CRYPTO":
+                continue
+            symbol = str(item.get("symbol", "")).strip().upper()
+            if "/" in symbol:
+                symbol = symbol.split("/", 1)[0]
+            if symbol.endswith("USDT"):
+                symbol = symbol[:-4]
+            if symbol:
+                symbols.add(symbol)
         if not symbols:
             raise CoinalyzeError("Coinalyze assets catalogue contains no CRYPTO assets")
         self._crypto_asset_symbols_cache = symbols
