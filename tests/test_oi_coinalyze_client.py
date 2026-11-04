@@ -123,6 +123,41 @@ class CoinalyzeClientTests(unittest.TestCase):
         self.assertAlmostEqual(last["taker_buy_quote"], 600 * expected_typical_price)
         self.assertAlmostEqual(last["taker_buy_quote"] / last["quote_volume"], 0.6)
 
+    def test_core_only_metrics_skip_unused_supplementary_api_endpoints(self):
+        client = CoinalyzeClient(
+            api_key="test", sleeper=lambda _: None, include_optional_metrics=False
+        )
+        client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"
+        start = 180000
+        candles = [
+            {"t": start + i * 900, "o": 100+i, "h": 102+i, "l": 99+i,
+             "c": 101+i, "v": 1000, "bv": 600}
+            for i in range(24)
+        ]
+        oi = [{"t": start + i * 900, "c": 100000 + i * 100}
+              for i in range(24)]
+        requested = []
+        def fake_get(endpoint, params=None):
+            requested.append(endpoint)
+            if endpoint == "funding-rate":
+                return [{"symbol": "BTCUSDT_PERP.A", "value": 0.0001}]
+            if endpoint == "open-interest-history":
+                return [{"symbol": "BTCUSDT_PERP.A", "history": oi}]
+            if endpoint == "ohlcv-history":
+                return [{"symbol": "BTCUSDT_PERP.A", "history": candles}]
+            raise AssertionError(f"Unexpected supplementary endpoint: {endpoint}")
+
+        client._get = fake_get
+        result = client.fetch_metrics("BTCUSDT", now=start + 24 * 900)
+        self.assertEqual(requested, ["funding-rate", "open-interest-history", "ohlcv-history"])
+        self.assertIsNotNone(result["market_snapshot"])
+        self.assertIsNone(result["current_open_interest_usd"])
+        self.assertIsNone(result["predicted_funding_rate"])
+        self.assertIsNone(result["long_short_ratio"])
+        self.assertIsNone(result["long_liquidations"])
+        self.assertIsNone(result["short_liquidations"])
+        self.assertTrue(result["data_quality"]["complete"])
+
     def test_fetch_metrics_calculates_closed_candle_oi_and_buy_ratio(self):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
         client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"
