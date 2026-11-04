@@ -30,12 +30,12 @@ class OutcomeTrackerTests(unittest.TestCase):
         first = [candle(900000, 100, 103, 99, 102.5)]
         monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: first)
         self.assertEqual(journal["trades"][key]["status"], "TP1_HIT")
-        self.assertEqual([e["event"] for e in journal["trades"][key]["events"]], ["TP1"])
+        self.assertEqual([e["event"] for e in journal["trades"][key]["events"]], ["ENTRY", "TP1"])
 
         second = [candle(1800000, 102.5, 105, 102, 104.5)]
         monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: second)
         self.assertEqual(journal["trades"][key]["status"], "CLOSED_TP2")
-        self.assertEqual([e["event"] for e in journal["trades"][key]["events"]], ["TP1", "TP2"])
+        self.assertEqual([e["event"] for e in journal["trades"][key]["events"]], ["ENTRY", "TP1", "TP2"])
 
     def test_stop_wins_if_stop_and_target_are_in_same_candle(self):
         journal, key = self.journal()
@@ -43,7 +43,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: both)
         record = journal["trades"][key]
         self.assertEqual(record["status"], "CLOSED_SL")
-        self.assertEqual([e["event"] for e in record["events"]], ["SL"])
+        self.assertEqual([e["event"] for e in record["events"]], ["ENTRY", "SL"])
         self.assertEqual(record["mfe_pct"], 0.0)
         self.assertEqual(record["mae_pct"], 2.0)
 
@@ -164,7 +164,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         record = make_trade_record(source, {"oi_change_15m_window_pct": 0.4}, 900000)
         self.assertEqual(record["signal"]["movement_strength"], 78)
         self.assertEqual(record["signal"]["entry_quality"], 42)
-        record["events"] = [{"event": "TP1", "time_ms": 1000000}]
+        record["events"] = [{"event": "ENTRY", "time_ms": 999999}, {"event": "TP1", "time_ms": 1000000}]
         record["status"] = "TP1_HIT"
         report = summarize_outcomes({"trades": {record["trade_id"]: record}})
         self.assertEqual(report["tp1_before_sl"], 1)
@@ -177,7 +177,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         journal = {"trades": {record["trade_id"]: record}}
         both = [candle(900000, 100, 103, 97, 101)]
         monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: both)
-        event = journal["trades"][record["trade_id"]]["events"][0]
+        event = journal["trades"][record["trade_id"]]["events"][-1]
         self.assertTrue(event["ambiguous_same_candle"])
         self.assertEqual(event["same_candle_targets"], ["TP1"])
         report = summarize_outcomes(journal)
