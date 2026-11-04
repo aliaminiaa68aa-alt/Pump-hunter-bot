@@ -5,7 +5,7 @@ from oi_engine.pullback_engine import advance_pullback_setup
 
 def snapshot(side="LONG"):
     candles = []
-    for i in range(22):
+    for i in range(60):
         candles.append({
             "open_time": i * 900000, "open": 99.8, "high": 100.5,
             "low": 99.5, "close": 100.0, "volume": 1000,
