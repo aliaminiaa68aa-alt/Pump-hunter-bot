@@ -126,6 +126,27 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(event["event"], "SL")
         self.assertEqual(event["fill"], 97.0)
 
+    def test_open_trade_skips_provider_calls_until_next_15m_candle_closes(self):
+        journal, key = self.journal()
+        calls = []
+        fetcher = lambda *args: calls.append(args) or []
+        monitor_journal(journal, now_ms=1799999, fetcher=fetcher)
+        self.assertEqual(calls, [])
+        self.assertEqual(journal["trades"][key]["status"], "OPEN")
+        monitor_journal(journal, now_ms=1800000, fetcher=fetcher)
+        self.assertEqual(len(calls), 1)
+
+    def test_stopped_trade_skips_post_stop_calls_between_15m_closes(self):
+        journal, key = self.journal()
+        stop_candle = [candle(900000, 100, 101, 97, 98)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: stop_candle)
+        calls = []
+        fetcher = lambda *args: calls.append(args) or []
+        monitor_journal(journal, now_ms=2000000, fetcher=fetcher)
+        self.assertEqual(calls, [])
+        monitor_journal(journal, now_ms=2700000, fetcher=fetcher)
+        self.assertEqual(len(calls), 1)
+
     def test_provider_error_is_retained_without_closing_trade(self):
         journal, key = self.journal()
         def fail(*_):
