@@ -58,6 +58,25 @@ class PublicTelegramSourceTests(unittest.TestCase):
         self.assertIn("COIN120USDT", watchlist)
         self.assertNotIn("COIN90USDT", watchlist)
 
+    def test_first_startup_backfills_recent_history_before_setting_cursor(self):
+        def make_post(message_id):
+            return {
+                "message_id": message_id,
+                "date": 1000,
+                "text": f"COIN{message_id}USDT +2%",
+                "channel": "oi_detector",
+            }
+        latest = [make_post(i) for i in range(101, 121)]
+        older = [make_post(i) for i in range(81, 101)]
+        def fetch(channel, timeout=20, before=None):
+            return latest if before is None else older
+        watchlist = {}
+        with patch("oi_engine.telegram_public_source.fetch_public_channel_posts", side_effect=fetch):
+            cursor, added = poll_public_channel_alerts("oi_detector", 0, watchlist, now=1000)
+        self.assertEqual(added, 40)
+        self.assertEqual(cursor, 120)
+        self.assertIn("COIN81USDT", watchlist)
+
     def test_new_public_post_is_added_and_cursor_moves(self):
         posts = [{
             "message_id": 20, "date": 1000, "text": "🚨 Crypto Open Interest | Pump/Dump Screener Bot 🔥 🔥 🟢 #TEST $0.123 • OI [15m]",
