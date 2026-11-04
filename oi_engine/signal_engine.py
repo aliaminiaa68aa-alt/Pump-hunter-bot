@@ -112,12 +112,12 @@ def validate_oi_cadence(rows: List[dict]) -> None:
 def fetch_snapshot(symbol: str) -> Dict[str, Any]:
     """Fetch closed 15m candles, OI history and current funding."""
     candles = _get("/fapi/v1/klines", {
-        "symbol": symbol, "interval": INTERVAL, "limit": 40
+        "symbol": symbol, "interval": INTERVAL, "limit": 80
     })
     # Binance returns the currently-forming candle last; exclude it.
     candles = candles[:-1]
-    if len(candles) < 22:
-        raise MarketDataError("Not enough closed candles")
+    if len(candles) < 55:
+        raise MarketDataError("Not enough closed candles for EMA50 confirmation")
 
     oi_rows = _get("/futures/data/openInterestHist", {
         "symbol": symbol, "period": INTERVAL, "limit": 6
