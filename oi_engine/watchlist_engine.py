@@ -85,52 +85,34 @@ def source_oi_priority(source_text: str) -> Dict[str, Any]:
 
 
 def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
-    def raw_funding(value: Any) -> str:
-        if value is None:
-            return "ناموجود"
-        try:
-            number = float(value)
-            if not math.isfinite(number):
-                return "نامعتبر"
-            return f"{number:.8g} (خام؛ واحد/بازه نامشخص)"
-        except (TypeError, ValueError):
-            return "نامعتبر"
+    """Compact, colorful Telegram card; keep only actionable signal details."""
+    import html
 
-    ratio = metrics.get("long_short_ratio")
-    long_liq, short_liq = metrics.get("long_liquidations"), metrics.get("short_liquidations")
-    funding = metrics.get("funding_rate")
-    predicted_funding = metrics.get("predicted_funding_rate")
-    funding_warning = ""
-    if funding is not None or predicted_funding is not None:
-        funding_warning = "\n⚠️ مقادیر Funding از Coinalyze خام‌اند؛ تا تأیید واحد و بازه زمانی، درصد تلقی نکن و مبنای ورود قرار نده."
-    priority_15m = metrics.get("source_oi_15m_pct")
-    priority_1h = metrics.get("source_oi_1h_pct")
-    priority_text = (
-        f"\nاولویت رشد OI هشدار: {metrics.get('oi_priority_tier', '🟡 معمولی')} "
-        f"(امتیاز {metrics.get('oi_priority_score', 0):.2f}/20)"
-        f"\nOI منبع: 15m={priority_15m if priority_15m is not None else 'ناموجود'}%، "
-        f"1h={priority_1h if priority_1h is not None else 'ناموجود'}%"
-    )
-    engine_names = {"OI_BOS": "شکست ساختار (BOS)", "PULLBACK": "پولبک"}
-    engine_text = engine_names.get(str(metrics.get("engine", "")), "نامشخص")
-    atr = metrics.get("atr_15m")
-    stop_pct = metrics.get("stop_distance_pct")
-    stop_atr = metrics.get("stop_distance_atr")
-    risk_text = (
-        f"\nموتور سیگنال: {engine_text}"
-        + (f"\nATR تایم‌فریم ۱۵دقیقه: {float(atr):.8g}" if atr is not None else "\nATR تایم‌فریم ۱۵دقیقه: ناموجود")
-        + (f"\nفاصله حد ضرر: {float(stop_pct):.2f}% | {float(stop_atr):.2f} ATR" if stop_pct is not None and stop_atr is not None else "\nفاصله حد ضرر: ناموجود")
-    )
+    symbol = html.escape(str(signal.symbol))
+    if signal.side == "LONG":
+        title = "🟢 <b>LONG</b>"
+        side_label = "خرید"
+    else:
+        title = "🔴 <b>SHORT</b>"
+        side_label = "فروش"
+
+    engine_names = {"OI_BOS": "BOS", "PULLBACK": "Pullback"}
+    engine = engine_names.get(str(metrics.get("engine", "")), "OI Signal")
+    oi_change = metrics.get("oi_change_15m_window_pct")
+    taker_ratio = metrics.get("taker_buy_ratio")
+    oi_text = f"{float(oi_change):+.2f}%" if oi_change is not None else "—"
+    taker_text = f"{float(taker_ratio):.0%}" if taker_ratio is not None else "—"
+
     return (
-        format_signal(signal) + risk_text + priority_text + "\n\nتأیید مرحله دوم Coinalyze"
-        + f"\nتغییر OI: {metrics['oi_change_15m_window_pct']:+.2f}%"
-        + f"\nنسبت خرید تهاجمی: {metrics['taker_buy_ratio']:.1%}"
-        + f"\nFunding خام (Coinalyze): {raw_funding(funding)}"
-        + f"\nFunding پیش‌بینی‌شده خام (Coinalyze): {raw_funding(predicted_funding)}"
-        + f"\nنسبت حساب‌های Long/Short: {'ناموجود' if ratio is None else f'{float(ratio):.3f}'}"
-        + f"\nلیکویید Long: {'ناموجود' if long_liq is None else f'{float(long_liq):,.0f}'}"
-        + f"\nلیکویید Short: {'ناموجود' if short_liq is None else f'{float(short_liq):,.0f}'}"
-        + funding_warning
+        f"{title}  <b>{symbol}</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        f"💵 ورود: <code>{signal.entry:.8g}</code>\n"
+        f"🛡 حد ضرر: <code>{signal.stop_loss:.8g}</code>\n"
+        f"🎯 هدف ۱: <code>{signal.take_profit_1:.8g}</code>\n"
+        f"🚀 هدف ۲: <code>{signal.take_profit_2:.8g}</code>\n"
+        "━━━━━━━━━━━━━━\n"
+        f"📊 OI ۱۵دقیقه: <b>{oi_text}</b>  |  جریان {taker_text}\n"
+        f"⚙️ حجم: {signal.volume_ratio:.1f}x  |  روش: {engine}"
     )
 
 
