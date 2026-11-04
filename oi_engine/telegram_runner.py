@@ -15,6 +15,7 @@ from oi_engine.alert_ingest import _is_crypto_candidate, parse_oi_alert_directio
 from oi_engine.coinalyze_client import CoinalyzeClient
 from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal, source_oi_priority
 from oi_engine.outcome_tracker import make_trade_record, monitor_journal, summarize_outcomes
+from oi_engine.entry_guard import EntryPriceError, evaluate_entry_freshness, fetch_gate_last_trade
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
@@ -413,6 +414,27 @@ def main() -> None:
         candle_id = int(signal.candle_close_time)
         if state.get(key) == candle_id:
             continue
+        # Re-check the latest actual trade immediately before Telegram delivery.
+        # The strategy entry is derived from a closed 15m candle; do not send it
+        # after the market has drifted materially away from that reference.
+        try:
+            live_trade = fetch_gate_last_trade(signal.symbol)
+            freshness = evaluate_entry_freshness(signal, live_trade["price"])
+        except EntryPriceError as exc:
+            print(f"Entry freshness blocked {signal.symbol} {signal.side}: {exc}")
+            continue
+        if not freshness["accepted"]:
+            print(
+                f"Entry freshness blocked {signal.symbol} {signal.side}: "
+                f"Gate={live_trade['price']:.10g}, entry={signal.entry:.10g}, "
+                f"drift={freshness['deviation_pct']:+.3f}%, "
+                f"limit={freshness['tolerance_pct']:.3f}%"
+            )
+            continue
+        metrics = dict(metrics)
+        metrics["entry_check_market_price"] = live_trade["price"]
+        metrics["entry_check_age_seconds"] = live_trade["age_seconds"]
+        metrics["entry_check_deviation_pct"] = freshness["deviation_pct"]
         message_id = send_telegram(token, chat_id, format_confirmed_signal(signal, metrics), parse_mode="HTML")
         trade_record = make_trade_record(signal, metrics, int(time.time() * 1000))
         trade_record["telegram_chat_id"] = str(chat_id)
