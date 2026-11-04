@@ -63,6 +63,28 @@ def save_outcome_journal(journal: Dict[str, Any]) -> None:
     _save_json(OUTCOME_PATH, journal)
 
 
+def _event_price_result(signal: Dict[str, Any], event: Dict[str, Any]) -> str:
+    """Report signed price movement from entry; this is not leveraged account PnL."""
+    entry = float(signal.get("entry") or 0)
+    if entry <= 0:
+        return ""
+    side = str(signal.get("side", "LONG")).upper()
+    name = event.get("event")
+    fallback_key = {"TP1": "take_profit_1", "TP2": "take_profit_2", "SL": "stop_loss"}.get(name)
+    fill = event.get("fill")
+    if fill is None and fallback_key:
+        fill = signal.get(fallback_key)
+    if fill is None:
+        return ""
+    fill = float(fill)
+    signed_pct = ((fill - entry) if side == "LONG" else (entry - fill)) / entry * 100.0
+    if name in {"TP1", "TP2"}:
+        return f"\nسود قیمتی: +{signed_pct:.2f}%"
+    if name == "SL":
+        return f"\nضرر قیمتی: {signed_pct:.2f}%"
+    return ""
+
+
 def send_telegram(token: str, chat_id: str, message: str, reply_to_message_id: int | None = None) -> int | None:
     response = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
@@ -245,13 +267,24 @@ def main() -> None:
                 label = labels.get(name)
             if label:
                 ambiguity = " (در همین کندل تارگت هم لمس شده؛ ترتیب دقیق داخل کندل مشخص نیست)" if event.get("ambiguous_same_candle") else ""
-                send_telegram(token, chat_id, label + "\\nارز: " + str(record["signal"]["symbol"]) + ambiguity,
+                result_pct = _event_price_result(record["signal"], event)
+                send_telegram(token, chat_id, label + "\\nارز: " + str(record["signal"]["symbol"]) + result_pct + ambiguity,
                               reply_to_message_id=int(anchor_id))
         if record.get("post_stop_tp1_reached") and not before["post_stop_tp1"]:
-            send_telegram(token, chat_id, "ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.",
+            signal = record["signal"]
+            side = str(signal.get("side", "LONG")).upper()
+            entry = float(signal.get("entry") or 0)
+            best_price = float(record.get("post_stop_best_price") or 0)
+            move_pct = (((best_price - entry) if side == "LONG" else (entry - best_price)) / entry * 100.0) if entry > 0 and best_price > 0 else 0.0
+            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.\\nحرکت قیمت از ورود: +{move_pct:.2f}%",
                           reply_to_message_id=int(anchor_id))
         if record.get("post_stop_tp2_reached") and not before["post_stop_tp2"]:
-            send_telegram(token, chat_id, "ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت دوم رسید.",
+            signal = record["signal"]
+            side = str(signal.get("side", "LONG")).upper()
+            entry = float(signal.get("entry") or 0)
+            best_price = float(record.get("post_stop_best_price") or 0)
+            move_pct = (((best_price - entry) if side == "LONG" else (entry - best_price)) / entry * 100.0) if entry > 0 and best_price > 0 else 0.0
+            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت دوم رسید.\\nحرکت قیمت از ورود: +{move_pct:.2f}%",
                           reply_to_message_id=int(anchor_id))
     save_outcome_journal(outcome_journal)
     outcome_statuses = {}
