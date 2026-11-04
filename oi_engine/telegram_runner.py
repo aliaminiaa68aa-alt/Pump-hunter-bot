@@ -229,11 +229,23 @@ def main() -> None:
             labels = {
                 "TP1": "🎯 تارگت اول خورد",
                 "TP2": "🏆 تارگت دوم خورد؛ معامله به پایان رسید",
-                "SL": "🛑 حد ضرر خورد",
             }
-            if name in labels:
+            if name == "SL":
+                sl_time = int(event.get("time_ms", 0))
+                tp1_was_hit = any(
+                    prior.get("event") == "TP1"
+                    and int(prior.get("time_ms", 0)) < sl_time
+                    for prior in record.get("events", [])
+                )
+                label = (
+                    "🛑 حد ضرر بخش باقی‌مانده خورد؛ تارگت اول قبلاً ثبت شده"
+                    if tp1_was_hit else "🛑 حد ضرر قبل از تارگت اول خورد"
+                )
+            else:
+                label = labels.get(name)
+            if label:
                 ambiguity = " (در همین کندل تارگت هم لمس شده؛ ترتیب دقیق داخل کندل مشخص نیست)" if event.get("ambiguous_same_candle") else ""
-                send_telegram(token, chat_id, labels[name] + "\\nارز: " + str(record["signal"]["symbol"]) + ambiguity,
+                send_telegram(token, chat_id, label + "\\nارز: " + str(record["signal"]["symbol"]) + ambiguity,
                               reply_to_message_id=int(anchor_id))
         if record.get("post_stop_tp1_reached") and not before["post_stop_tp1"]:
             send_telegram(token, chat_id, "ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.",
