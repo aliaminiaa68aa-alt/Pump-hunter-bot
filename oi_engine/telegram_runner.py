@@ -173,19 +173,25 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         _safe_int(watchlist[symbol].get("last_checked", 0)),
         _safe_int(watchlist[symbol]["pending_setup"].get("expires_at_close_time", 0)),
     ))
-    pending_slots = count if len(symbols) <= count else max(1, count // 2)
+    if len(symbols) <= count or len(pending_all) == len(symbols):
+        pending_slots = count
+    else:
+        pending_slots = max(1, count // 2)
     pending = pending_all[:pending_slots]
     selected = list(pending)
 
     remaining_slots = count - len(selected)
     hot = [
         symbol for symbol in ranked
-        if symbol not in selected
+        if symbol not in pending_all
         and _safe_float(watchlist[symbol].get("oi_priority_score", 0.0)) > 0.0
     ][:min(2, remaining_slots)]
     selected.extend(hot)
 
-    rotating = [symbol for symbol in ranked if symbol not in selected]
+    rotating = [
+        symbol for symbol in ranked
+        if symbol not in selected and symbol not in pending_all
+    ]
     rotating_slots = count - len(selected)
     rotating_selected = []
     if rotating_slots > 0 and rotating:
@@ -203,6 +209,15 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
             for offset in range(min(rotating_slots, len(rotating)))
         ]
         selected.extend(rotating_selected)
+
+    # If there are too few non-pending candidates to fill the batch, use the
+    # remaining slots for the next pending setups in their fair queue order.
+    if len(selected) < count:
+        for symbol in pending_all:
+            if symbol not in selected:
+                selected.append(symbol)
+                if len(selected) >= count:
+                    break
 
     next_cursor = rotating_selected[-1] if rotating_selected else last_scanned_symbol
     return {symbol: watchlist[symbol] for symbol in selected}, next_cursor
