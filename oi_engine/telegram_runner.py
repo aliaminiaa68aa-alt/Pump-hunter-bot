@@ -257,7 +257,7 @@ def summarize_scan_diagnostics(watchlist, scanned_batch):
 def blocked_by_active_symbol_trade(signal, outcome_journal: Dict[str, Any]) -> bool:
     """Allow at most one unresolved trade per symbol, regardless of side or engine."""
     symbol = str(signal.symbol).upper()
-    terminal_statuses = {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT"}
+    terminal_statuses = {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY"}
     for record in outcome_journal.get("trades", {}).values():
         prior_signal = record.get("signal", {})
         if str(prior_signal.get("symbol", "")).upper() != symbol:
