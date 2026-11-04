@@ -54,6 +54,17 @@ class SignalEngineTests(unittest.TestCase):
         self.assertTrue(any("حجم پایین است" in reason for reason in reasons))
         self.assertIsNone(evaluate_snapshot(snapshot))
 
+    def test_diagnostics_use_the_same_oi_and_volume_thresholds_as_live_entries(self):
+        snapshot = make_snapshot("LONG")
+        snapshot["oi_values"] = [100.0, 100.0, 100.2]  # +0.20%, live minimum is +0.15%.
+        snapshot["candles"][-1]["quote_volume"] = 105000.0  # 1.05x, live minimum.
+        snapshot["candles"][-1]["taker_buy_quote"] = 54600.0  # 52%, live minimum.
+        signal = evaluate_snapshot(snapshot)
+        self.assertIsNotNone(signal)
+        reasons = diagnose_snapshot(snapshot)
+        self.assertFalse(any("رشد OI کم است" in reason for reason in reasons))
+        self.assertFalse(any("حجم پایین است" in reason for reason in reasons))
+
     def test_signal_score_is_not_presented_as_win_probability(self):
         signal = evaluate_snapshot(make_snapshot("LONG"))
         message = format_signal(signal)
