@@ -36,6 +36,18 @@ class EntryGuardTests(unittest.TestCase):
         self.assertEqual(result["age_seconds"], 10.0)
         session.get.assert_called_once()
 
+    def test_selects_newest_trade_even_if_response_is_not_ordered(self):
+        response = Mock()
+        response.json.return_value = [
+            {"contract": "ABC_USDT", "price": "99.0", "create_time": 990},
+            {"contract": "ABC_USDT", "price": "100.1", "create_time": 1000},
+        ]
+        session = Mock()
+        session.get.return_value = response
+        result = fetch_gate_last_trade("ABCUSDT", session=session, now=1010)
+        self.assertEqual(result["price"], 100.1)
+        self.assertEqual(result["trade_time"], 1000)
+
     def test_stale_gate_trade_fails_closed(self):
         response = Mock()
         response.json.return_value = [{
