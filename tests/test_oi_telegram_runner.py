@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from oi_engine.signal_engine import Signal
 from oi_engine import telegram_runner
@@ -28,6 +28,9 @@ def sample_metrics():
 
 
 class FakeClient:
+    def get_crypto_asset_symbols(self):
+        return {"BTC", "ETH", "TEST", "NEW", "ABC", "XYZ", "OLD", "COIN", "PEND", "HOT"}
+
     def is_crypto_asset(self, base_asset):
         return True
 
