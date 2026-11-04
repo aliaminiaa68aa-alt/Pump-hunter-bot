@@ -271,20 +271,12 @@ def main() -> None:
                 send_telegram(token, chat_id, label + "\\nارز: " + str(record["signal"]["symbol"]) + result_pct + ambiguity,
                               reply_to_message_id=int(anchor_id))
         if record.get("post_stop_tp1_reached") and not before["post_stop_tp1"]:
-            signal = record["signal"]
-            side = str(signal.get("side", "LONG")).upper()
-            entry = float(signal.get("entry") or 0)
-            best_price = float(record.get("post_stop_best_price") or 0)
-            move_pct = (((best_price - entry) if side == "LONG" else (entry - best_price)) / entry * 100.0) if entry > 0 and best_price > 0 else 0.0
-            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.\\nحرکت قیمت از ورود: +{move_pct:.2f}%",
+            move_pct = float(record.get("post_stop_mfe_pct") or 0.0)
+            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.\\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
                           reply_to_message_id=int(anchor_id))
         if record.get("post_stop_tp2_reached") and not before["post_stop_tp2"]:
-            signal = record["signal"]
-            side = str(signal.get("side", "LONG")).upper()
-            entry = float(signal.get("entry") or 0)
-            best_price = float(record.get("post_stop_best_price") or 0)
-            move_pct = (((best_price - entry) if side == "LONG" else (entry - best_price)) / entry * 100.0) if entry > 0 and best_price > 0 else 0.0
-            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت دوم رسید.\\nحرکت قیمت از ورود: +{move_pct:.2f}%",
+            move_pct = float(record.get("post_stop_mfe_pct") or 0.0)
+            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت دوم رسید.\\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
                           reply_to_message_id=int(anchor_id))
     save_outcome_journal(outcome_journal)
     outcome_statuses = {}
