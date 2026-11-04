@@ -17,6 +17,10 @@ NON_CRYPTO_BASES = {
     # Tokenized equity and ETF contracts observed in the live OI source feed.
     "PLTR", "MSFT", "GEV", "ASTS", "NVO", "GDX", "LITE", "FWDI",
     "KLAC", "DJT", "MCD", "SOXS", "SNXX", "INTW", "XBI",
+    # Additional tokenized stock/ETF perpetuals seen in the feed or exchange notices.
+    "NET", "EWT", "CRDO", "QCOM", "SAMSUNG", "SAMSUNGEM", "GIGADEV", "CXMT",
+    "SKDD", "SKUU", "SKHYNIX", "RAM", "MRNA", "ZHONGJI", "HANMI",
+    "LGELECTRONICS", "NAVER", "KODEX200", "KO",
 }
 
 # Stablecoins are crypto assets, but are not suitable pump candidates.
