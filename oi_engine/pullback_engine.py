@@ -12,6 +12,38 @@ SETUP_LIFETIME_CANDLES = 4
 STOP_BUFFER_ATR = 0.15
 MAX_STOP_ATR = 1.50
 MIN_STOP_PCT = 0.20
+FLOW_LOOKBACK_CANDLES = 3
+
+
+def _ema(values: list[float], period: int) -> float:
+    """EMA over closed candles only; values are supplied oldest to newest."""
+    if not values:
+        return 0.0
+    alpha = 2.0 / (period + 1.0)
+    result = float(values[0])
+    for value in values[1:]:
+        result = alpha * float(value) + (1.0 - alpha) * result
+    return result
+
+
+def _recent_order_flow(candles: list[dict], side: str) -> tuple[float, float]:
+    """Return aggregate taker-buy ratio and directional candle-volume share."""
+    recent = candles[-FLOW_LOOKBACK_CANDLES:]
+    quote_total = sum(float(c.get("quote_volume", 0.0)) for c in recent)
+    taker_total = sum(float(c.get("taker_buy_quote", 0.0)) for c in recent)
+    if quote_total <= 0 or taker_total < 0 or taker_total > quote_total:
+        return 0.5, 0.0
+    directional_volume = 0.0
+    for candle in recent:
+        quote = float(candle.get("quote_volume", 0.0))
+        is_directional = (
+            float(candle["close"]) > float(candle["open"])
+            if side == "LONG" else
+            float(candle["close"]) < float(candle["open"])
+        )
+        if is_directional:
+            directional_volume += quote
+    return taker_total / quote_total, directional_volume / quote_total
 
 
 def advance_pullback_setup(
@@ -81,7 +113,15 @@ def advance_pullback_setup(
         touched = pullback_extreme <= level + tolerance
         valid_depth = pullback_extreme >= level - invalidation
         confirmed = float(last["close"]) > level and float(last["close"]) > float(last["open"])
-        directional_flow = float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.53
+        aggregate_flow, directional_candle_share = _recent_order_flow(candles, side)
+        closes = [float(c["close"]) for c in candles]
+        ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
+        directional_flow = (
+            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.53
+            and aggregate_flow >= 0.52
+            and directional_candle_share >= 0.55
+            and float(last["close"]) > ema20 > ema50
+        )
         stop = pullback_extreme - atr * STOP_BUFFER_ATR
         risk = float(last["close"]) - stop
     else:
@@ -93,7 +133,15 @@ def advance_pullback_setup(
         touched = pullback_extreme >= level - tolerance
         valid_depth = pullback_extreme <= level + invalidation
         confirmed = float(last["close"]) < level and float(last["close"]) < float(last["open"])
-        directional_flow = float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.47
+        aggregate_flow, directional_candle_share = _recent_order_flow(candles, side)
+        closes = [float(c["close"]) for c in candles]
+        ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
+        directional_flow = (
+            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.47
+            and aggregate_flow <= 0.48
+            and directional_candle_share >= 0.55
+            and float(last["close"]) < ema20 < ema50
+        )
         stop = pullback_extreme + atr * STOP_BUFFER_ATR
         risk = stop - float(last["close"])
 
@@ -102,7 +150,11 @@ def advance_pullback_setup(
     if not touched or not confirmed:
         return None, pending, "هنوز پولبک و کندل برگشتی معتبر شکل نگرفته"
     if not directional_flow:
-        return None, pending, "پولبک رخ داد اما جریان سفارش هنوز هم‌جهت نیست؛ setup تا پایان مهلت حفظ می‌شود و منتظر تأیید معتبر می‌مانیم"
+        return None, pending, (
+            f"پولبک رخ داد اما تأیید چندکندلی/EMA کامل نیست "
+            f"(جریان تجمیعی {aggregate_flow:.1%}، سهم کندل‌های هم‌جهت {directional_candle_share:.1%})؛ "
+            "setup تا پایان مهلت حفظ می‌شود"
+        )
 
     oi_change = (float(oi_values[-1]) / float(oi_values[-2]) - 1.0) * 100.0
     if oi_change < 0.35:
