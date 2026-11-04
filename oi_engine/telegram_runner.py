@@ -188,7 +188,8 @@ def summarize_scan_diagnostics(watchlist, scanned_batch):
         reason = str(record.get("reason", ""))
         if "Coinalyze رد کرد" in reason:
             reasons["coinalyze_rejected"] += 1
-        if "پولبک" in status or "پولبک" in reason or "شکست" in reason:
+        if (isinstance(record.get("pending_setup"), dict)
+                or status in {"منتظر پولبک و تأیید", "نزدیک شرایط ورود"}):
             reasons["pending_pullback"] += 1
         if any(word in reason for word in ("باطل", "منقضی", "مهلت پولبک", "setup پاک شد")):
             reasons["setup_invalidated_or_expired"] += 1
@@ -297,15 +298,15 @@ def main() -> None:
             if label:
                 ambiguity = " (در همین کندل تارگت هم لمس شده؛ ترتیب دقیق داخل کندل مشخص نیست)" if event.get("ambiguous_same_candle") else ""
                 result_pct = _event_price_result(record["signal"], event)
-                send_telegram(token, chat_id, label + "\\nارز: " + str(record["signal"]["symbol"]) + result_pct + ambiguity,
+                send_telegram(token, chat_id, label + "\nارز: " + str(record["signal"]["symbol"]) + result_pct + ambiguity,
                               reply_to_message_id=int(anchor_id))
         if record.get("post_stop_tp1_reached") and not before["post_stop_tp1"]:
             move_pct = float(record.get("post_stop_mfe_pct") or 0.0)
-            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.\\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
+            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
                           reply_to_message_id=int(anchor_id))
         if record.get("post_stop_tp2_reached") and not before["post_stop_tp2"]:
             move_pct = float(record.get("post_stop_mfe_pct") or 0.0)
-            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت دوم رسید.\\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
+            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت دوم رسید.\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
                           reply_to_message_id=int(anchor_id))
     save_outcome_journal(outcome_journal)
     outcome_statuses = {}
