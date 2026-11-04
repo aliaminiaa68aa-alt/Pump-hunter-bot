@@ -254,6 +254,21 @@ def summarize_scan_diagnostics(watchlist, scanned_batch):
     }
 
 
+def blocked_by_active_symbol_trade(signal, outcome_journal: Dict[str, Any]) -> bool:
+    """Allow at most one unresolved trade per symbol, regardless of side or engine."""
+    symbol = str(signal.symbol).upper()
+    terminal_statuses = {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT"}
+    for record in outcome_journal.get("trades", {}).values():
+        prior_signal = record.get("signal", {})
+        if str(prior_signal.get("symbol", "")).upper() != symbol:
+            continue
+        # OPEN and TP1_HIT both represent an unresolved position. Do not let
+        # another LONG/SHORT alert for this coin create a second simultaneous trade.
+        if str(record.get("status", "OPEN")).upper() not in terminal_statuses:
+            return True
+    return False
+
+
 def blocked_by_same_candle_opposite_stop(signal, outcome_journal: Dict[str, Any]) -> bool:
     """Block an opposite-side re-entry until a newer 15m candle has closed."""
     symbol = str(signal.symbol)
@@ -399,6 +414,17 @@ def main() -> None:
     )
     confirmed, scanned_batch = scan_watchlist(batch, client=client)
     watchlist.update(scanned_batch)
+
+    # One unresolved position per coin: suppress repeated same-side signals and
+    # opposite-side flips until the existing trade reaches SL, TP2, or timeout.
+    before_active_filter = len(confirmed)
+    confirmed = [
+        (signal, metrics) for signal, metrics in confirmed
+        if not blocked_by_active_symbol_trade(signal, outcome_journal)
+    ]
+    active_blocked = before_active_filter - len(confirmed)
+    if active_blocked:
+        print(f"Duplicate-symbol guard: suppressed {active_blocked} signal(s) because a trade is still active")
 
     # A stop and an opposite signal can be observed in the same runner cycle.
     # Require a strictly newer closed 15m candle before allowing the reversal.
