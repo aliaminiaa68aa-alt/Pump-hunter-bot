@@ -261,6 +261,44 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertIn("HOT2USDT", batch)
         self.assertEqual(len(batch), 8)
 
+    def test_many_pending_setups_do_not_starve_hot_or_new_symbols_and_rotate(self):
+        watchlist = {
+            **{
+                f"PEND{i}USDT": {
+                    "pending_setup": {"expires_at_close_time": 10000 + i},
+                    "last_checked": 0,
+                }
+                for i in range(8)
+            },
+            "HOT1USDT": {"oi_priority_score": 12.0},
+            "HOT2USDT": {"oi_priority_score": 9.0},
+            **{f"NEW{i}USDT": {} for i in range(6)},
+        }
+        first, cursor = telegram_runner.select_watchlist_batch(watchlist)
+        self.assertEqual(len(first), 8)
+        self.assertEqual(sum("pending_setup" in record for record in first.values()), 4)
+        self.assertIn("HOT1USDT", first)
+        self.assertIn("HOT2USDT", first)
+        self.assertTrue(any(symbol.startswith("NEW") for symbol in first))
+
+        for record in first.values():
+            if "pending_setup" in record:
+                record["last_checked"] = 100
+        second, _ = telegram_runner.select_watchlist_batch(watchlist, cursor)
+        second_pending = {
+            symbol for symbol, record in second.items()
+            if "pending_setup" in record
+        }
+        self.assertTrue(second_pending.intersection({"PEND4USDT", "PEND5USDT", "PEND6USDT", "PEND7USDT"}))
+
+    def test_watchlist_pruning_ignores_malformed_cached_records(self):
+        kept = telegram_runner.prune_watchlist({
+            "BTCUSDT": {"last_alert": "not-a-timestamp"},
+            "ETHUSDT": None,
+            "UVXYUSDT": {"last_alert": 999990},
+        }, now=1000000)
+        self.assertEqual(list(kept), ["BTCUSDT"])
+
     def test_twenty_four_symbols_are_all_scanned_once_across_three_batches(self):
         watchlist = {f"COIN{i:02d}USDT": {"status": "در حال رصد"} for i in range(24)}
         cursor = ""
