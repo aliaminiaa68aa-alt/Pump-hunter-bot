@@ -30,7 +30,7 @@ def add_retest(data, side):
     prev_close_time = candles[-1]["close_time"]
     if side == "LONG":
         row = {"open_time":prev_close_time+1,"open":100.6,"high":101.0,"low":100.4,
-               "close":100.8,"volume":1500,"quote_volume":200000,
+               "close":100.85,"volume":1500,"quote_volume":200000,
                "taker_buy_quote":120000,"close_time":prev_close_time+900000}
     else:
         row = {"open_time":prev_close_time+1,"open":99.9,"high":100.0,"low":99.3,
@@ -181,7 +181,7 @@ class PullbackEngineTests(unittest.TestCase):
         _, pending, _ = advance_pullback_setup(data, pending)
         self.assertAlmostEqual(pending["pullback_extreme"], 99.95)
         add_retest(data, "LONG")
-        data["candles"][-1].update({"low":100.35, "open":100.6, "close":100.8,
+        data["candles"][-1].update({"low":100.35, "open":100.6, "close":100.85,
                                     "taker_buy_quote":120000})
         signal, next_pending, _ = advance_pullback_setup(data, pending)
         self.assertIsNotNone(signal)
