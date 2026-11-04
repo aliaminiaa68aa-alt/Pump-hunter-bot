@@ -17,6 +17,7 @@ BASE_URL = "https://api.coinalyze.net/v1"
 INTERVAL = "15min"
 WINDOW_SECONDS = 6 * 60 * 60
 MAX_REQUESTS_PER_MINUTE = 40
+MAX_ALIGNED_CANDLE_AGE_SECONDS = 15 * 60
 
 
 class CoinalyzeError(RuntimeError):
@@ -214,6 +215,14 @@ class CoinalyzeClient:
         aligned = [
             row for row in closed_ohlcv if int(row["t"]) in oi_by_time
         ]
+        # A correctly aligned candle can still be too old to support a live entry.
+        # Match the Binance path's 15m staleness tolerance and fail closed when
+        # the newest common OHLCV/OI candle is older than one extra interval.
+        if aligned:
+            latest_aligned_close = int(aligned[-1]["t"]) + 15 * 60
+            aligned_age = end - latest_aligned_close
+            if aligned_age < 0 or aligned_age > MAX_ALIGNED_CANDLE_AGE_SECONDS:
+                aligned = []
         # Confirm OI and taker flow against the same latest CLOSED 15m candle.
         aligned_metrics = aligned[-3:]
         cadence_ok = (
