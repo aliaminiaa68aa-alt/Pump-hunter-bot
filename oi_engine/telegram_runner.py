@@ -153,7 +153,7 @@ def prune_watchlist_by_asset_category(watchlist: Dict[str, Any], client: Coinaly
 
 
 def _has_supported_perpetual(client: CoinalyzeClient, symbol: str) -> bool:
-    """Return False only for a genuine missing Binance perpetual mapping."""
+    """Reject non-crypto assets and symbols without a Binance USDT perpetual mapping."""
     from oi_engine.coinalyze_client import CoinalyzeError
     try:
         if not symbol.endswith("USDT") or not client.is_crypto_asset(symbol[:-4]):
