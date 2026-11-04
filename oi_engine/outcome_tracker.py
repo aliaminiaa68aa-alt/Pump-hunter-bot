@@ -113,6 +113,11 @@ def monitor_journal(
             try:
                 cursor = int(record.get("post_stop_last_checked_ms",
                                         int(record.get("exit_time_ms", now)) + 1))
+                # The monitor runs every five minutes, but only closed 15m candles
+                # can change an outcome. Avoid spending an API request between closes.
+                if now < cursor + INTERVAL_MS:
+                    record["post_stop_tracking"] = "ACTIVE"
+                    continue
                 candles = sorted(fetcher(signal["symbol"], cursor, min(now, post_stop_until)),
                                  key=lambda row: int(row[0]))
                 for candle in candles:
@@ -145,11 +150,14 @@ def monitor_journal(
         side = signal["side"]
         entry = float(signal["entry"])
         try:
-            candles = fetcher(
-                signal["symbol"],
-                int(record.get("last_checked_ms", int(signal["candle_close_time"]) + 1)),
-                now,
-            )
+            cursor = int(record.get("last_checked_ms", int(signal["candle_close_time"]) + 1))
+            # No closed candle can exist yet; keep timeout handling but skip the provider call.
+            if now < cursor + INTERVAL_MS:
+                if now - int(record["sent_at_ms"]) >= MAX_ACTIVE_HOURS * 60 * 60 * 1000:
+                    record["status"] = "TIMED_OUT"
+                    record["exit_time_ms"] = now
+                continue
+            candles = fetcher(signal["symbol"], cursor, now)
             candles = sorted(candles, key=lambda row: int(row[0]))
             for candle in candles:
                 open_ms = int(candle[0])

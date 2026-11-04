@@ -19,7 +19,7 @@ from oi_engine.outcome_tracker import make_trade_record, monitor_journal, summar
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
 OUTCOME_PATH = Path(".oi_state/trade_outcomes.json")
-MAX_WATCHLIST_SYMBOLS = 8  # Coinalyze throttles at 40/min; larger batches reduce watchlist revisit time
+MAX_WATCHLIST_SYMBOLS = 12  # Core Coinalyze scan uses 3 calls/symbol; keep below the 40/min limit with normal outcome load
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
 
 
@@ -304,7 +304,7 @@ def main() -> None:
             if recovered_side:
                 record["source_side"] = recovered_side
 
-    client = CoinalyzeClient(api_key=api_key)
+    client = CoinalyzeClient(api_key=api_key, include_optional_metrics=False)
     # Binance Futures returns HTTP 451 on this runner; use the same Coinalyze
     # 15m OHLCV fallback as the scanner so outcome tracking can still progress.
     previous_events = {

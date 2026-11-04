@@ -31,6 +31,7 @@ class CoinalyzeClient:
         session: Optional[requests.Session] = None,
         clock=time.time,
         sleeper=time.sleep,
+        include_optional_metrics: bool = True,
     ) -> None:
         self.api_key = (api_key or os.getenv("COINALYZE_API_KEY", "")).strip()
         if not self.api_key:
@@ -42,6 +43,7 @@ class CoinalyzeClient:
         })
         self.clock = clock
         self.sleeper = sleeper
+        self.include_optional_metrics = bool(include_optional_metrics)
         self.request_times = deque()
         self._future_markets_cache: Optional[List[dict]] = None
         self._binance_exchange_codes: Optional[set[str]] = None
@@ -177,21 +179,34 @@ class CoinalyzeClient:
         end = int(now if now is not None else self.clock())
         start = end - WINDOW_SECONDS
 
-        current_oi = self._first(self._get("open-interest", {
-            "symbols": market_symbol, "convert_to_usd": "true"
-        }), market_symbol)
+        # The live entry engine needs only current funding plus aligned OI/OHLCV.
+        # Supplementary OI USD, predicted funding, long/short and liquidation series
+        # remain available for diagnostics, but are opt-in to protect scan capacity.
+        current_oi = (
+            self._first(self._get("open-interest", {
+                "symbols": market_symbol, "convert_to_usd": "true"
+            }), market_symbol)
+            if self.include_optional_metrics else None
+        )
         current_funding = self._first(self._get("funding-rate", {
             "symbols": market_symbol
         }), market_symbol)
-        predicted_funding = self._first(self._get("predicted-funding-rate", {
-            "symbols": market_symbol
-        }), market_symbol)
+        predicted_funding = (
+            self._first(self._get("predicted-funding-rate", {
+                "symbols": market_symbol
+            }), market_symbol)
+            if self.include_optional_metrics else None
+        )
 
         oi_hist = self._history("open-interest-history", market_symbol, start, end)
-        # Historical funding is not used by entry confirmation or Telegram output.
-        # Skip this endpoint to reserve API quota for scanning more watchlist symbols.
-        lsr_hist = self._history("long-short-ratio-history", market_symbol, start, end)
-        liquidation_hist = self._history("liquidation-history", market_symbol, start, end)
+        lsr_hist = (
+            self._history("long-short-ratio-history", market_symbol, start, end)
+            if self.include_optional_metrics else []
+        )
+        liquidation_hist = (
+            self._history("liquidation-history", market_symbol, start, end)
+            if self.include_optional_metrics else []
+        )
         ohlcv_hist = self._history("ohlcv-history", market_symbol, start, end)
 
         oi_change_pct = None
@@ -333,7 +348,12 @@ class CoinalyzeClient:
                 "long_short_history_points": len(lsr_hist),
                 "liquidation_history_points": len(liquidation_hist),
                 "ohlcv_history_points": len(ohlcv_hist),
-                "complete": all((current_oi, current_funding, oi_change_pct is not None,
-                                 last_lsr, last_liq, last_ohlcv)),
+                "complete": bool(
+                    current_funding and oi_change_pct is not None and last_ohlcv
+                    and (
+                        not self.include_optional_metrics
+                        or (current_oi and last_lsr and last_liq)
+                    )
+                ),
             },
         }
