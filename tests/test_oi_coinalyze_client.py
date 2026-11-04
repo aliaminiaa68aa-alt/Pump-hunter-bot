@@ -164,5 +164,41 @@ class CoinalyzeClientTests(unittest.TestCase):
         self.assertTrue(result["data_quality"]["complete"])
 
 
+    def test_fetch_metrics_rejects_stale_aligned_market_snapshot(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"
+        start = 180000
+        candles = [
+            {"t": start + i * 900, "o": 100+i, "h": 102+i, "l": 99+i,
+             "c": 101+i, "v": 1000, "bv": 600}
+            for i in range(24)
+        ]
+        oi = [{"t": start + i * 900, "c": 100000 + i * 100}
+              for i in range(24)]
+
+        def fake_get(endpoint, params=None):
+            if endpoint == "open-interest":
+                return [{"symbol": "BTCUSDT_PERP.A", "value": 1000000}]
+            if endpoint == "funding-rate":
+                return [{"symbol": "BTCUSDT_PERP.A", "value": 0.0001}]
+            if endpoint == "predicted-funding-rate":
+                return [{"symbol": "BTCUSDT_PERP.A", "value": 0.0002}]
+            history = {
+                "open-interest-history": oi,
+                "long-short-ratio-history": [{"t": start, "r": 1.2}],
+                "liquidation-history": [{"t": start, "l": 1200, "s": 900}],
+                "ohlcv-history": candles,
+            }
+            return [{"symbol": "BTCUSDT_PERP.A", "history": history[endpoint]}]
+
+        client._get = fake_get
+        # The latest common candle closed at start + 24*900; the snapshot
+        # is 901 seconds old, just beyond the one-interval tolerance.
+        result = client.fetch_metrics("BTCUSDT", now=start + 24 * 900 + 901)
+        self.assertIsNone(result["market_snapshot"])
+        self.assertIsNone(result["oi_change_15m_window_pct"])
+        self.assertIsNone(result["taker_buy_ratio"])
+
+
 if __name__ == "__main__":
     unittest.main()
