@@ -208,6 +208,30 @@ def summarize_scan_diagnostics(watchlist, scanned_batch):
     }
 
 
+def blocked_by_same_candle_opposite_stop(signal, outcome_journal: Dict[str, Any]) -> bool:
+    """Block an opposite-side re-entry until a newer 15m candle has closed."""
+    symbol = str(signal.symbol)
+    side = str(signal.side).upper()
+    candle_close_time = int(signal.candle_close_time)
+    for record in outcome_journal.get("trades", {}).values():
+        prior_signal = record.get("signal", {})
+        if str(prior_signal.get("symbol", "")) != symbol:
+            continue
+        prior_side = str(prior_signal.get("side", "")).upper()
+        if prior_side == side or prior_side not in {"LONG", "SHORT"}:
+            continue
+        if record.get("status") != "CLOSED_SL":
+            continue
+        stop_times = [
+            int(event.get("time_ms", 0))
+            for event in record.get("events", [])
+            if event.get("event") == "SL"
+        ]
+        if stop_times and candle_close_time <= max(stop_times):
+            return True
+    return False
+
+
 def main() -> None:
     token = os.getenv("BOT_TOKEN")
     chat_id = os.getenv("CHAT_ID")
@@ -329,6 +353,13 @@ def main() -> None:
     )
     confirmed, scanned_batch = scan_watchlist(batch, client=client)
     watchlist.update(scanned_batch)
+
+    # A stop and an opposite signal can be observed in the same runner cycle.
+    # Require a strictly newer closed 15m candle before allowing the reversal.
+    confirmed = [
+        (signal, metrics) for signal, metrics in confirmed
+        if not blocked_by_same_candle_opposite_stop(signal, outcome_journal)
+    ]
 
     sent = 0
     for signal, metrics in confirmed:
