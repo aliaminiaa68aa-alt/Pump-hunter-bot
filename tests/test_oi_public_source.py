@@ -1,7 +1,7 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from oi_engine.telegram_public_source import _ChannelParser, poll_public_channel_alerts
+from oi_engine.telegram_public_source import _ChannelParser, fetch_public_channel_posts, poll_public_channel_alerts
 
 
 class PublicTelegramSourceTests(unittest.TestCase):
@@ -18,6 +18,64 @@ class PublicTelegramSourceTests(unittest.TestCase):
         self.assertEqual(parser.posts[0]["post_key"], "oi_detector/123")
         self.assertIn("TESTUSDT.P", parser.posts[0]["text"])
         self.assertEqual(parser.posts[0]["date"], "2026-11-02T10:00:00+00:00")
+
+    def test_fetch_public_channel_posts_uses_before_pagination_parameter(self):
+        response = Mock()
+        response.text = '''
+        <div class="tgme_widget_message js-widget_message" data-post="oi_detector/123">
+          <div class="tgme_widget_message_text">TESTUSDT +2%</div>
+          <div class="tgme_widget_message_footer"><time datetime="2026-11-02T10:00:00+00:00"></time></div>
+        </div>
+        '''
+        response.raise_for_status = Mock()
+        with patch("oi_engine.telegram_public_source.requests.get", return_value=response) as get:
+            posts = fetch_public_channel_posts("oi_detector", before=124)
+        self.assertEqual(posts[0]["message_id"], 123)
+        self.assertEqual(get.call_args.kwargs["params"], {"before": 124})
+
+    def test_backfills_unseen_posts_older_than_the_latest_preview_window(self):
+        def make_post(message_id):
+            return {
+                "message_id": message_id,
+                "date": 1000,
+                "text": f"COIN{message_id}USDT +2%",
+                "channel": "oi_detector",
+            }
+        latest = [make_post(i) for i in range(101, 121)]
+        older = [make_post(i) for i in range(81, 101)]
+        calls = []
+        def fetch(channel, timeout=20, before=None):
+            calls.append(before)
+            return latest if before is None else older
+
+        watchlist = {}
+        with patch("oi_engine.telegram_public_source.fetch_public_channel_posts", side_effect=fetch):
+            cursor, added = poll_public_channel_alerts("oi_detector", 90, watchlist, now=1000)
+        self.assertEqual(calls, [None, 101])
+        self.assertEqual(added, 30)
+        self.assertEqual(cursor, 120)
+        self.assertIn("COIN91USDT", watchlist)
+        self.assertIn("COIN120USDT", watchlist)
+        self.assertNotIn("COIN90USDT", watchlist)
+
+    def test_first_startup_backfills_recent_history_before_setting_cursor(self):
+        def make_post(message_id):
+            return {
+                "message_id": message_id,
+                "date": 1000,
+                "text": f"COIN{message_id}USDT +2%",
+                "channel": "oi_detector",
+            }
+        latest = [make_post(i) for i in range(101, 121)]
+        older = [make_post(i) for i in range(81, 101)]
+        def fetch(channel, timeout=20, before=None):
+            return latest if before is None else older
+        watchlist = {}
+        with patch("oi_engine.telegram_public_source.fetch_public_channel_posts", side_effect=fetch):
+            cursor, added = poll_public_channel_alerts("oi_detector", 0, watchlist, now=1000)
+        self.assertEqual(added, 40)
+        self.assertEqual(cursor, 120)
+        self.assertIn("COIN81USDT", watchlist)
 
     def test_new_public_post_is_added_and_cursor_moves(self):
         posts = [{

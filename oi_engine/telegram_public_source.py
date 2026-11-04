@@ -10,6 +10,8 @@ from oi_engine.alert_ingest import parse_forwarded_oi_alert, parse_oi_alert_dire
 
 PUBLIC_CHANNEL = "oi_detector"
 PUBLIC_CHANNEL_URL = "https://t.me/s/{channel}"
+MAX_BACKFILL_PAGES = 5
+MAX_ALERT_AGE_SECONDS = 6 * 60 * 60
 VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 
 class _ChannelParser(HTMLParser):
@@ -61,12 +63,13 @@ def _unix_time(value, fallback):
     except (TypeError, ValueError, OverflowError):
         return fallback
 
-def fetch_public_channel_posts(channel=PUBLIC_CHANNEL, timeout=20):
+def fetch_public_channel_posts(channel=PUBLIC_CHANNEL, timeout=20, before=None):
     slug = channel.lstrip("@").strip()
     if not re.fullmatch(r"[A-Za-z0-9_]{5,}", slug):
         raise ValueError("Invalid public Telegram channel username")
     response = requests.get(
         PUBLIC_CHANNEL_URL.format(channel=slug),
+        params={"before": int(before)} if before is not None else None,
         headers={"User-Agent": "Mozilla/5.0 (compatible; OIAlertMonitor/1.0)"},
         timeout=timeout,
     )
@@ -94,32 +97,64 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
     """Ingest every unseen recent alert; scan capacity is managed separately by the runner."""
     timestamp = int(now if now is not None else time.time())
     posts = fetch_public_channel_posts(channel)
+    backfill_pages = 0
+    oldest_visible_id = posts[0]["message_id"] if posts else 0
+    oldest_visible_date = posts[0]["date"] if posts else 0
+
+    # The public preview normally exposes only its latest 20 posts. If our saved
+    # cursor is older than that window, page backwards before advancing the cursor.
+    while (
+        posts
+        and oldest_visible_id > last_message_id
+        and oldest_visible_date >= timestamp - MAX_ALERT_AGE_SECONDS
+        and backfill_pages < MAX_BACKFILL_PAGES
+    ):
+        older_posts = fetch_public_channel_posts(channel, before=oldest_visible_id)
+        older_posts = [
+            post for post in older_posts
+            if post["message_id"] < oldest_visible_id
+        ]
+        if not older_posts:
+            break
+        posts.extend(older_posts)
+        backfill_pages += 1
+        oldest_post = min(older_posts, key=lambda post: post["message_id"])
+        oldest_visible_id = oldest_post["message_id"]
+        oldest_visible_date = oldest_post["date"]
+
+    # De-duplicate defensively in case the upstream preview overlaps page edges.
+    posts = sorted(
+        {post["message_id"]: post for post in posts}.values(),
+        key=lambda post: post["message_id"],
+    )
     unseen = [post for post in posts if post["message_id"] > last_message_id]
     next_id = last_message_id
     added = 0
     if unseen:
         print(
             f"Public Telegram poll: page_posts={len(posts)} unseen_posts={len(unseen)} "
-            f"cursor_before={last_message_id} page_range={posts[0]['message_id']}-{posts[-1]['message_id']}"
+            f"backfill_pages={backfill_pages} cursor_before={last_message_id} "
+            f"page_range={posts[0]['message_id']}-{posts[-1]['message_id']}"
         )
-        if last_message_id and posts[0]["message_id"] > last_message_id + 1:
+        if (oldest_visible_id > last_message_id
+                and oldest_visible_date >= timestamp - MAX_ALERT_AGE_SECONDS):
             print(
-                f"WARNING: public Telegram preview gap detected: "
-                f"cursor={last_message_id}, oldest_visible={posts[0]['message_id']}; "
-                "some older posts may have fallen outside the preview page"
+                f"WARNING: public Telegram backfill limit reached: cursor={last_message_id}, "
+                f"oldest_visible={oldest_visible_id}, pages={backfill_pages}; "
+                "older unseen posts may remain outside this scan"
             )
     else:
         newest = posts[-1]["message_id"] if posts else 0
         print(
             f"Public Telegram poll: page_posts={len(posts)} unseen_posts=0 "
-            f"cursor_before={last_message_id} newest_visible={newest}"
+            f"backfill_pages={backfill_pages} cursor_before={last_message_id} newest_visible={newest}"
         )
     for post in unseen:
         print(
             f"Public Telegram unseen post: message_id={post['message_id']} "
             f"text={post['text'][:220]!r}"
         )
-        if timestamp - post["date"] > 6 * 60 * 60 or post["date"] > timestamp + 60:
+        if timestamp - post["date"] > MAX_ALERT_AGE_SECONDS or post["date"] > timestamp + 60:
             print(
                 f"Public Telegram post skipped by age/time: message_id={post['message_id']} "
                 f"post_date={post['date']} now={timestamp}"
