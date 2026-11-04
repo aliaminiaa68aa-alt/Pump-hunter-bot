@@ -168,7 +168,7 @@ class TelegramRunnerTests(unittest.TestCase):
             self.assertEqual(len(journal["trades"]), 1)
             tracked = next(iter(journal["trades"].values()))
             self.assertEqual(tracked["signal"]["symbol"], "TESTUSDT")
-            self.assertEqual(tracked["status"], "OPEN")
+            self.assertEqual(tracked["status"], "WAITING_ENTRY")
             send.assert_called_once()
             self.assertIn("UNSPECIFIED:TESTUSDT:LONG", state.read_text(encoding="utf-8"))
             saved = json.loads(watch.read_text(encoding="utf-8"))
