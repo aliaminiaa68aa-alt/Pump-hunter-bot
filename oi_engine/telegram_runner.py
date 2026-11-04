@@ -339,6 +339,7 @@ def main() -> None:
         for event in record.get("events", [])[int(before["events"]):]:
             name = event.get("event")
             labels = {
+                "ENTRY": f"🟡 ورود فعال شد؛ قیمت اجرا: {float(event.get('fill', record['signal']['entry'])):.8g}",
                 "TP1": "🎯 تارگت اول خورد\n💰 مدیریت سرمایه: بخشی از سود را ذخیره کنید و حد ضررِ باقی‌مانده را به نقطه ورود منتقل کنید.",
                 "TP2": "🏆 تارگت دوم خورد؛ معامله به پایان رسید",
             }
