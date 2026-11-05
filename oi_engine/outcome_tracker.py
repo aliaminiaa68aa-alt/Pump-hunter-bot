@@ -358,7 +358,7 @@ def monitor_journal(
     # Bound history without deleting unresolved trades.
     closed = [
         (key, value) for key, value in trades.items()
-        if value.get("status") in {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY"}
+        if value.get("status") in {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE"}
     ]
     if len(closed) > 500:
         for key, _ in sorted(closed, key=lambda item: item[1].get("sent_at_ms", 0))[:-500]:
