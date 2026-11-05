@@ -259,6 +259,14 @@ def monitor_journal(
                     record["exit_time_ms"] = close_ms
                     break
 
+                if entry_intrabar:
+                    # The candle began before the limit entry was filled.
+                    # Its high/low may include pre-entry movement, so exclude
+                    # the whole candle from post-entry MFE/MAE statistics.
+                    record["entry_candle_excursion_ambiguous"] = True
+                    record["last_checked_ms"] = close_ms + 1
+                    continue
+
                 # OHLC cannot reveal intrabar order. If a stop and any target
                 # coexist in one candle, assume the stop happened first and do
                 # not credit later unknown intrabar extremes to MFE/MAE.
