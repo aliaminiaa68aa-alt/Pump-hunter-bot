@@ -185,8 +185,11 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
     # Thus an alert received between runs is guaranteed a first-pass slot.
     fresh_alerts = [
         symbol for symbol in symbols
-        if _safe_int(watchlist[symbol].get("last_alert", 0)) >
-           _safe_int(watchlist[symbol].get("last_checked", 0))
+        if _safe_int(
+            watchlist[symbol].get(
+                "last_alert_received_at", watchlist[symbol].get("last_alert", 0)
+            )
+        ) > _safe_int(watchlist[symbol].get("last_checked", 0))
     ]
     fresh_alerts.sort(
         key=lambda symbol: (
