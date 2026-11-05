@@ -117,6 +117,26 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         self.assertFalse(telegram_runner.blocked_by_active_symbol_trade(sample_signal(), journal))
 
+    def test_outcome_update_treats_read_timeout_as_delivery_unknown_without_retry(self):
+        with patch.object(
+            telegram_runner, "send_telegram",
+            side_effect=telegram_runner.requests.exceptions.ReadTimeout("read timed out"),
+        ) as send, patch("builtins.print") as log:
+            result = telegram_runner.send_outcome_update(
+                "token", "chat", "outcome update", reply_to_message_id=123
+            )
+        self.assertIsNone(result)
+        send.assert_called_once()
+        self.assertIn("delivery status is unknown", log.call_args.args[0])
+
+    def test_outcome_update_does_not_swallow_non_timeout_errors(self):
+        with patch.object(
+            telegram_runner, "send_telegram",
+            side_effect=RuntimeError("Telegram rejected message"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "rejected"):
+                telegram_runner.send_outcome_update("token", "chat", "outcome update")
+
     def test_trade_update_reports_signed_price_percentage_for_long_and_short(self):
         long_signal = {"entry": 100.0, "side": "LONG", "take_profit_1": 102.0, "stop_loss": 98.0}
         short_signal = {"entry": 100.0, "side": "SHORT", "take_profit_1": 98.0, "stop_loss": 102.0}
