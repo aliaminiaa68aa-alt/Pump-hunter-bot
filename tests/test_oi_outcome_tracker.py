@@ -91,6 +91,33 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(record["last_checked_ms"], cutoff + 60_000)
         self.assertEqual(record["status"], "OPEN")
 
+    def test_hybrid_replay_falls_back_when_minute_history_has_internal_gap(self):
+        journal, key = self.journal()
+        journal["trades"][key]["status"] = "OPEN"
+        journal["trades"][key]["entry_fill_price"] = 100.0
+        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000}]
+        now = 100_000_000
+        cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
+        fallback_calls = []
+
+        def fetch_15m(symbol, start, end):
+            fallback_calls.append((start, end))
+            return [candle(start, 101.1, 101.5, 101.0, 101.2)]
+
+        # The response is non-empty but skips one minute. It must not be
+        # trusted as a continuous replay window.
+        minute_rows = [
+            candle(cutoff, 101.1, 101.5, 101.0, 101.2),
+            candle(cutoff + 120_000, 101.1, 101.5, 101.0, 101.2),
+        ]
+        monitor_journal(
+            journal, now_ms=now, fetcher=fetch_15m,
+            micro_fetcher=lambda *_: minute_rows,
+        )
+        self.assertEqual(fallback_calls, [(900000, cutoff), (cutoff, now)])
+        self.assertEqual(journal["trades"][key]["status"], "OPEN")
+        self.assertEqual(journal["trades"][key]["last_checked_ms"], cutoff + 900_000)
+
     def test_hybrid_replay_falls_back_to_15m_when_minute_history_empty(self):
         journal, key = self.journal()
         journal["trades"][key]["status"] = "OPEN"
