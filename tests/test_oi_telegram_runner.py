@@ -105,6 +105,20 @@ class TelegramRunnerTests(unittest.TestCase):
         new_long = sample_signal()
         self.assertTrue(telegram_runner.blocked_by_active_symbol_trade(new_long, journal))
 
+    def test_ambiguous_entry_candle_does_not_block_new_signal_for_symbol(self):
+        journal = {
+            "trades": {
+                "ambiguous-long": {
+                    "status": "AMBIGUOUS_ENTRY_CANDLE",
+                    "signal": {"symbol": "TESTUSDT", "side": "LONG"},
+                    "events": [{"event": "AMBIGUOUS_ENTRY_CANDLE", "time_ms": 1000000}],
+                }
+            }
+        }
+        self.assertFalse(
+            telegram_runner.blocked_by_active_symbol_trade(sample_signal(), journal)
+        )
+
     def test_closed_trade_does_not_block_new_signal(self):
         journal = {
             "trades": {
