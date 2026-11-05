@@ -101,6 +101,7 @@ def monitor_journal(
 ) -> Dict[str, Any]:
     """Update active records using 1m replay when available, otherwise 15m candles."""
     now = int(now_ms if now_ms is not None else time.time() * 1000)
+    minimum_interval_ms = 60 * 1000 if micro_fetcher is not None else INTERVAL_MS
 
     def fetch_replay_candles(symbol: str, start_ms: int, end_ms: int) -> List[list]:
         """Use 15m history for older ranges and 1m for the recent retained window."""
@@ -150,9 +151,9 @@ def monitor_journal(
             try:
                 cursor = int(record.get("post_stop_last_checked_ms",
                                         int(record.get("exit_time_ms", now)) + 1))
-                # The monitor runs every five minutes, but only closed 15m candles
-                # can change an outcome. Avoid spending an API request between closes.
-                if now < cursor + INTERVAL_MS:
+                # Minute data can be checked after each closed minute; without it,
+                # retain the original 15m polling guard.
+                if now < cursor + minimum_interval_ms:
                     record["post_stop_tracking"] = "ACTIVE"
                     continue
                 candles = sorted(fetch_replay_candles(signal["symbol"], cursor, min(now, post_stop_until)),
