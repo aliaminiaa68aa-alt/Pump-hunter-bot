@@ -514,15 +514,15 @@ class TelegramRunnerTests(unittest.TestCase):
         # Remaining fresh alerts must lead the next batch. The batch may
         # also use its spare capacity for ordinary rotation candidates.
         self.assertEqual(
-            list(second)[:2], ["ALERT14USDT", "ALERT13USDT"]
+            list(second)[:2], ["ALERT2USDT", "ALERT1USDT"]
         )
         self.assertIn("PENDINGUSDT", second)
         self.assertLess(
-            list(second).index("ALERT14USDT"),
+            list(second).index("ALERT2USDT"),
             list(second).index("PENDINGUSDT"),
         )
         self.assertLess(
-            list(second).index("ALERT13USDT"),
+            list(second).index("ALERT1USDT"),
             list(second).index("PENDINGUSDT"),
         )
 
