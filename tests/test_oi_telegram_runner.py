@@ -475,6 +475,27 @@ class TelegramRunnerTests(unittest.TestCase):
         batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=1)
         self.assertEqual(list(batch), ["OLDER_POSTUSDT"])
 
+    def test_never_attempted_fresh_alert_precedes_failed_scan_retries(self):
+        watchlist = {
+            "FAILED_OLDUSDT": {
+                "last_alert_received_at": 1100,
+                "last_checked": 1000,
+                "last_attempted_at": 1050,
+            },
+            "NEVER_TRIEDUSDT": {
+                "last_alert_received_at": 1200,
+                "last_checked": 1000,
+                "last_attempted_at": 0,
+            },
+            "FAILED_NEWUSDT": {
+                "last_alert_received_at": 1300,
+                "last_checked": 1000,
+                "last_attempted_at": 1080,
+            },
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=1)
+        self.assertEqual(list(batch), ["NEVER_TRIEDUSDT"])
+
     def test_unscanned_fresh_alerts_keep_priority_on_following_cycles(self):
         watchlist = {
             f"ALERT{i}USDT": {"last_alert": 1000 + i, "last_checked": 0}
