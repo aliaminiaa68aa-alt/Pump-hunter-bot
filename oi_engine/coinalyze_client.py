@@ -15,7 +15,10 @@ import requests
 
 BASE_URL = "https://api.coinalyze.net/v1"
 INTERVAL = "15min"
-WINDOW_SECONDS = 6 * 60 * 60
+# The pullback engine requires 55 closed 15m candles for EMA50. Six hours only
+# provides 24 candles, so the fallback could never build a usable market snapshot.
+# Keep an 18h window (72 candles) to leave room for alignment and candle closure.
+WINDOW_SECONDS = 18 * 60 * 60
 MAX_REQUESTS_PER_MINUTE = 40
 MAX_ALIGNED_CANDLE_AGE_SECONDS = 15 * 60
 
