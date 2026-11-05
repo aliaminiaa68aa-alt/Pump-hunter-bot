@@ -13,6 +13,7 @@ import requests
 BASE_URL = "https://fapi.binance.com"
 INTERVAL_MS = 15 * 60 * 1000
 MAX_ACTIVE_HOURS = 96
+MAX_PENDING_ENTRY_HOURS = 1
 
 
 def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
@@ -155,7 +156,9 @@ def monitor_journal(
             cursor = int(record.get("last_checked_ms", int(signal["candle_close_time"]) + 1))
             # No closed candle can exist yet; keep timeout handling but skip the provider call.
             if now < cursor + INTERVAL_MS:
-                if now - int(record["sent_at_ms"]) >= MAX_ACTIVE_HOURS * 60 * 60 * 1000:
+                timeout_hours = (MAX_PENDING_ENTRY_HOURS if status == "WAITING_ENTRY"
+                                  else MAX_ACTIVE_HOURS)
+                if now - int(record["sent_at_ms"]) >= timeout_hours * 60 * 60 * 1000:
                     record["status"] = ("EXPIRED_NO_ENTRY" if status == "WAITING_ENTRY"
                                         else "TIMED_OUT")
                     record["exit_time_ms"] = now
@@ -291,7 +294,10 @@ def monitor_journal(
 
                 record["last_checked_ms"] = close_ms + 1
 
-            if now - int(record["sent_at_ms"]) >= MAX_ACTIVE_HOURS * 60 * 60 * 1000:
+            timeout_hours = (MAX_PENDING_ENTRY_HOURS
+                              if record.get("status") == "WAITING_ENTRY"
+                              else MAX_ACTIVE_HOURS)
+            if now - int(record["sent_at_ms"]) >= timeout_hours * 60 * 60 * 1000:
                 if record.get("status") not in {"CLOSED_SL", "CLOSED_TP2"}:
                     record["status"] = ("EXPIRED_NO_ENTRY"
                                         if record.get("status") == "WAITING_ENTRY"
