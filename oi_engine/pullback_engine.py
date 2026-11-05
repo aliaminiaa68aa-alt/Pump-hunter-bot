@@ -203,6 +203,13 @@ def advance_pullback_setup(
         level + atr * ENTRY_LIMIT_OFFSET_ATR if side == "LONG"
         else level - atr * ENTRY_LIMIT_OFFSET_ATR
     )
+    # A resting limit must be on the passive side of the current close:
+    # below market for LONG, above market for SHORT. Otherwise it would be
+    # marketable at signal time and defeat the wait-for-retest execution model.
+    confirmation_close = float(last["close"])
+    if ((side == "LONG" and entry >= confirmation_close)
+            or (side == "SHORT" and entry <= confirmation_close)):
+        return None, pending, "قیمت هنوز از ورود محدود عبور نکرده؛ برای جلوگیری از ورود فوری، منتظر حرکت/پولبک معتبر می‌مانیم"
     risk = entry - stop if side == "LONG" else stop - entry
     if risk <= 0:
         return None, None, "ساختار حد ضرر در سمت اشتباه ورود قرار گرفته؛ setup باطل شد"
