@@ -223,9 +223,9 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertTrue(record["tp1_candle_excursion_ambiguous"])
         self.assertEqual(record["status"], "TP1_HIT")
 
-    def test_trade_times_out_after_four_days(self):
+    def test_unfilled_entry_expires_after_one_hour(self):
         journal, key = self.journal()
-        monitor_journal(journal, now_ms=900000 + 96 * 60 * 60 * 1000,
+        monitor_journal(journal, now_ms=900000 + 60 * 60 * 1000,
                         fetcher=lambda *_: [])
         self.assertEqual(journal["trades"][key]["status"], "EXPIRED_NO_ENTRY")
 
