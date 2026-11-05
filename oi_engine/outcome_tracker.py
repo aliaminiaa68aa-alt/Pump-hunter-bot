@@ -100,9 +100,40 @@ def monitor_journal(
     micro_fetcher: Callable[[str, int, int], List[list]] | None = None,
 ) -> Dict[str, Any]:
     """Update active records using 1m replay when available, otherwise 15m candles."""
-    active_fetcher = micro_fetcher or fetcher
-    interval_ms = 60 * 1000 if micro_fetcher is not None else INTERVAL_MS
     now = int(now_ms if now_ms is not None else time.time() * 1000)
+
+    def fetch_replay_candles(symbol: str, start_ms: int, end_ms: int) -> List[list]:
+        """Use 15m history for older ranges and 1m for the recent retained window."""
+        if micro_fetcher is None:
+            return [list(row) + [INTERVAL_MS] for row in fetcher(symbol, start_ms, end_ms)]
+        # Coinalyze retains roughly 1,500-2,000 intraday points. Keep a margin
+        # and reserve the recent 1,400 minutes for precise one-minute replay.
+        cutoff = max(start_ms, ((end_ms - 1400 * 60 * 1000) // INTERVAL_MS) * INTERVAL_MS)
+        combined: List[list] = []
+        if cutoff > start_ms:
+            older = fetcher(symbol, start_ms, cutoff)
+            combined.extend(
+                list(row) + [INTERVAL_MS] for row in older
+                if int(row[0]) < cutoff
+            )
+        try:
+            recent = micro_fetcher(symbol, cutoff, end_ms)
+        except Exception:
+            recent = []
+        if recent:
+            combined.extend(
+                list(row) + [60 * 1000] for row in recent
+                if int(row[0]) >= cutoff
+            )
+        else:
+            # If minute history is unavailable for this range, retain coverage
+            # with 15m candles rather than silently leaving the trade untracked.
+            fallback = fetcher(symbol, cutoff, end_ms)
+            combined.extend(
+                list(row) + [INTERVAL_MS] for row in fallback
+                if int(row[0]) >= cutoff
+            )
+        return sorted(combined, key=lambda row: int(row[0]))
     trades = journal.setdefault("trades", {})
     for trade_id, record in list(trades.items()):
         status = record.get("status")
@@ -121,14 +152,15 @@ def monitor_journal(
                                         int(record.get("exit_time_ms", now)) + 1))
                 # The monitor runs every five minutes, but only closed 15m candles
                 # can change an outcome. Avoid spending an API request between closes.
-                if now < cursor + interval_ms:
+                if now < cursor + INTERVAL_MS:
                     record["post_stop_tracking"] = "ACTIVE"
                     continue
-                candles = sorted(active_fetcher(signal["symbol"], cursor, min(now, post_stop_until)),
+                candles = sorted(fetch_replay_candles(signal["symbol"], cursor, min(now, post_stop_until)),
                                  key=lambda row: int(row[0]))
                 for candle in candles:
                     open_ms = int(candle[0])
-                    close_ms = open_ms + interval_ms - 1
+                    candle_interval_ms = int(candle[6]) if len(candle) > 6 else INTERVAL_MS
+                    close_ms = open_ms + candle_interval_ms - 1
                     if close_ms >= now:
                         continue
                     high, low = float(candle[2]), float(candle[3])
@@ -166,7 +198,7 @@ def monitor_journal(
                                         else "TIMED_OUT")
                     record["exit_time_ms"] = now
                 continue
-            candles = active_fetcher(signal["symbol"], cursor, now)
+            candles = fetch_replay_candles(signal["symbol"], cursor, now)
             candles = sorted(candles, key=lambda row: int(row[0]))
             for candle in candles:
                 open_ms = int(candle[0])
