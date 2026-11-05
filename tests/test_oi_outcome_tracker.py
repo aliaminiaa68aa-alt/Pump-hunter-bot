@@ -67,6 +67,9 @@ class OutcomeTrackerTests(unittest.TestCase):
 
     def test_hybrid_replay_uses_15m_for_old_history_and_1m_for_recent(self):
         journal, key = self.journal()
+        journal["trades"][key]["status"] = "OPEN"
+        journal["trades"][key]["entry_fill_price"] = 100.0
+        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000}]
         now = 100_000_000
         cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
         calls = {"15m": [], "1m": []}
@@ -86,7 +89,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(calls["15m"][0][1], cutoff)
         self.assertEqual(calls["1m"], [(cutoff, now)])
         self.assertEqual(record["last_checked_ms"], cutoff + 60_000)
-        self.assertEqual(record["status"], "WAITING_ENTRY")
+        self.assertEqual(record["status"], "OPEN")
 
     def test_hybrid_replay_falls_back_to_15m_when_minute_history_empty(self):
         journal, key = self.journal()
@@ -102,7 +105,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         monitor_journal(journal, now_ms=now, fetcher=fetch_15m,
                         micro_fetcher=lambda *_: [])
         self.assertEqual(calls, [(900000, cutoff), (cutoff, now)])
-        self.assertEqual(journal["trades"][key]["status"], "WAITING_ENTRY")
+        self.assertEqual(journal["trades"][key]["status"], "OPEN")
 
     def test_long_moves_remaining_stop_to_entry_after_tp1(self):
         journal, key = self.journal("LONG")
