@@ -137,8 +137,11 @@ class CoinalyzeClientTests(unittest.TestCase):
         oi = [{"t": start + i * 900, "c": 100000 + i * 100}
               for i in range(60)]
         requested = []
+        history_ranges = []
         def fake_get(endpoint, params=None):
             requested.append(endpoint)
+            if endpoint in {"open-interest-history", "ohlcv-history"}:
+                history_ranges.append(params)
             if endpoint == "funding-rate":
                 return [{"symbol": "BTCUSDT_PERP.A", "value": 0.0001}]
             if endpoint == "open-interest-history":
@@ -150,6 +153,12 @@ class CoinalyzeClientTests(unittest.TestCase):
         client._get = fake_get
         result = client.fetch_metrics("BTCUSDT", now=start + 60 * 900)
         self.assertEqual(requested, ["funding-rate", "open-interest-history", "ohlcv-history"])
+        # The fallback must request enough 15m history for the EMA50 pullback engine.
+        self.assertEqual(len(history_ranges), 2)
+        self.assertTrue(all(
+            params["to"] - params["from"] >= 55 * 15 * 60
+            for params in history_ranges
+        ))
         self.assertIsNotNone(result["market_snapshot"])
         self.assertIsNone(result["current_open_interest_usd"])
         self.assertIsNone(result["predicted_funding_rate"])
