@@ -320,7 +320,7 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         "tp2_reached": 0, "ambiguous_stop_target": 0, "provider_errors": 0,
         "entry_touched": 0, "not_entered": 0, "entry_touched_decided": 0,
         "entry_touched_win_rate_pct": None,
-        "groups": {}, "by_engine_side": {},
+        "groups": {}, "by_engine_side": {}, "trade_details": [],
     }
     groups: Dict[str, List[dict]] = {}
     for record in trades:
@@ -383,6 +383,31 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
             report.setdefault("tp1_excursion_ambiguous", 0)
             report["tp1_excursion_ambiguous"] += 1
         groups.setdefault(outcome, []).append(metrics)
+        entry = float(signal.get("entry") or 0.0)
+        stop = float(signal.get("stop_loss") or 0.0)
+        risk_pct = abs(entry - stop) / entry * 100.0 if entry > 0 else None
+        report["trade_details"].append({
+            "trade_id": record.get("trade_id"),
+            "symbol": signal.get("symbol"),
+            "side": signal.get("side", "UNKNOWN"),
+            "status": status,
+            "entry": entry or None,
+            "stop_loss": stop or None,
+            "risk_pct": round(risk_pct, 4) if risk_pct is not None else None,
+            "atr_15m": signal.get("atr_15m"),
+            "stop_distance_atr": signal.get("stop_distance_atr"),
+            "setup_level": signal.get("setup_level"),
+            "pullback_extreme": signal.get("pullback_extreme"),
+            "ema20": signal.get("ema20"),
+            "ema50": signal.get("ema50"),
+            "entry_quality": signal.get("entry_quality"),
+            "movement_strength": signal.get("movement_strength"),
+            "mae_before_tp1_pct": record.get("mae_before_tp1_pct"),
+            "mfe_before_tp1_pct": record.get("mfe_before_tp1_pct"),
+            "post_stop_mfe_pct": record.get("post_stop_mfe_pct"),
+            "post_stop_tp1_reached": bool(record.get("post_stop_tp1_reached")),
+            "post_stop_tp2_reached": bool(record.get("post_stop_tp2_reached")),
+        })
         engine = str(signal.get("engine", signal.get("strategy", "UNSPECIFIED")))
         side = str(signal.get("side", "UNKNOWN"))
         key = f"{engine}:{side}"
@@ -395,7 +420,10 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         )
     for name, rows in groups.items():
         summary = {"count": len(rows)}
-        for field in ("movement_strength", "entry_quality", "mae_before_tp1_pct", "mfe_before_tp1_pct"):
+        for field in (
+            "movement_strength", "entry_quality", "mae_before_tp1_pct",
+            "mfe_before_tp1_pct", "atr_15m", "stop_distance_atr",
+        ):
             values = [float(row[field]) for row in rows if row.get(field) is not None]
             summary[field + "_avg"] = round(sum(values) / len(values), 2) if values else None
         report["groups"][name] = summary
