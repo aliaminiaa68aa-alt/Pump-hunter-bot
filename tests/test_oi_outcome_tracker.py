@@ -263,9 +263,10 @@ class OutcomeTrackerTests(unittest.TestCase):
         touched = [candle(900000, 101, 102, 99.5, 100.5)]
         monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: touched)
         record = journal["trades"][key]
-        self.assertEqual(record["status"], "TP1_HIT")
+        self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_CANDLE")
         self.assertEqual(record["entry_fill_price"], 100.0)
-        self.assertEqual(record["events"][0]["event"], "ENTRY")
+        self.assertEqual([event["event"] for event in record["events"]],
+                         ["ENTRY", "AMBIGUOUS_ENTRY_CANDLE"])
 
     def test_summary_recognizes_legacy_records_without_entry_events(self):
         legacy_sl = make_trade_record(signal(), {}, 900000)
