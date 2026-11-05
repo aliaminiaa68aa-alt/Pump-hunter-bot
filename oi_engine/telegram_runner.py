@@ -191,12 +191,14 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
             )
         ) > _safe_int(watchlist[symbol].get("last_checked", 0))
     ]
+    # Give never-attempted alerts their first pass before retrying alerts
+    # whose provider request failed. Then retry the oldest attempt first.
     fresh_alerts.sort(
         key=lambda symbol: (
-            _safe_int(watchlist[symbol].get("last_alert", 0)),
-            score(symbol),
-        ),
-        reverse=True,
+            _safe_int(watchlist[symbol].get("last_attempted_at", 0)),
+            -_safe_int(watchlist[symbol].get("last_alert_received_at", watchlist[symbol].get("last_alert", 0))),
+            -score(symbol),
+        )
     )
     selected = fresh_alerts[:count]
     remaining_slots = count - len(selected)
