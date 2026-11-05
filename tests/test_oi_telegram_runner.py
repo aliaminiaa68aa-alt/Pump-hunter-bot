@@ -459,6 +459,22 @@ class TelegramRunnerTests(unittest.TestCase):
         batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=3)
         self.assertEqual(list(batch), ["NEW2USDT", "NEW1USDT", "PENDINGUSDT"])
 
+    def test_recently_ingested_alert_is_fresh_even_if_source_post_is_older(self):
+        watchlist = {
+            "OLDER_POSTUSDT": {
+                "last_alert": 950,
+                "last_alert_received_at": 1100,
+                "last_checked": 1000,
+            },
+            "PENDINGUSDT": {
+                "pending_setup": {"expires_at_close_time": 2000},
+                "last_checked": 1050,
+            },
+            "HOTUSDT": {"oi_priority_score": 10.0, "last_checked": 1050},
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=1)
+        self.assertEqual(list(batch), ["OLDER_POSTUSDT"])
+
     def test_unscanned_fresh_alerts_keep_priority_on_following_cycles(self):
         watchlist = {
             f"ALERT{i}USDT": {"last_alert": 1000 + i, "last_checked": 0}
