@@ -328,7 +328,15 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         report["statuses"][status] = report["statuses"].get(status, 0) + 1
         events = sorted(record.get("events", []), key=lambda event: int(event.get("time_ms", 0)))
         names = [event.get("event") for event in events]
-        entered = "ENTRY" in names
+        # Older journal records predate explicit ENTRY events. A recorded
+        # TP/SL event or an active/closed trade status proves the entry was
+        # reached, so keep historical outcome statistics backward-compatible.
+        entered = (
+            "ENTRY" in names
+            or record.get("entry_fill_price") is not None
+            or any(name in {"SL", "TP1", "TP2"} for name in names)
+            or status in {"OPEN", "TP1_HIT", "CLOSED_SL", "CLOSED_TP2"}
+        )
         if entered:
             report["entry_touched"] += 1
         else:
