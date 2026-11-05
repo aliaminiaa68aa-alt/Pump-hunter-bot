@@ -169,6 +169,10 @@ class OutcomeTrackerTests(unittest.TestCase):
         record = make_trade_record(source, {}, 900000)
         record["status"] = "CLOSED_SL"
         record["entry_fill_price"] = 100.0
+        record["events"] = [
+            {"event": "ENTRY", "time_ms": 900000, "fill": 100.0},
+            {"event": "SL", "time_ms": 1800000, "fill": 98.0},
+        ]
         record["mae_before_tp1_pct"] = 2.0
         record["mfe_before_tp1_pct"] = 0.5
         report = summarize_outcomes({"trades": {record["trade_id"]: record}})
