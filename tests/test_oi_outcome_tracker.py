@@ -93,6 +93,9 @@ class OutcomeTrackerTests(unittest.TestCase):
 
     def test_hybrid_replay_falls_back_to_15m_when_minute_history_empty(self):
         journal, key = self.journal()
+        journal["trades"][key]["status"] = "OPEN"
+        journal["trades"][key]["entry_fill_price"] = 100.0
+        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000}]
         now = 100_000_000
         cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
         calls = []
