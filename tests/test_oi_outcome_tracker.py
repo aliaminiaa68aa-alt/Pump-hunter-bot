@@ -330,6 +330,22 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(record["mfe_pct"], 0.0)
         self.assertEqual(record["mae_pct"], 0.0)
 
+    def test_intrabar_entry_candle_without_exit_does_not_count_pre_entry_excursions(self):
+        journal, key = self.journal()
+        # Opens above the LONG limit, then trades through entry without
+        # touching either stop or target. Extremes before the fill are unknown.
+        one_minute = [candle(900000, 101, 101.5, 99.5, 100.5)]
+        monitor_journal(
+            journal, now_ms=960000, fetcher=lambda *_: [],
+            micro_fetcher=lambda *_: one_minute,
+        )
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "OPEN")
+        self.assertTrue(record["entry_candle_excursion_ambiguous"])
+        self.assertEqual(record["mfe_pct"], 0.0)
+        self.assertEqual(record["mae_pct"], 0.0)
+        self.assertEqual(record["last_checked_ms"], 960000)
+
     def test_entry_is_recorded_only_when_candle_reaches_level(self):
         journal, key = self.journal()
         touched = [candle(900000, 101, 102, 99.5, 100.5)]
