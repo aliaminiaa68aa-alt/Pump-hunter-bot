@@ -376,6 +376,8 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         metrics = {
             "movement_strength": signal.get("movement_strength"),
             "entry_quality": signal.get("entry_quality"),
+            "atr_15m": signal.get("atr_15m"),
+            "stop_distance_atr": signal.get("stop_distance_atr"),
             "mae_before_tp1_pct": record.get("mae_before_tp1_pct"),
             "mfe_before_tp1_pct": record.get("mfe_before_tp1_pct"),
         }
