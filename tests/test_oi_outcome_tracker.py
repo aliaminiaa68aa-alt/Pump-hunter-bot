@@ -65,6 +65,45 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(report["sl_before_tp1"], 0)
         self.assertEqual(report["tp1_before_sl"], 0)
 
+    def test_hybrid_replay_uses_15m_for_old_history_and_1m_for_recent(self):
+        journal, key = self.journal()
+        now = 100_000_000
+        cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
+        calls = {"15m": [], "1m": []}
+
+        def fetch_15m(symbol, start, end):
+            calls["15m"].append((start, end))
+            return [candle(900000, 101.1, 101.5, 101.0, 101.2)]
+
+        def fetch_1m(symbol, start, end):
+            calls["1m"].append((start, end))
+            return [candle(cutoff, 101.1, 101.5, 101.0, 101.2)]
+
+        monitor_journal(journal, now_ms=now, fetcher=fetch_15m,
+                        micro_fetcher=fetch_1m)
+        record = journal["trades"][key]
+        self.assertEqual(len(calls["15m"]), 1)
+        self.assertEqual(calls["15m"][0][1], cutoff)
+        self.assertEqual(calls["1m"], [(cutoff, now)])
+        self.assertEqual(record["last_checked_ms"], cutoff + 60_000)
+        self.assertEqual(record["status"], "WAITING_ENTRY")
+
+    def test_hybrid_replay_falls_back_to_15m_when_minute_history_empty(self):
+        journal, key = self.journal()
+        now = 100_000_000
+        cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
+        calls = []
+
+        def fetch_15m(symbol, start, end):
+            calls.append((start, end))
+            return [candle(900000, 101.1, 101.5, 101.0, 101.2),
+                    candle(cutoff, 101.1, 101.5, 101.0, 101.2)]
+
+        monitor_journal(journal, now_ms=now, fetcher=fetch_15m,
+                        micro_fetcher=lambda *_: [])
+        self.assertEqual(calls, [(900000, cutoff), (cutoff, now)])
+        self.assertEqual(journal["trades"][key]["status"], "WAITING_ENTRY")
+
     def test_long_moves_remaining_stop_to_entry_after_tp1(self):
         journal, key = self.journal("LONG")
         first = [candle(900000, 100, 103, 99.5, 102.5)]
