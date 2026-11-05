@@ -159,7 +159,7 @@ def advance_pullback_setup(
         directional_flow = (
             float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.485
             and aggregate_flow <= 0.495
-            and directional_candle_share >= 0.55
+            and directional_candle_share >= 0.50
             and float(last["close"]) < ema20 < ema50
         )
         stop = pullback_extreme + atr * STOP_BUFFER_ATR
