@@ -109,6 +109,34 @@ class PullbackEngineTests(unittest.TestCase):
             signal.setup_level - signal.atr_15m * 0.05,
         )
 
+    def test_long_limit_entry_must_be_below_confirmation_close(self):
+        data = snapshot("LONG")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "LONG")
+        data["candles"][-1].update({
+            "open":100.505, "high":100.55, "low":100.5,
+            "close":100.54, "quote_volume":200000,
+            "taker_buy_quote":120000,
+        })
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNone(signal)
+        self.assertIsNotNone(next_pending)
+        self.assertIn("ورود محدود", reason)
+
+    def test_short_limit_entry_must_be_above_confirmation_close(self):
+        data = snapshot("SHORT")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "SHORT")
+        data["candles"][-1].update({
+            "open":99.495, "high":99.5, "low":99.45,
+            "close":99.46, "quote_volume":200000,
+            "taker_buy_quote":80000,
+        })
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNone(signal)
+        self.assertIsNotNone(next_pending)
+        self.assertIn("ورود محدود", reason)
+
     def test_weak_order_flow_keeps_setup_alive_for_next_retest(self):
         data = snapshot("LONG")
         _, pending, _ = advance_pullback_setup(data)
