@@ -139,10 +139,10 @@ class CoinalyzeClient:
             return None
         return next((row for row in payload if row.get("symbol") == symbol), None)
 
-    def _history(self, endpoint: str, symbol: str, start: int, end: int) -> List[dict]:
+    def _history(self, endpoint: str, symbol: str, start: int, end: int, interval: str = INTERVAL) -> List[dict]:
         payload = self._get(endpoint, {
             "symbols": symbol,
-            "interval": INTERVAL,
+            "interval": interval,
             "from": start,
             "to": end,
         })
@@ -172,6 +172,26 @@ class CoinalyzeClient:
                 candles.append([
                     open_time, str(open_price), str(high), str(low), str(close), "0"
                 ])
+            except (KeyError, TypeError, ValueError, OverflowError):
+                continue
+        return sorted(candles, key=lambda item: int(item[0]))
+
+    def fetch_ohlcv_1m_candles(self, binance_symbol: str, start_ms: int, end_ms: int) -> List[list]:
+        """Fetch closed one-minute OHLCV candles for trade-outcome replay."""
+        market_symbol = self.resolve_market(binance_symbol)
+        history = self._history(
+            "ohlcv-history", market_symbol,
+            int(start_ms) // 1000, int(end_ms) // 1000, interval="1min",
+        )
+        candles = []
+        for row in history:
+            try:
+                open_time = int(row["t"]) * 1000
+                values = tuple(float(row[key]) for key in ("o", "h", "l", "c"))
+                open_price, high, low, close = values
+                if not all(math.isfinite(value) for value in values) or min(values) <= 0 or high < low:
+                    continue
+                candles.append([open_time, str(open_price), str(high), str(low), str(close), "0"])
             except (KeyError, TypeError, ValueError, OverflowError):
                 continue
         return sorted(candles, key=lambda item: int(item[0]))
