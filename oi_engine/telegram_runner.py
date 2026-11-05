@@ -372,7 +372,7 @@ def main() -> None:
     outcome_journal = monitor_journal(
         outcome_journal,
         fetcher=client.fetch_ohlcv_candles,
-        micro_fetcher=client.fetch_ohlcv_1m_candles,
+        micro_fetcher=getattr(client, "fetch_ohlcv_1m_candles", None),
     )
     for trade_id, record in outcome_journal.get("trades", {}).items():
         anchor_id = record.get("telegram_message_id")
