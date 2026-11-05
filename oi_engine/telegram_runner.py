@@ -123,6 +123,26 @@ def send_telegram(
     return int(result["message_id"]) if result.get("message_id") is not None else None
 
 
+def send_outcome_update(
+    token: str, chat_id: str, message: str,
+    reply_to_message_id: int | None = None,
+) -> int | None:
+    """Send a non-entry outcome update without failing a whole scan on an ambiguous timeout."""
+    try:
+        return send_telegram(
+            token, chat_id, message, reply_to_message_id=reply_to_message_id
+        )
+    except requests.exceptions.ReadTimeout:
+        # Telegram may have accepted the message before the response timed out.
+        # Do not retry blindly: that could create a duplicate reply. Confirmed
+        # entry alerts still use send_telegram directly and remain fail-closed.
+        print(
+            "WARNING: Telegram outcome update timed out; delivery status is unknown; "
+            "skipping retry to avoid a duplicate message"
+        )
+        return None
+
+
 def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[str, Any]:
     timestamp = int(now if now is not None else time.time())
     kept = {}
@@ -359,16 +379,16 @@ def main() -> None:
             if label:
                 ambiguity = " (در همین کندل تارگت هم لمس شده؛ ترتیب دقیق داخل کندل مشخص نیست)" if event.get("ambiguous_same_candle") else ""
                 result_pct = _event_price_result(record["signal"], event)
-                send_telegram(token, chat_id, label + "\nارز: " + str(record["signal"]["symbol"]) + result_pct + ambiguity,
-                              reply_to_message_id=int(anchor_id))
+                send_outcome_update(token, chat_id, label + "\nارز: " + str(record["signal"]["symbol"]) + result_pct + ambiguity,
+                                    reply_to_message_id=int(anchor_id))
         if record.get("post_stop_tp1_reached") and not before["post_stop_tp1"]:
             move_pct = float(record.get("post_stop_mfe_pct") or 0.0)
-            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
-                          reply_to_message_id=int(anchor_id))
+            send_outcome_update(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
+                                reply_to_message_id=int(anchor_id))
         if record.get("post_stop_tp2_reached") and not before["post_stop_tp2"]:
             move_pct = float(record.get("post_stop_mfe_pct") or 0.0)
-            send_telegram(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت دوم رسید.\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
-                          reply_to_message_id=int(anchor_id))
+            send_outcome_update(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت دوم رسید.\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
+                                reply_to_message_id=int(anchor_id))
     save_outcome_journal(outcome_journal)
     outcome_statuses = {}
     for trade in outcome_journal.get("trades", {}).values():
