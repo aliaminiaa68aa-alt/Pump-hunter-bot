@@ -151,7 +151,7 @@ def monitor_journal(
                 record["post_stop_error"] = f"{type(exc).__name__}: {exc}"
             continue
 
-        if status in {"CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY"}:
+        if status in {"CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE"}:
             continue
         side = signal["side"]
         entry = float(record.get("entry_fill_price") or signal["entry"])
@@ -174,12 +174,15 @@ def monitor_journal(
                 if close_ms >= now:
                     continue
                 event_names = {event["event"] for event in record.get("events", [])}
+                entry_intrabar = False
                 if record.get("status") == "WAITING_ENTRY":
                     entry_level = float(signal["entry"])
                     high, low, open_price = float(candle[2]), float(candle[3]), float(candle[1])
                     if not (low <= entry_level <= high):
                         record["last_checked_ms"] = close_ms + 1
                         continue
+                    entry_intrabar = (open_price > entry_level if side == "LONG"
+                                       else open_price < entry_level)
                     fill = (min(open_price, entry_level) if side == "LONG"
                             else max(open_price, entry_level))
                     record["entry_fill_price"] = fill
@@ -202,6 +205,16 @@ def monitor_journal(
                 stop_hit, tp1_hit, tp2_hit, stop_fill, tp1_fill, tp2_fill = _touches(
                     side, candle, active_signal
                 )
+                if entry_intrabar and (stop_hit or tp1_hit or tp2_hit):
+                    record["entry_candle_ambiguous"] = True
+                    record.setdefault("events", []).append({
+                        "event": "AMBIGUOUS_ENTRY_CANDLE", "time_ms": close_ms,
+                        "entry_fill": entry, "stop_touched": stop_hit,
+                        "tp1_touched": tp1_hit, "tp2_touched": tp2_hit,
+                    })
+                    record["status"] = "AMBIGUOUS_ENTRY_CANDLE"
+                    record["exit_time_ms"] = close_ms
+                    break
 
                 # OHLC cannot reveal intrabar order. If a stop and any target
                 # coexist in one candle, assume the stop happened first and do
@@ -355,7 +368,11 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         first_sl_ambiguous = (
             first_sl is not None and bool(events[first_sl].get("ambiguous_same_candle"))
         )
-        if first_sl_ambiguous:
+        if record.get("entry_candle_ambiguous"):
+            outcome = "ambiguous_entry_candle"
+            if entered:
+                report["entry_touched_decided"] += 0
+        elif first_sl_ambiguous:
             outcome = "ambiguous_stop_target"
             if entered:
                 report["entry_touched_decided"] += 1
