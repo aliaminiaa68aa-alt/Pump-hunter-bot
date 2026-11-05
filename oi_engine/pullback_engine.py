@@ -228,5 +228,7 @@ def advance_pullback_setup(
         funding_rate=float(snapshot.get("funding_rate", 0.0)),
         confidence=confidence, candle_close_time=close_time,
         movement_strength=movement_strength, entry_quality=entry_quality,
+        setup_level=level, atr_15m=atr, pullback_extreme=pullback_extreme,
+        ema20=ema20, ema50=ema50, stop_distance_atr=(risk / atr if atr > 0 else 0.0),
     )
     return signal, None, "پولبک و کندل برگشتی تأیید شدند"

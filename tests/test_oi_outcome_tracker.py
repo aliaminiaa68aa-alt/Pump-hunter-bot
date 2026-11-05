@@ -158,6 +158,32 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(record["status"], "WAITING_ENTRY")
         self.assertIn("provider unavailable", record["last_error"])
 
+    def test_trade_report_exposes_entry_and_stop_diagnostics(self):
+        source = signal()
+        source.update({
+            "movement_strength": 78, "entry_quality": 72,
+            "atr_15m": 1.25, "stop_distance_atr": 1.1,
+            "setup_level": 100.5, "pullback_extreme": 99.0,
+            "ema20": 101.0, "ema50": 100.0,
+        })
+        record = make_trade_record(source, {}, 900000)
+        record["status"] = "CLOSED_SL"
+        record["entry_fill_price"] = 100.0
+        record["events"] = [
+            {"event": "ENTRY", "time_ms": 900000, "fill": 100.0},
+            {"event": "SL", "time_ms": 1800000, "fill": 98.0},
+        ]
+        record["mae_before_tp1_pct"] = 2.0
+        record["mfe_before_tp1_pct"] = 0.5
+        report = summarize_outcomes({"trades": {record["trade_id"]: record}})
+        detail = report["trade_details"][0]
+        self.assertEqual(detail["side"], "LONG")
+        self.assertEqual(detail["entry_quality"], 72)
+        self.assertEqual(detail["stop_distance_atr"], 1.1)
+        self.assertEqual(detail["pullback_extreme"], 99.0)
+        self.assertEqual(detail["risk_pct"], 2.0)
+        self.assertEqual(report["groups"]["sl_before_tp1"]["stop_distance_atr_avg"], 1.1)
+
     def test_signal_scores_are_preserved_and_reported_by_outcome(self):
         source = signal()
         source.update({"movement_strength": 78, "entry_quality": 42, "engine": "OI"})
