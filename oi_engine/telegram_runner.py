@@ -172,39 +172,58 @@ def _has_supported_perpetual(client: CoinalyzeClient, symbol: str) -> bool:
 
 
 def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIST_SYMBOLS):
-    """Prioritize pending setups and strong OI while preserving fair queue rotation."""
+    """Scan newly alerted OI symbols first, then pending setups, hot OI and fair rotation."""
     symbols = list(watchlist)
     if not symbols:
         return {}, ""
+
     count = min(max(1, _safe_int(limit, MAX_WATCHLIST_SYMBOLS)), len(symbols))
-    ranked = sorted(
-        symbols,
-        key=lambda symbol: _safe_float(watchlist[symbol].get("oi_priority_score", 0.0)),
+    score = lambda symbol: _safe_float(watchlist[symbol].get("oi_priority_score", 0.0))
+
+    # A fresh OI alert must outrank even an older pending setup. last_alert is
+    # refreshed on every new source alert; last_checked is written after a scan.
+    # Thus an alert received between runs is guaranteed a first-pass slot.
+    fresh_alerts = [
+        symbol for symbol in symbols
+        if _safe_int(watchlist[symbol].get("last_alert", 0)) >
+           _safe_int(watchlist[symbol].get("last_checked", 0))
+    ]
+    fresh_alerts.sort(
+        key=lambda symbol: (
+            _safe_int(watchlist[symbol].get("last_alert", 0)),
+            score(symbol),
+        ),
         reverse=True,
     )
+    selected = fresh_alerts[:count]
+    remaining_slots = count - len(selected)
+    if remaining_slots <= 0:
+        return {symbol: watchlist[symbol] for symbol in selected}, last_scanned_symbol
 
-    # Pending setups are important, but must not consume the entire scan budget:
-    # otherwise fresh alerts can wait up to their one-hour setup expiry.
+    remaining = [symbol for symbol in symbols if symbol not in selected]
+    ranked = sorted(remaining, key=score, reverse=True)
+
+    # After every newly alerted symbol has received its first scan, revisit
+    # active pullbacks before routine candidates so valid setups are not missed.
     pending_all = [
-        symbol for symbol in symbols
+        symbol for symbol in remaining
         if isinstance(watchlist[symbol].get("pending_setup"), dict)
     ]
     pending_all.sort(key=lambda symbol: (
         _safe_int(watchlist[symbol].get("last_checked", 0)),
         _safe_int(watchlist[symbol]["pending_setup"].get("expires_at_close_time", 0)),
     ))
-    if len(symbols) <= count or len(pending_all) == len(symbols):
-        pending_slots = count
+    if len(remaining) <= remaining_slots or len(pending_all) == len(remaining):
+        pending_slots = remaining_slots
     else:
-        pending_slots = max(1, count // 2)
+        pending_slots = max(1, remaining_slots // 2)
     pending = pending_all[:pending_slots]
-    selected = list(pending)
+    selected.extend(pending)
 
     remaining_slots = count - len(selected)
     hot = [
         symbol for symbol in ranked
-        if symbol not in pending_all
-        and _safe_float(watchlist[symbol].get("oi_priority_score", 0.0)) > 0.0
+        if symbol not in pending_all and score(symbol) > 0.0
     ][:min(2, remaining_slots)]
     selected.extend(hot)
 
@@ -215,8 +234,6 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
     rotating_slots = count - len(selected)
     rotating_selected = []
     if rotating_slots > 0 and rotating:
-        # The cursor may itself be a pending or hot symbol. Find its position in
-        # the full ranking, then resume with the next eligible rotating symbol.
         rank_position = {symbol: index for index, symbol in enumerate(ranked)}
         cursor_position = rank_position.get(last_scanned_symbol, -1)
         start = next(
@@ -230,8 +247,6 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         ]
         selected.extend(rotating_selected)
 
-    # If there are too few non-pending candidates to fill the batch, use the
-    # remaining slots for the next pending setups in their fair queue order.
     if len(selected) < count:
         for symbol in pending_all:
             if symbol not in selected:
@@ -241,7 +256,6 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
 
     next_cursor = rotating_selected[-1] if rotating_selected else last_scanned_symbol
     return {symbol: watchlist[symbol] for symbol in selected}, next_cursor
-
 
 def summarize_scan_diagnostics(watchlist, scanned_batch):
     """Build compact counters explaining where the current scan batch stands."""
