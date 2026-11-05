@@ -13,6 +13,7 @@ import requests
 BASE_URL = "https://fapi.binance.com"
 INTERVAL_MS = 15 * 60 * 1000
 MAX_ACTIVE_HOURS = 96
+MAX_PENDING_ENTRY_HOURS = 1
 
 
 def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
@@ -96,9 +97,53 @@ def monitor_journal(
     journal: Dict[str, Any],
     now_ms: int | None = None,
     fetcher: Callable[[str, int, int], List[list]] = _fetch_klines,
+    micro_fetcher: Callable[[str, int, int], List[list]] | None = None,
 ) -> Dict[str, Any]:
-    """Update active records; provider failures are retained per trade, not fatal."""
+    """Update active records using 1m replay when available, otherwise 15m candles."""
     now = int(now_ms if now_ms is not None else time.time() * 1000)
+    minimum_interval_ms = 60 * 1000 if micro_fetcher is not None else INTERVAL_MS
+
+    def fetch_replay_candles(symbol: str, start_ms: int, end_ms: int) -> List[list]:
+        """Use 15m history for older ranges and 1m for the recent retained window."""
+        if micro_fetcher is None:
+            return [list(row) + [INTERVAL_MS] for row in fetcher(symbol, start_ms, end_ms)]
+        # Coinalyze retains roughly 1,500-2,000 intraday points. Keep a margin
+        # and reserve the recent 1,400 minutes for precise one-minute replay.
+        cutoff = max(start_ms, ((end_ms - 1400 * 60 * 1000) // INTERVAL_MS) * INTERVAL_MS)
+        combined: List[list] = []
+        if cutoff > start_ms:
+            older = fetcher(symbol, start_ms, cutoff)
+            combined.extend(
+                list(row) + [INTERVAL_MS] for row in older
+                if int(row[0]) < cutoff
+            )
+        try:
+            recent = micro_fetcher(symbol, cutoff, end_ms)
+        except Exception:
+            recent = []
+        minute_rows = sorted(
+            (list(row) for row in recent if int(row[0]) >= cutoff),
+            key=lambda row: int(row[0]),
+        ) if recent else []
+        # A non-empty response is not necessarily complete. A hole in the
+        # minute sequence could hide a stop/target touch, so do not replay a
+        # partial high-resolution window as if it were continuous.
+        has_minute_gap = any(
+            int(current[0]) - int(previous[0]) != 60 * 1000
+            for previous, current in zip(minute_rows, minute_rows[1:])
+        )
+        if minute_rows and not has_minute_gap:
+            combined.extend(row + [60 * 1000] for row in minute_rows)
+        else:
+            # Fall back for the whole recent window if minute history is empty
+            # or internally discontinuous; mixing partial 1m with 15m could
+            # double-count or misorder the same price action.
+            fallback = fetcher(symbol, cutoff, end_ms)
+            combined.extend(
+                list(row) + [INTERVAL_MS] for row in fallback
+                if int(row[0]) >= cutoff
+            )
+        return sorted(combined, key=lambda row: int(row[0]))
     trades = journal.setdefault("trades", {})
     for trade_id, record in list(trades.items()):
         status = record.get("status")
@@ -115,16 +160,17 @@ def monitor_journal(
             try:
                 cursor = int(record.get("post_stop_last_checked_ms",
                                         int(record.get("exit_time_ms", now)) + 1))
-                # The monitor runs every five minutes, but only closed 15m candles
-                # can change an outcome. Avoid spending an API request between closes.
-                if now < cursor + INTERVAL_MS:
+                # Minute data can be checked after each closed minute; without it,
+                # retain the original 15m polling guard.
+                if now < cursor + minimum_interval_ms:
                     record["post_stop_tracking"] = "ACTIVE"
                     continue
-                candles = sorted(fetcher(signal["symbol"], cursor, min(now, post_stop_until)),
+                candles = sorted(fetch_replay_candles(signal["symbol"], cursor, min(now, post_stop_until)),
                                  key=lambda row: int(row[0]))
                 for candle in candles:
                     open_ms = int(candle[0])
-                    close_ms = open_ms + INTERVAL_MS - 1
+                    candle_interval_ms = int(candle[6]) if len(candle) > 6 else INTERVAL_MS
+                    close_ms = open_ms + candle_interval_ms - 1
                     if close_ms >= now:
                         continue
                     high, low = float(candle[2]), float(candle[3])
@@ -147,33 +193,39 @@ def monitor_journal(
                 record["post_stop_error"] = f"{type(exc).__name__}: {exc}"
             continue
 
-        if status in {"CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY"}:
+        if status in {"CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE"}:
             continue
         side = signal["side"]
         entry = float(record.get("entry_fill_price") or signal["entry"])
         try:
             cursor = int(record.get("last_checked_ms", int(signal["candle_close_time"]) + 1))
             # No closed candle can exist yet; keep timeout handling but skip the provider call.
-            if now < cursor + INTERVAL_MS:
-                if now - int(record["sent_at_ms"]) >= MAX_ACTIVE_HOURS * 60 * 60 * 1000:
+            if now < cursor + minimum_interval_ms:
+                timeout_hours = (MAX_PENDING_ENTRY_HOURS if status == "WAITING_ENTRY"
+                                  else MAX_ACTIVE_HOURS)
+                if now - int(record["sent_at_ms"]) >= timeout_hours * 60 * 60 * 1000:
                     record["status"] = ("EXPIRED_NO_ENTRY" if status == "WAITING_ENTRY"
                                         else "TIMED_OUT")
                     record["exit_time_ms"] = now
                 continue
-            candles = fetcher(signal["symbol"], cursor, now)
+            candles = fetch_replay_candles(signal["symbol"], cursor, now)
             candles = sorted(candles, key=lambda row: int(row[0]))
             for candle in candles:
                 open_ms = int(candle[0])
-                close_ms = open_ms + INTERVAL_MS - 1
+                candle_interval_ms = int(candle[6]) if len(candle) > 6 else INTERVAL_MS
+                close_ms = open_ms + candle_interval_ms - 1
                 if close_ms >= now:
                     continue
                 event_names = {event["event"] for event in record.get("events", [])}
+                entry_intrabar = False
                 if record.get("status") == "WAITING_ENTRY":
                     entry_level = float(signal["entry"])
                     high, low, open_price = float(candle[2]), float(candle[3]), float(candle[1])
                     if not (low <= entry_level <= high):
                         record["last_checked_ms"] = close_ms + 1
                         continue
+                    entry_intrabar = (open_price > entry_level if side == "LONG"
+                                       else open_price < entry_level)
                     fill = (min(open_price, entry_level) if side == "LONG"
                             else max(open_price, entry_level))
                     record["entry_fill_price"] = fill
@@ -196,6 +248,24 @@ def monitor_journal(
                 stop_hit, tp1_hit, tp2_hit, stop_fill, tp1_fill, tp2_fill = _touches(
                     side, candle, active_signal
                 )
+                if entry_intrabar and (stop_hit or tp1_hit or tp2_hit):
+                    record["entry_candle_ambiguous"] = True
+                    record.setdefault("events", []).append({
+                        "event": "AMBIGUOUS_ENTRY_CANDLE", "time_ms": close_ms,
+                        "entry_fill": entry, "stop_touched": stop_hit,
+                        "tp1_touched": tp1_hit, "tp2_touched": tp2_hit,
+                    })
+                    record["status"] = "AMBIGUOUS_ENTRY_CANDLE"
+                    record["exit_time_ms"] = close_ms
+                    break
+
+                if entry_intrabar:
+                    # The candle began before the limit entry was filled.
+                    # Its high/low may include pre-entry movement, so exclude
+                    # the whole candle from post-entry MFE/MAE statistics.
+                    record["entry_candle_excursion_ambiguous"] = True
+                    record["last_checked_ms"] = close_ms + 1
+                    continue
 
                 # OHLC cannot reveal intrabar order. If a stop and any target
                 # coexist in one candle, assume the stop happened first and do
@@ -291,7 +361,10 @@ def monitor_journal(
 
                 record["last_checked_ms"] = close_ms + 1
 
-            if now - int(record["sent_at_ms"]) >= MAX_ACTIVE_HOURS * 60 * 60 * 1000:
+            timeout_hours = (MAX_PENDING_ENTRY_HOURS
+                              if record.get("status") == "WAITING_ENTRY"
+                              else MAX_ACTIVE_HOURS)
+            if now - int(record["sent_at_ms"]) >= timeout_hours * 60 * 60 * 1000:
                 if record.get("status") not in {"CLOSED_SL", "CLOSED_TP2"}:
                     record["status"] = ("EXPIRED_NO_ENTRY"
                                         if record.get("status") == "WAITING_ENTRY"
@@ -302,7 +375,7 @@ def monitor_journal(
     # Bound history without deleting unresolved trades.
     closed = [
         (key, value) for key, value in trades.items()
-        if value.get("status") in {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY"}
+        if value.get("status") in {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE"}
     ]
     if len(closed) > 500:
         for key, _ in sorted(closed, key=lambda item: item[1].get("sent_at_ms", 0))[:-500]:
@@ -346,7 +419,9 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         first_sl_ambiguous = (
             first_sl is not None and bool(events[first_sl].get("ambiguous_same_candle"))
         )
-        if first_sl_ambiguous:
+        if record.get("entry_candle_ambiguous"):
+            outcome = "ambiguous_entry_candle"
+        elif first_sl_ambiguous:
             outcome = "ambiguous_stop_target"
             if entered:
                 report["entry_touched_decided"] += 1

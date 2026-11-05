@@ -80,6 +80,20 @@ class CoinalyzeClientTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0][:5], [180000000, "100.0", "105.0", "98.0", "103.0"])
 
+    def test_fetch_ohlcv_1m_candles_requests_one_minute_interval(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"
+        seen = {}
+        def history(endpoint, symbol, start, end, interval="15min"):
+            seen.update({"endpoint": endpoint, "symbol": symbol, "start": start,
+                         "end": end, "interval": interval})
+            return [{"t": 180000, "o": "100", "h": "102", "l": "99", "c": "101"}]
+        client._history = history
+        rows = client.fetch_ohlcv_1m_candles("BTCUSDT", 180000000, 180060000)
+        self.assertEqual(seen["interval"], "1min")
+        self.assertEqual(seen["endpoint"], "ohlcv-history")
+        self.assertEqual(rows[0][:5], [180000000, "100.0", "102.0", "99.0", "101.0"])
+
     def test_fetch_metrics_builds_closed_15m_market_snapshot(self):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
         client.resolve_market = lambda symbol: "BTCUSDT_PERP.A"

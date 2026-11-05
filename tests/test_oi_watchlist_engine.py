@@ -68,6 +68,18 @@ class WatchlistTests(unittest.TestCase):
         self.assertIn("Coinalyze 15m fallback", updated["ABCUSDT"]["data_source"])
         self.assertNotIn("market_snapshot", updated["ABCUSDT"]["coinalyze"])
 
+    def test_failed_market_scan_does_not_consume_fresh_alert_priority(self):
+        with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                   side_effect=__import__("oi_engine.signal_engine", fromlist=["MarketDataError"]).MarketDataError("temporary provider failure")):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {"last_alert_received_at": 900, "last_checked": 800}},
+                FakeClient(metrics()), now=1000
+            )
+        self.assertEqual(found, [])
+        self.assertEqual(updated["ABCUSDT"]["last_attempted_at"], 1000)
+        self.assertEqual(updated["ABCUSDT"]["last_checked"], 800)
+        self.assertEqual(updated["ABCUSDT"]["status"], "خطای دریافت داده")
+
     def test_signal_message_is_compact_and_keeps_actionable_fields(self):
         message = format_confirmed_signal(signal(), metrics())
         self.assertIn("<b>LONG</b>", message)

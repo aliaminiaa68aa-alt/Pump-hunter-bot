@@ -205,6 +205,10 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
             **existing,
             "first_seen": existing.get("first_seen", post["date"]),
             "last_alert": post["date"],
+            # Keep ingestion time separate from the source post timestamp. A
+            # post can be several minutes old when polled, while last_checked
+            # may be newer; comparing those clocks would silently skip a fresh alert.
+            "last_alert_received_at": timestamp,
             "source": "telegram_public_preview",
             "source_channel": post["channel"],
             "source_message_id": post["message_id"],

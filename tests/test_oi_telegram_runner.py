@@ -105,6 +105,20 @@ class TelegramRunnerTests(unittest.TestCase):
         new_long = sample_signal()
         self.assertTrue(telegram_runner.blocked_by_active_symbol_trade(new_long, journal))
 
+    def test_ambiguous_entry_candle_does_not_block_new_signal_for_symbol(self):
+        journal = {
+            "trades": {
+                "ambiguous-long": {
+                    "status": "AMBIGUOUS_ENTRY_CANDLE",
+                    "signal": {"symbol": "TESTUSDT", "side": "LONG"},
+                    "events": [{"event": "AMBIGUOUS_ENTRY_CANDLE", "time_ms": 1000000}],
+                }
+            }
+        }
+        self.assertFalse(
+            telegram_runner.blocked_by_active_symbol_trade(sample_signal(), journal)
+        )
+
     def test_closed_trade_does_not_block_new_signal(self):
         journal = {
             "trades": {
@@ -444,6 +458,87 @@ class TelegramRunnerTests(unittest.TestCase):
             saved = json.loads(watch_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["symbols"]["BTCUSDT"]["source_side"], "LONG")
             self.assertNotIn("source_side", saved["symbols"]["ETHUSDT"])
+
+
+    def test_fresh_oi_alerts_precede_pending_and_hot_candidates(self):
+        watchlist = {
+            "PENDINGUSDT": {
+                "pending_setup": {"expires_at_close_time": 1000},
+                "last_checked": 900,
+            },
+            "HOTUSDT": {"oi_priority_score": 20.0, "last_checked": 900},
+            "NEW1USDT": {"last_alert": 1200, "last_checked": 0, "oi_priority_score": 1.0},
+            "NEW2USDT": {"last_alert": 1300, "last_checked": 0, "oi_priority_score": 0.0},
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=3)
+        self.assertEqual(list(batch), ["NEW2USDT", "NEW1USDT", "PENDINGUSDT"])
+
+    def test_recently_ingested_alert_is_fresh_even_if_source_post_is_older(self):
+        watchlist = {
+            "OLDER_POSTUSDT": {
+                "last_alert": 950,
+                "last_alert_received_at": 1100,
+                "last_checked": 1000,
+            },
+            "PENDINGUSDT": {
+                "pending_setup": {"expires_at_close_time": 2000},
+                "last_checked": 1050,
+            },
+            "HOTUSDT": {"oi_priority_score": 10.0, "last_checked": 1050},
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=1)
+        self.assertEqual(list(batch), ["OLDER_POSTUSDT"])
+
+    def test_never_attempted_fresh_alert_precedes_failed_scan_retries(self):
+        watchlist = {
+            "FAILED_OLDUSDT": {
+                "last_alert_received_at": 1100,
+                "last_checked": 1000,
+                "last_attempted_at": 1050,
+            },
+            "NEVER_TRIEDUSDT": {
+                "last_alert_received_at": 1200,
+                "last_checked": 1000,
+                "last_attempted_at": 0,
+            },
+            "FAILED_NEWUSDT": {
+                "last_alert_received_at": 1300,
+                "last_checked": 1000,
+                "last_attempted_at": 1080,
+            },
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=1)
+        self.assertEqual(list(batch), ["NEVER_TRIEDUSDT"])
+
+    def test_unscanned_fresh_alerts_keep_priority_on_following_cycles(self):
+        watchlist = {
+            f"ALERT{i}USDT": {"last_alert": 1000 + i, "last_checked": 0}
+            for i in range(1, 15)
+        }
+        watchlist["PENDINGUSDT"] = {
+            "pending_setup": {"expires_at_close_time": 500},
+            "last_checked": 900,
+        }
+        first, cursor = telegram_runner.select_watchlist_batch(watchlist, limit=12)
+        self.assertEqual(len(first), 12)
+        self.assertTrue(all(symbol.startswith("ALERT") for symbol in first))
+        for record in first.values():
+            record["last_checked"] = 2000
+        second, _ = telegram_runner.select_watchlist_batch(watchlist, cursor, limit=12)
+        # Remaining fresh alerts must lead the next batch. The batch may
+        # also use its spare capacity for ordinary rotation candidates.
+        self.assertEqual(
+            list(second)[:2], ["ALERT2USDT", "ALERT1USDT"]
+        )
+        self.assertIn("PENDINGUSDT", second)
+        self.assertLess(
+            list(second).index("ALERT2USDT"),
+            list(second).index("PENDINGUSDT"),
+        )
+        self.assertLess(
+            list(second).index("ALERT1USDT"),
+            list(second).index("PENDINGUSDT"),
+        )
 
 
 if __name__ == "__main__":

@@ -47,6 +47,96 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(record["mfe_pct"], 0.0)
         self.assertEqual(record["mae_pct"], 2.0)
 
+    def test_one_minute_intrabar_entry_with_stop_or_target_is_ambiguous(self):
+        record = make_trade_record(signal(), {}, 900000)
+        journal = {"trades": {record["trade_id"]: record}}
+        # Price opens above the LONG limit, then spans entry, stop and target.
+        # OHLC cannot prove whether the adverse extreme preceded the entry fill.
+        one_minute = [candle(900000, 101, 103, 97, 101)]
+        monitor_journal(
+            journal, now_ms=960000, fetcher=lambda *_: [],
+            micro_fetcher=lambda *_: one_minute,
+        )
+        result = journal["trades"][record["trade_id"]]
+        self.assertEqual(result["status"], "AMBIGUOUS_ENTRY_CANDLE")
+        self.assertTrue(result["entry_candle_ambiguous"])
+        report = summarize_outcomes(journal)
+        self.assertIn("ambiguous_entry_candle", report["groups"])
+        self.assertEqual(report["sl_before_tp1"], 0)
+        self.assertEqual(report["tp1_before_sl"], 0)
+
+    def test_hybrid_replay_uses_15m_for_old_history_and_1m_for_recent(self):
+        journal, key = self.journal()
+        journal["trades"][key]["status"] = "OPEN"
+        journal["trades"][key]["entry_fill_price"] = 100.0
+        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000}]
+        now = 100_000_000
+        cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
+        calls = {"15m": [], "1m": []}
+
+        def fetch_15m(symbol, start, end):
+            calls["15m"].append((start, end))
+            return [candle(900000, 101.1, 101.5, 101.0, 101.2)]
+
+        def fetch_1m(symbol, start, end):
+            calls["1m"].append((start, end))
+            return [candle(cutoff, 101.1, 101.5, 101.0, 101.2)]
+
+        monitor_journal(journal, now_ms=now, fetcher=fetch_15m,
+                        micro_fetcher=fetch_1m)
+        record = journal["trades"][key]
+        self.assertEqual(len(calls["15m"]), 1)
+        self.assertEqual(calls["15m"][0][1], cutoff)
+        self.assertEqual(calls["1m"], [(cutoff, now)])
+        self.assertEqual(record["last_checked_ms"], cutoff + 60_000)
+        self.assertEqual(record["status"], "OPEN")
+
+    def test_hybrid_replay_falls_back_when_minute_history_has_internal_gap(self):
+        journal, key = self.journal()
+        journal["trades"][key]["status"] = "OPEN"
+        journal["trades"][key]["entry_fill_price"] = 100.0
+        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000}]
+        now = 100_000_000
+        cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
+        fallback_calls = []
+
+        def fetch_15m(symbol, start, end):
+            fallback_calls.append((start, end))
+            return [candle(start, 101.1, 101.5, 101.0, 101.2)]
+
+        # The response is non-empty but skips one minute. It must not be
+        # trusted as a continuous replay window.
+        minute_rows = [
+            candle(cutoff, 101.1, 101.5, 101.0, 101.2),
+            candle(cutoff + 120_000, 101.1, 101.5, 101.0, 101.2),
+        ]
+        monitor_journal(
+            journal, now_ms=now, fetcher=fetch_15m,
+            micro_fetcher=lambda *_: minute_rows,
+        )
+        self.assertEqual(fallback_calls, [(900000, cutoff), (cutoff, now)])
+        self.assertEqual(journal["trades"][key]["status"], "OPEN")
+        self.assertEqual(journal["trades"][key]["last_checked_ms"], cutoff + 900_000)
+
+    def test_hybrid_replay_falls_back_to_15m_when_minute_history_empty(self):
+        journal, key = self.journal()
+        journal["trades"][key]["status"] = "OPEN"
+        journal["trades"][key]["entry_fill_price"] = 100.0
+        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000}]
+        now = 100_000_000
+        cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
+        calls = []
+
+        def fetch_15m(symbol, start, end):
+            calls.append((start, end))
+            return [candle(900000, 101.1, 101.5, 101.0, 101.2),
+                    candle(cutoff, 101.1, 101.5, 101.0, 101.2)]
+
+        monitor_journal(journal, now_ms=now, fetcher=fetch_15m,
+                        micro_fetcher=lambda *_: [])
+        self.assertEqual(calls, [(900000, cutoff), (cutoff, now)])
+        self.assertEqual(journal["trades"][key]["status"], "OPEN")
+
     def test_long_moves_remaining_stop_to_entry_after_tp1(self):
         journal, key = self.journal("LONG")
         first = [candle(900000, 100, 103, 99.5, 102.5)]
@@ -223,9 +313,9 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertTrue(record["tp1_candle_excursion_ambiguous"])
         self.assertEqual(record["status"], "TP1_HIT")
 
-    def test_trade_times_out_after_four_days(self):
+    def test_unfilled_entry_expires_after_one_hour(self):
         journal, key = self.journal()
-        monitor_journal(journal, now_ms=900000 + 96 * 60 * 60 * 1000,
+        monitor_journal(journal, now_ms=900000 + 60 * 60 * 1000,
                         fetcher=lambda *_: [])
         self.assertEqual(journal["trades"][key]["status"], "EXPIRED_NO_ENTRY")
 
@@ -240,14 +330,31 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(record["mfe_pct"], 0.0)
         self.assertEqual(record["mae_pct"], 0.0)
 
+    def test_intrabar_entry_candle_without_exit_does_not_count_pre_entry_excursions(self):
+        journal, key = self.journal()
+        # Opens above the LONG limit, then trades through entry without
+        # touching either stop or target. Extremes before the fill are unknown.
+        one_minute = [candle(900000, 101, 101.5, 99.5, 100.5)]
+        monitor_journal(
+            journal, now_ms=960000, fetcher=lambda *_: [],
+            micro_fetcher=lambda *_: one_minute,
+        )
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "OPEN")
+        self.assertTrue(record["entry_candle_excursion_ambiguous"])
+        self.assertEqual(record["mfe_pct"], 0.0)
+        self.assertEqual(record["mae_pct"], 0.0)
+        self.assertEqual(record["last_checked_ms"], 960000)
+
     def test_entry_is_recorded_only_when_candle_reaches_level(self):
         journal, key = self.journal()
         touched = [candle(900000, 101, 102, 99.5, 100.5)]
         monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: touched)
         record = journal["trades"][key]
-        self.assertEqual(record["status"], "TP1_HIT")
+        self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_CANDLE")
         self.assertEqual(record["entry_fill_price"], 100.0)
-        self.assertEqual(record["events"][0]["event"], "ENTRY")
+        self.assertEqual([event["event"] for event in record["events"]],
+                         ["ENTRY", "AMBIGUOUS_ENTRY_CANDLE"])
 
     def test_summary_recognizes_legacy_records_without_entry_events(self):
         legacy_sl = make_trade_record(signal(), {}, 900000)

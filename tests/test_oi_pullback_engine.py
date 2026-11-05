@@ -84,7 +84,7 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertLess(signal.entry, data["candles"][-1]["close"])
         self.assertAlmostEqual(
             signal.entry,
-            signal.setup_level + signal.atr_15m * 0.05,
+            signal.setup_level + signal.atr_15m * 0.02,
         )
         self.assertGreater(signal.atr_15m, 0)
         self.assertGreater(signal.pullback_extreme, 0)
@@ -106,7 +106,7 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertGreater(signal.entry, data["candles"][-1]["close"])
         self.assertAlmostEqual(
             signal.entry,
-            signal.setup_level - signal.atr_15m * 0.05,
+            signal.setup_level - signal.atr_15m * 0.02,
         )
 
     def test_long_limit_entry_must_be_below_confirmation_close(self):
@@ -114,8 +114,8 @@ class PullbackEngineTests(unittest.TestCase):
         _, pending, _ = advance_pullback_setup(data)
         add_retest(data, "LONG")
         data["candles"][-1].update({
-            "open":100.505, "high":100.55, "low":100.5,
-            "close":100.54, "quote_volume":200000,
+            "open":100.505, "high":100.525, "low":100.5,
+            "close":100.52, "quote_volume":200000,
             "taker_buy_quote":120000,
         })
         signal, next_pending, reason = advance_pullback_setup(data, pending)
@@ -128,8 +128,8 @@ class PullbackEngineTests(unittest.TestCase):
         _, pending, _ = advance_pullback_setup(data)
         add_retest(data, "SHORT")
         data["candles"][-1].update({
-            "open":99.495, "high":99.5, "low":99.45,
-            "close":99.46, "quote_volume":200000,
+            "open":99.495, "high":99.5, "low":99.47,
+            "close":99.479, "quote_volume":200000,
             "taker_buy_quote":80000,
         })
         signal, next_pending, reason = advance_pullback_setup(data, pending)
@@ -237,7 +237,7 @@ class PullbackEngineTests(unittest.TestCase):
         signal, next_pending, _ = advance_pullback_setup(data, pending)
         self.assertIsNotNone(signal)
         self.assertIsNone(next_pending)
-        self.assertLess(signal.stop_loss, 99.95)
+        self.assertAlmostEqual(signal.stop_loss, 99.95 - signal.atr_15m * 0.35)
 
     def test_short_stop_uses_highest_high_across_pullback_candles(self):
         data = snapshot("SHORT")
@@ -254,7 +254,7 @@ class PullbackEngineTests(unittest.TestCase):
         signal, next_pending, _ = advance_pullback_setup(data, pending)
         self.assertIsNotNone(signal)
         self.assertIsNone(next_pending)
-        self.assertGreater(signal.stop_loss, 100.05)
+        self.assertAlmostEqual(signal.stop_loss, 100.05 + signal.atr_15m * 0.35)
 
     def test_setup_expires_after_four_15m_candles(self):
         data = snapshot("LONG")

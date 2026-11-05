@@ -28,9 +28,9 @@ def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
     # Funding, long/short ratio and liquidation history are supplementary context.
     # Missing optional endpoints must not veto an otherwise valid OI + taker-flow confirmation.
     if signal.side == "LONG":
-        return taker_ratio >= 0.52
+        return taker_ratio >= 0.505
     if signal.side == "SHORT":
-        return taker_ratio <= 0.48
+        return taker_ratio <= 0.495
     return False
 
 
@@ -125,7 +125,9 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
     confirmed: List[Tuple[Signal, Dict[str, Any]]] = []
     updated = {symbol: dict(record) for symbol, record in watchlist.items()}
     for symbol, record in updated.items():
-        record["last_checked"] = timestamp
+        # Record attempts separately from successful scans. A transient provider
+        # failure must not mark a fresh OI alert as fully checked.
+        record["last_attempted_at"] = timestamp
         try:
             metrics = None
             try:
@@ -176,7 +178,14 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 else:
                     record["pending_setup"] = pending_setup or previous_pending_setup
                     record["status"] = "نزدیک شرایط ورود"
-                    record["reason"] = "سیگنال پولبک منتظر تأیید OI/جریان سفارش است"
+                    oi_value = metrics.get("oi_change_15m_window_pct")
+                    flow_value = metrics.get("taker_buy_ratio")
+                    oi_text = f"{float(oi_value):+.2f}%" if oi_value is not None else "ناموجود"
+                    flow_text = f"{float(flow_value):.1%}" if flow_value is not None else "ناموجود"
+                    record["reason"] = (
+                        "پولبک تأیید شد اما تأیید مستقل Coinalyze کافی نیست "
+                        f"(OI: {oi_text}؛ جریان خرید تهاجمی: {flow_text})"
+                    )
             else:
                 record["pending_setup"] = pending_setup
                 record["status"] = "منتظر پولبک و تأیید" if pending_setup else "در حال رصد"
@@ -187,6 +196,9 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     record["reason"] = "رد شرایط ورود: " + " | ".join(reasons[:3])
                 else:
                     record["reason"] = "شکست/شتاب اولیه دیده شد اما ورود بدون پولبک و تأیید صادر نمی‌شود"
+            # Only a completed market-data/evaluation pass consumes the fresh-alert
+            # priority. Failed requests remain eligible for retry.
+            record["last_checked"] = timestamp
         except (CoinalyzeError, MarketDataError, OSError, ValueError, KeyError) as exc:
             record["status"] = "خطای دریافت داده"
             record["reason"] = f"{type(exc).__name__}: {exc}"
