@@ -446,5 +446,38 @@ class TelegramRunnerTests(unittest.TestCase):
             self.assertNotIn("source_side", saved["symbols"]["ETHUSDT"])
 
 
+    def test_fresh_oi_alerts_precede_pending_and_hot_candidates(self):
+        watchlist = {
+            "PENDINGUSDT": {
+                "pending_setup": {"expires_at_close_time": 1000},
+                "last_checked": 900,
+            },
+            "HOTUSDT": {"oi_priority_score": 20.0, "last_checked": 900},
+            "NEW1USDT": {"last_alert": 1200, "last_checked": 0, "oi_priority_score": 1.0},
+            "NEW2USDT": {"last_alert": 1300, "last_checked": 0, "oi_priority_score": 0.0},
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=3)
+        self.assertEqual(list(batch), ["NEW2USDT", "NEW1USDT", "PENDINGUSDT"])
+
+    def test_unscanned_fresh_alerts_keep_priority_on_following_cycles(self):
+        watchlist = {
+            f"ALERT{i}USDT": {"last_alert": 1000 + i, "last_checked": 0}
+            for i in range(1, 15)
+        }
+        watchlist["PENDINGUSDT"] = {
+            "pending_setup": {"expires_at_close_time": 500},
+            "last_checked": 900,
+        }
+        first, cursor = telegram_runner.select_watchlist_batch(watchlist, limit=12)
+        self.assertEqual(len(first), 12)
+        self.assertTrue(all(symbol.startswith("ALERT") for symbol in first))
+        for record in first.values():
+            record["last_checked"] = 2000
+        second, _ = telegram_runner.select_watchlist_batch(watchlist, cursor, limit=12)
+        self.assertEqual(
+            set(second), {"ALERT13USDT", "ALERT14USDT", "PENDINGUSDT"}
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
