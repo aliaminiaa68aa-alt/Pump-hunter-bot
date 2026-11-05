@@ -13,6 +13,7 @@ STOP_BUFFER_ATR = 0.22
 MAX_STOP_ATR = 1.50
 MIN_STOP_PCT = 0.20
 MAX_ENTRY_EXTENSION_ATR = 0.45
+ENTRY_LIMIT_OFFSET_ATR = 0.05
 MIN_ENTRY_QUALITY = 65
 MIN_REJECTION_BODY_RATIO = 0.30
 MIN_REJECTION_CLOSE_LOCATION = 0.68
@@ -135,7 +136,6 @@ def advance_pullback_setup(
             and float(last["close"]) > ema20 > ema50
         )
         stop = pullback_extreme - atr * STOP_BUFFER_ATR
-        risk = float(last["close"]) - stop
     else:
         pullback_extreme = max(
             float(pending.get("pullback_extreme", last["high"])),
@@ -163,7 +163,6 @@ def advance_pullback_setup(
             and float(last["close"]) < ema20 < ema50
         )
         stop = pullback_extreme + atr * STOP_BUFFER_ATR
-        risk = stop - float(last["close"])
 
     if not valid_depth:
         return None, None, "پولبک بیش از حد عمیق شد؛ setup باطل شد"
@@ -196,7 +195,17 @@ def advance_pullback_setup(
     if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 1.15:
         return None, pending, "پولبک رخ داد اما حجم کندل برگشتی کافی نیست؛ setup تا پایان مهلت حفظ شد"
 
-    entry = float(last["close"])
+    # Place a resting limit near the broken structure, not at the confirmation
+    # candle close. The signal is sent only after confirmation, then waits for
+    # price to revisit this level; this avoids turning every signal into a
+    # next-candle market entry after an extended rejection candle.
+    entry = (
+        level + atr * ENTRY_LIMIT_OFFSET_ATR if side == "LONG"
+        else level - atr * ENTRY_LIMIT_OFFSET_ATR
+    )
+    risk = entry - stop if side == "LONG" else stop - entry
+    if risk <= 0:
+        return None, None, "ساختار حد ضرر در سمت اشتباه ورود قرار گرفته؛ setup باطل شد"
     min_risk = entry * MIN_STOP_PCT / 100.0
     if risk < min_risk:
         stop = entry - min_risk if side == "LONG" else entry + min_risk
@@ -209,7 +218,7 @@ def advance_pullback_setup(
     tp1 = entry + risk if side == "LONG" else entry - risk
     tp2 = entry + 2.0 * risk if side == "LONG" else entry - 2.0 * risk
     taker_ratio = float(last["taker_buy_quote"]) / quote_volume
-    price_change = (entry / float(candles[-2]["close"]) - 1.0) * 100.0
+    price_change = (float(last["close"]) / float(candles[-2]["close"]) - 1.0) * 100.0
     movement_strength, entry_quality = score_signal_components(
         candles, side, oi_change, price_change, taker_ratio,
         quote_volume / average_volume, atr, level,
