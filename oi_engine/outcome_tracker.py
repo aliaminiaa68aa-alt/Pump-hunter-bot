@@ -191,7 +191,7 @@ def monitor_journal(
         try:
             cursor = int(record.get("last_checked_ms", int(signal["candle_close_time"]) + 1))
             # No closed candle can exist yet; keep timeout handling but skip the provider call.
-            if now < cursor + interval_ms:
+            if now < cursor + minimum_interval_ms:
                 timeout_hours = (MAX_PENDING_ENTRY_HOURS if status == "WAITING_ENTRY"
                                   else MAX_ACTIVE_HOURS)
                 if now - int(record["sent_at_ms"]) >= timeout_hours * 60 * 60 * 1000:
@@ -203,7 +203,8 @@ def monitor_journal(
             candles = sorted(candles, key=lambda row: int(row[0]))
             for candle in candles:
                 open_ms = int(candle[0])
-                close_ms = open_ms + interval_ms - 1
+                candle_interval_ms = int(candle[6]) if len(candle) > 6 else INTERVAL_MS
+                close_ms = open_ms + candle_interval_ms - 1
                 if close_ms >= now:
                     continue
                 event_names = {event["event"] for event in record.get("events", [])}
