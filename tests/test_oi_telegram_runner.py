@@ -511,8 +511,19 @@ class TelegramRunnerTests(unittest.TestCase):
         for record in first.values():
             record["last_checked"] = 2000
         second, _ = telegram_runner.select_watchlist_batch(watchlist, cursor, limit=12)
+        # Remaining fresh alerts must lead the next batch. The batch may
+        # also use its spare capacity for ordinary rotation candidates.
         self.assertEqual(
-            set(second), {"ALERT13USDT", "ALERT14USDT", "PENDINGUSDT"}
+            list(second)[:2], ["ALERT14USDT", "ALERT13USDT"]
+        )
+        self.assertIn("PENDINGUSDT", second)
+        self.assertLess(
+            list(second).index("ALERT14USDT"),
+            list(second).index("PENDINGUSDT"),
+        )
+        self.assertLess(
+            list(second).index("ALERT13USDT"),
+            list(second).index("PENDINGUSDT"),
         )
 
 
