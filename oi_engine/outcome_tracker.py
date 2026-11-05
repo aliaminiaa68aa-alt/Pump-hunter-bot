@@ -101,7 +101,7 @@ def monitor_journal(
 ) -> Dict[str, Any]:
     """Update active records using 1m replay when available, otherwise 15m candles."""
     active_fetcher = micro_fetcher or fetcher
-    interval_ms = 60 * 1000 if micro_fetcher is not None else interval_ms
+    interval_ms = 60 * 1000 if micro_fetcher is not None else INTERVAL_MS
     now = int(now_ms if now_ms is not None else time.time() * 1000)
     trades = journal.setdefault("trades", {})
     for trade_id, record in list(trades.items()):
