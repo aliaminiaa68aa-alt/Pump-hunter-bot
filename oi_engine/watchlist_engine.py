@@ -125,7 +125,9 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
     confirmed: List[Tuple[Signal, Dict[str, Any]]] = []
     updated = {symbol: dict(record) for symbol, record in watchlist.items()}
     for symbol, record in updated.items():
-        record["last_checked"] = timestamp
+        # Record attempts separately from successful scans. A transient provider
+        # failure must not mark a fresh OI alert as fully checked.
+        record["last_attempted_at"] = timestamp
         try:
             metrics = None
             try:
@@ -187,6 +189,9 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     record["reason"] = "رد شرایط ورود: " + " | ".join(reasons[:3])
                 else:
                     record["reason"] = "شکست/شتاب اولیه دیده شد اما ورود بدون پولبک و تأیید صادر نمی‌شود"
+            # Only a completed market-data/evaluation pass consumes the fresh-alert
+            # priority. Failed requests remain eligible for retry.
+            record["last_checked"] = timestamp
         except (CoinalyzeError, MarketDataError, OSError, ValueError, KeyError) as exc:
             record["status"] = "خطای دریافت داده"
             record["reason"] = f"{type(exc).__name__}: {exc}"
