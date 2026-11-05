@@ -79,6 +79,11 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertIsNone(next_pending)
         self.assertLess(signal.stop_loss, signal.entry)
         self.assertGreater(signal.take_profit_2, signal.take_profit_1)
+        self.assertGreater(signal.atr_15m, 0)
+        self.assertGreater(signal.pullback_extreme, 0)
+        self.assertGreater(signal.setup_level, 0)
+        self.assertGreater(signal.ema20, signal.ema50)
+        self.assertGreater(signal.stop_distance_atr, 0)
         self.assertIn("تأیید شدند", reason)
 
     def test_short_only_signals_after_retest_confirmation(self):
