@@ -40,6 +40,13 @@ class Signal:
     candle_close_time: int
     movement_strength: int = 0
     entry_quality: int = 0
+    # Entry/stop diagnostics captured at signal time; these do not affect execution.
+    setup_level: float = 0.0
+    atr_15m: float = 0.0
+    pullback_extreme: float = 0.0
+    ema20: float = 0.0
+    ema50: float = 0.0
+    stop_distance_atr: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
