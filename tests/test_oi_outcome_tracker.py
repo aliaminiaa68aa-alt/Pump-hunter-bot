@@ -223,6 +223,33 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(record["entry_fill_price"], 100.0)
         self.assertEqual(record["events"][0]["event"], "ENTRY")
 
+    def test_summary_recognizes_legacy_records_without_entry_events(self):
+        legacy_sl = make_trade_record(signal(), {}, 900000)
+        legacy_sl["events"] = [{"event": "SL", "time_ms": 1000000, "fill": 98.0}]
+        legacy_sl["status"] = "CLOSED_SL"
+
+        legacy_tp1 = make_trade_record(
+            {**signal(), "candle_close_time": 1800000}, {}, 1800000
+        )
+        legacy_tp1["events"] = [{"event": "TP1", "time_ms": 2000000, "fill": 102.0}]
+        legacy_tp1["status"] = "TP1_HIT"
+
+        waiting = make_trade_record(
+            {**signal(), "candle_close_time": 2700000}, {}, 2700000
+        )
+        report = summarize_outcomes({"trades": {
+            legacy_sl["trade_id"]: legacy_sl,
+            legacy_tp1["trade_id"]: legacy_tp1,
+            waiting["trade_id"]: waiting,
+        }})
+
+        self.assertEqual(report["entry_touched"], 2)
+        self.assertEqual(report["not_entered"], 1)
+        self.assertEqual(report["entry_touched_decided"], 2)
+        self.assertEqual(report["sl_before_tp1"], 1)
+        self.assertEqual(report["tp1_before_sl"], 1)
+        self.assertEqual(report["entry_touched_win_rate_pct"], 50.0)
+
     def test_summary_win_rate_uses_only_entered_and_decided_trades(self):
         entered = make_trade_record(signal(), {}, 900000)
         entered["events"] = [
