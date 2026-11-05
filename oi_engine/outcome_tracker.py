@@ -97,8 +97,11 @@ def monitor_journal(
     journal: Dict[str, Any],
     now_ms: int | None = None,
     fetcher: Callable[[str, int, int], List[list]] = _fetch_klines,
+    micro_fetcher: Callable[[str, int, int], List[list]] | None = None,
 ) -> Dict[str, Any]:
-    """Update active records; provider failures are retained per trade, not fatal."""
+    """Update active records using 1m replay when available, otherwise 15m candles."""
+    active_fetcher = micro_fetcher or fetcher
+    interval_ms = 60 * 1000 if micro_fetcher is not None else interval_ms
     now = int(now_ms if now_ms is not None else time.time() * 1000)
     trades = journal.setdefault("trades", {})
     for trade_id, record in list(trades.items()):
@@ -118,14 +121,14 @@ def monitor_journal(
                                         int(record.get("exit_time_ms", now)) + 1))
                 # The monitor runs every five minutes, but only closed 15m candles
                 # can change an outcome. Avoid spending an API request between closes.
-                if now < cursor + INTERVAL_MS:
+                if now < cursor + interval_ms:
                     record["post_stop_tracking"] = "ACTIVE"
                     continue
-                candles = sorted(fetcher(signal["symbol"], cursor, min(now, post_stop_until)),
+                candles = sorted(active_fetcher(signal["symbol"], cursor, min(now, post_stop_until)),
                                  key=lambda row: int(row[0]))
                 for candle in candles:
                     open_ms = int(candle[0])
-                    close_ms = open_ms + INTERVAL_MS - 1
+                    close_ms = open_ms + interval_ms - 1
                     if close_ms >= now:
                         continue
                     high, low = float(candle[2]), float(candle[3])
@@ -155,7 +158,7 @@ def monitor_journal(
         try:
             cursor = int(record.get("last_checked_ms", int(signal["candle_close_time"]) + 1))
             # No closed candle can exist yet; keep timeout handling but skip the provider call.
-            if now < cursor + INTERVAL_MS:
+            if now < cursor + interval_ms:
                 timeout_hours = (MAX_PENDING_ENTRY_HOURS if status == "WAITING_ENTRY"
                                   else MAX_ACTIVE_HOURS)
                 if now - int(record["sent_at_ms"]) >= timeout_hours * 60 * 60 * 1000:
@@ -163,11 +166,11 @@ def monitor_journal(
                                         else "TIMED_OUT")
                     record["exit_time_ms"] = now
                 continue
-            candles = fetcher(signal["symbol"], cursor, now)
+            candles = active_fetcher(signal["symbol"], cursor, now)
             candles = sorted(candles, key=lambda row: int(row[0]))
             for candle in candles:
                 open_ms = int(candle[0])
-                close_ms = open_ms + INTERVAL_MS - 1
+                close_ms = open_ms + interval_ms - 1
                 if close_ms >= now:
                     continue
                 event_names = {event["event"] for event in record.get("events", [])}
