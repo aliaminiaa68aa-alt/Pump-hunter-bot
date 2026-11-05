@@ -121,14 +121,23 @@ def monitor_journal(
             recent = micro_fetcher(symbol, cutoff, end_ms)
         except Exception:
             recent = []
-        if recent:
-            combined.extend(
-                list(row) + [60 * 1000] for row in recent
-                if int(row[0]) >= cutoff
-            )
+        minute_rows = sorted(
+            (list(row) for row in recent if int(row[0]) >= cutoff),
+            key=lambda row: int(row[0]),
+        ) if recent else []
+        # A non-empty response is not necessarily complete. A hole in the
+        # minute sequence could hide a stop/target touch, so do not replay a
+        # partial high-resolution window as if it were continuous.
+        has_minute_gap = any(
+            int(current[0]) - int(previous[0]) != 60 * 1000
+            for previous, current in zip(minute_rows, minute_rows[1:])
+        )
+        if minute_rows and not has_minute_gap:
+            combined.extend(row + [60 * 1000] for row in minute_rows)
         else:
-            # If minute history is unavailable for this range, retain coverage
-            # with 15m candles rather than silently leaving the trade untracked.
+            # Fall back for the whole recent window if minute history is empty
+            # or internally discontinuous; mixing partial 1m with 15m could
+            # double-count or misorder the same price action.
             fallback = fetcher(symbol, cutoff, end_ms)
             combined.extend(
                 list(row) + [INTERVAL_MS] for row in fallback
