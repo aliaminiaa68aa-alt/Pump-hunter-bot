@@ -47,6 +47,24 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(record["mfe_pct"], 0.0)
         self.assertEqual(record["mae_pct"], 2.0)
 
+    def test_one_minute_intrabar_entry_with_stop_or_target_is_ambiguous(self):
+        record = make_trade_record(signal(), {}, 900000)
+        journal = {"trades": {record["trade_id"]: record}}
+        # Price opens above the LONG limit, then spans entry, stop and target.
+        # OHLC cannot prove whether the adverse extreme preceded the entry fill.
+        one_minute = [candle(900000, 101, 103, 97, 101)]
+        monitor_journal(
+            journal, now_ms=960000, fetcher=lambda *_: [],
+            micro_fetcher=lambda *_: one_minute,
+        )
+        result = journal["trades"][record["trade_id"]]
+        self.assertEqual(result["status"], "AMBIGUOUS_ENTRY_CANDLE")
+        self.assertTrue(result["entry_candle_ambiguous"])
+        report = summarize_outcomes(journal)
+        self.assertIn("ambiguous_entry_candle", report["groups"])
+        self.assertEqual(report["sl_before_tp1"], 0)
+        self.assertEqual(report["tp1_before_sl"], 0)
+
     def test_long_moves_remaining_stop_to_entry_after_tp1(self):
         journal, key = self.journal("LONG")
         first = [candle(900000, 100, 103, 99.5, 102.5)]
