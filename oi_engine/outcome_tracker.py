@@ -370,8 +370,6 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         )
         if record.get("entry_candle_ambiguous"):
             outcome = "ambiguous_entry_candle"
-            if entered:
-                report["entry_touched_decided"] += 0
         elif first_sl_ambiguous:
             outcome = "ambiguous_stop_target"
             if entered:
