@@ -69,6 +69,32 @@ class LivePriceMonitorTests(unittest.TestCase):
         self.assertEqual(record["status"], "EXPIRED_NO_ENTRY")
         self.assertEqual(record["events"], [])
 
+    def test_entry_and_stop_crossed_in_one_poll_are_ambiguous(self):
+        journal, record = make_journal("LONG")
+        apply_live_prices(journal, {"TESTUSDT": 101.0}, now_ms=2_000)
+        # The next poll is already below both entry=100 and stop=98.
+        # We cannot know whether entry filled before the stop was crossed.
+        apply_live_prices(journal, {"TESTUSDT": 97.5}, now_ms=3_000)
+        self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_POLL")
+        self.assertEqual(
+            [event["event"] for event in record["events"]],
+            ["ENTRY", "AMBIGUOUS_ENTRY_POLL"],
+        )
+        self.assertTrue(record["entry_poll_ambiguous"])
+        apply_live_prices(journal, {"TESTUSDT": 102.5}, now_ms=4_000)
+        self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_POLL")
+        self.assertEqual(len(record["events"]), 2)
+
+    def test_short_entry_and_stop_crossed_in_one_poll_are_ambiguous(self):
+        journal, record = make_journal("SHORT")
+        apply_live_prices(journal, {"TESTUSDT": 99.0}, now_ms=2_000)
+        apply_live_prices(journal, {"TESTUSDT": 102.5}, now_ms=3_000)
+        self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_POLL")
+        self.assertEqual(
+            [event["event"] for event in record["events"]],
+            ["ENTRY", "AMBIGUOUS_ENTRY_POLL"],
+        )
+
     def test_target_one_then_breakeven_stop(self):
         journal, record = make_journal("LONG")
         apply_live_prices(journal, {"TESTUSDT": 101.0}, now_ms=2_000)
