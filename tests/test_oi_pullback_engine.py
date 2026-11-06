@@ -209,6 +209,21 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertEqual(signal.execution_mode, "MISSED")
         self.assertIsNone(next_pending)
 
+    def test_long_very_late_confirmation_is_reported_as_missed(self):
+        data = snapshot("LONG")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "LONG")
+        # The retest was valid, but the scan observes a much later close after
+        # price has already run far beyond the planned entry. Notify as MISSED.
+        data["candles"][-1].update({
+            "open":100.5, "high":103.8, "low":100.4, "close":103.5,
+            "quote_volume":200000, "taker_buy_quote":150000,
+        })
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNotNone(signal, reason)
+        self.assertEqual(signal.execution_mode, "MISSED")
+        self.assertIsNone(next_pending)
+
     def test_long_small_entry_overshoot_switches_to_market(self):
         data = snapshot("LONG")
         _, pending, _ = advance_pullback_setup(data)
