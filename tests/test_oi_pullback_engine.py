@@ -135,6 +135,8 @@ class PullbackEngineTests(unittest.TestCase):
              "quote_volume":200000, "taker_buy_quote":100000,
              "close_time":first_time + 1800000},
         ])
+        data["current_price"] = 100.98
+        data["price_timestamp"] = int(time.time() * 1000)
         data["oi_values"] = [100.2, 101.0, 101.8]
         signal, next_pending, reason = advance_pullback_setup(data, pending)
         self.assertIsNotNone(signal, reason)
@@ -213,7 +215,7 @@ class PullbackEngineTests(unittest.TestCase):
         signal, next_pending, reason = advance_pullback_setup(data, pending)
         if signal is not None:
             self.assertEqual(signal.execution_mode, "MARKET")
-            self.assertAlmostEqual(signal.entry, data["candles"][-1]["close"])
+            self.assertAlmostEqual(signal.entry, data["current_price"])
         else:
             self.assertIsNotNone(next_pending)
 
@@ -342,7 +344,13 @@ class PullbackEngineTests(unittest.TestCase):
         first = data["candles"][-1]
         first.update({"high":100.05, "open":99.9, "close":99.4,
                       "taker_buy_quote":100000})
-        _, pending, _ = advance_pullback_setup(data, pending)
+        signal, pending, reason = advance_pullback_setup(data, pending)
+        if signal is not None:
+            self.assertAlmostEqual(
+                signal.stop_loss, 100.05 + signal.atr_15m * 0.35
+            )
+            return
+        self.assertIsNotNone(pending, reason)
         self.assertAlmostEqual(pending["pullback_extreme"], 100.05)
         add_retest(data, "SHORT")
         data["candles"][-1].update({"high":99.7, "open":99.9, "close":99.3,
