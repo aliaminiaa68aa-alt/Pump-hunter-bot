@@ -741,12 +741,14 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        send.assert_called_once()
-        self.assertIn("تارگت اول خورد", send.call_args.args[2])
-        self.assertNotIn("ورود", send.call_args.args[2])
+        self.assertEqual(send.call_count, 2)
+        entry_message = send.call_args_list[0].args[2]
+        target_message = send.call_args_list[1].args[2]
+        self.assertIn("ورود فعال شد", entry_message)
+        self.assertIn("مبنای ورود تازه نیست", entry_message)
+        self.assertIn("تارگت اول خورد", target_message)
         record = result["trades"]["slightly-delayed-entry"]
-        self.assertEqual(record["notification_state"]["0"]["status"], "ignored")
-        self.assertEqual(record["notification_state"]["0"]["reason"], "late_entry_notification")
+        self.assertEqual(record["notification_state"]["0"]["status"], "sent")
         self.assertEqual(record["notification_state"]["1"]["status"], "sent")
 
 
@@ -776,15 +778,17 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        send.assert_called_once()
-        message = send.call_args.args[2]
-        self.assertIn("حد ضرر خورد", message)
-        self.assertIn("برای ورود جدید اقدام نکنید", message)
+        self.assertEqual(send.call_count, 2)
+        entry_message = send.call_args_list[0].args[2]
+        stop_message = send.call_args_list[1].args[2]
+        self.assertIn("ورود فعال شد", entry_message)
+        self.assertIn("مبنای ورود تازه نیست", entry_message)
+        self.assertIn("حد ضرر خورد", stop_message)
+        self.assertIn("برای ورود جدید اقدام نکنید", stop_message)
         record = result["trades"]["delayed-trade"]
         self.assertEqual(record["status"], "CLOSED_SL")
         self.assertFalse(record.get("entry_missed", False))
-        self.assertEqual(record["notification_state"]["0"]["status"], "ignored")
-        self.assertEqual(record["notification_state"]["0"]["reason"], "late_entry_notification")
+        self.assertEqual(record["notification_state"]["0"]["status"], "sent")
         self.assertEqual(record["notification_state"]["1"]["status"], "sent")
 
 
