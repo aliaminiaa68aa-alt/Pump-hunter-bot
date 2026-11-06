@@ -124,7 +124,7 @@ class PullbackEngineTests(unittest.TestCase):
             # happened in the previous candle while this symbol was not scanned.
             {"open_time": first_time + 900001, "open":100.94, "high":101.0,
              "low":100.75, "close":100.98, "volume":1500,
-             "quote_volume":200000, "taker_buy_quote":120000,
+             "quote_volume":200000, "taker_buy_quote":100000,
              "close_time":first_time + 1800000},
         ])
         data["oi_values"] = [100.2, 101.0, 101.8]
