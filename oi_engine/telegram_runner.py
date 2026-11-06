@@ -186,8 +186,13 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
     legacy_cutoff = now_ms - 96 * 60 * 60 * 1000
     for trade_id, record in journal.get("trades", {}).items():
         anchor_id = record.get("telegram_message_id")
+        # A missing original-message ID must not suppress outcome alerts.
+        # Send them as standalone chat messages when reply threading is unavailable.
         if not anchor_id:
-            continue
+            print(
+                f"WARNING: outcome trade has no Telegram anchor; "
+                f"sending standalone notifications: trade={trade_id}"
+            )
         events = record.get("events", [])
         delivery = record.setdefault("notification_state", {})
         for index, event in enumerate(events):
