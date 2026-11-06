@@ -188,6 +188,28 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
     # A delayed/queued GitHub Actions run must not silently discard real fills.
     legacy_cutoff = now_ms - 96 * 60 * 60 * 1000
     for trade_id, record in journal.get("trades", {}).items():
+        # A GitHub Actions polling gap can reveal an entry only after the
+        # market has already moved. Such a historical touch is not a usable
+        # fill for the user: suppress ENTRY and every downstream outcome.
+        events = record.get("events", [])
+        entry_event = next((event for event in events if event.get("event") == "ENTRY"), None)
+        if entry_event:
+            entry_time = _safe_int(entry_event.get("time_ms"), 0)
+            sent_at = _safe_int(record.get("sent_at_ms"), 0)
+            late_entry = bool(entry_time and now_ms - entry_time > 120000)
+            if late_entry and not record.get("entry_missed"):
+                record["entry_missed"] = True
+                record["status"] = "MISSED_ENTRY"
+                record["entry_missed_reason"] = "Entry was detected more than 120 seconds after its candle timestamp"
+                print(
+                    f"Outcome entry suppressed as stale: trade={trade_id} "
+                    f"entry_time_ms={entry_time} sent_at_ms={sent_at} now_ms={now_ms}"
+                )
+            if record.get("entry_missed"):
+                delivery = record.setdefault("notification_state", {})
+                for index in range(len(events)):
+                    delivery[str(index)] = {"status": "ignored", "reason": "missed_entry"}
+                continue
         anchor_id = record.get("telegram_message_id")
         # A missing original-message ID must not suppress outcome alerts.
         # Send them as standalone chat messages when reply threading is unavailable.
@@ -564,7 +586,7 @@ def summarize_scan_diagnostics(watchlist, scanned_batch):
 def blocked_by_active_symbol_trade(signal, outcome_journal: Dict[str, Any]) -> bool:
     """Allow at most one unresolved trade per symbol, regardless of side or engine."""
     symbol = str(signal.symbol).upper()
-    terminal_statuses = {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE", "INVALID_NO_ENTRY"}
+    terminal_statuses = {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE", "INVALID_NO_ENTRY", "MISSED_ENTRY"}
     for record in outcome_journal.get("trades", {}).values():
         prior_signal = record.get("signal", {})
         if str(prior_signal.get("symbol", "")).upper() != symbol:
