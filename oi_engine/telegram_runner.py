@@ -188,28 +188,44 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
     # A delayed/queued GitHub Actions run must not silently discard real fills.
     legacy_cutoff = now_ms - 96 * 60 * 60 * 1000
     for trade_id, record in journal.get("trades", {}).items():
-        # A GitHub Actions polling gap can reveal an entry only after the
-        # market has already moved. Such a historical touch is not a usable
-        # fill for the user: suppress ENTRY and every downstream outcome.
+        # Distinguish a genuinely missed setup from a delayed polling cycle.
+        # If entry happened BEFORE the signal was sent, suppress the whole
+        # trade. If entry happened AFTER the signal but this runner noticed it
+        # late, suppress only the stale ENTRY ping; preserve TP/SL reporting.
         events = record.get("events", [])
         entry_event = next((event for event in events if event.get("event") == "ENTRY"), None)
+        late_entry_notification = False
         if entry_event:
             entry_time = _safe_int(entry_event.get("time_ms"), 0)
             sent_at = _safe_int(record.get("sent_at_ms"), 0)
-            late_entry = bool(entry_time and now_ms - entry_time > 120000)
-            if late_entry and not record.get("entry_missed"):
+            entry_predates_signal = bool(entry_time and sent_at and entry_time <= sent_at)
+            late_entry_notification = bool(
+                entry_time and now_ms - entry_time > 120000 and not entry_predates_signal
+            )
+            if entry_predates_signal and not record.get("entry_missed"):
                 record["entry_missed"] = True
                 record["status"] = "MISSED_ENTRY"
-                record["entry_missed_reason"] = "Entry was detected more than 120 seconds after its candle timestamp"
+                record["entry_missed_reason"] = "Entry touch occurred before the signal was sent"
                 print(
-                    f"Outcome entry suppressed as stale: trade={trade_id} "
-                    f"entry_time_ms={entry_time} sent_at_ms={sent_at} now_ms={now_ms}"
+                    f"Outcome trade invalidated: entry predates signal: trade={trade_id} "
+                    f"entry_time_ms={entry_time} sent_at_ms={sent_at}"
                 )
             if record.get("entry_missed"):
                 delivery = record.setdefault("notification_state", {})
                 for index in range(len(events)):
                     delivery[str(index)] = {"status": "ignored", "reason": "missed_entry"}
                 continue
+            if late_entry_notification:
+                delivery = record.setdefault("notification_state", {})
+                entry_index = events.index(entry_event)
+                delivery[str(entry_index)] = {
+                    "status": "ignored",
+                    "reason": "late_entry_notification",
+                }
+                print(
+                    f"Late ENTRY ping suppressed; downstream outcomes retained: trade={trade_id} "
+                    f"entry_time_ms={entry_time} sent_at_ms={sent_at} now_ms={now_ms}"
+                )
         anchor_id = record.get("telegram_message_id")
         # A missing original-message ID must not suppress outcome alerts.
         # Send them as standalone chat messages when reply threading is unavailable.
@@ -263,6 +279,8 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 message += f"\nزمان لمس: {clock} (به وقت ایران)"
             if delayed and name == "ENTRY":
                 message += "\nاین اعلان با تأخیر ارسال شده؛ مبنای ورود تازه نیست."
+            elif delayed and name in {"TP1", "TP2", "SL"}:
+                message += "\nاین گزارش مربوط به نتیجه قبلی است؛ برای ورود جدید اقدام نکنید."
             message += _event_price_result(record["signal"], event)
             if event.get("ambiguous_same_candle"):
                 message += "\nترتیب لمس حد ضرر و تارگت در این کندل مشخص نیست."
