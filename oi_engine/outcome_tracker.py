@@ -272,9 +272,20 @@ def monitor_journal(
                 if record.get("status") == "WAITING_ENTRY":
                     entry_level = float(signal["entry"])
                     high, low, open_price = float(candle[2]), float(candle[3]), float(candle[1])
-                    if not (low <= entry_level <= high):
+                    # A limit entry is also filled when the candle opens beyond
+                    # the level: the market gapped through the order before the
+                    # candle's first trade. Requiring the level to be inside the
+                    # candle range misses these real fills entirely.
+                    touched = (
+                        low <= entry_level <= high or open_price <= entry_level
+                        if side == "LONG"
+                        else low <= entry_level <= high or open_price >= entry_level
+                    )
+                    if not touched:
                         record["last_checked_ms"] = close_ms + 1
                         continue
+                    # If price opened beyond the limit, use the opening price
+                    # as the conservative executable fill; otherwise use level.
                     entry_intrabar = (open_price > entry_level if side == "LONG"
                                        else open_price < entry_level)
                     fill = (min(open_price, entry_level) if side == "LONG"
