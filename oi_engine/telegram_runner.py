@@ -6,6 +6,7 @@ import math
 import os
 import time
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 import requests
@@ -165,6 +166,86 @@ def send_outcome_update(
         )
         return None
 
+
+
+def _format_event_time_iran(event: Dict[str, Any]) -> str:
+    timestamp = _safe_int(event.get("time_ms"), 0)
+    if not timestamp:
+        return ""
+    local = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc).astimezone(
+        timezone(timedelta(hours=3, minutes=30))
+    )
+    return local.strftime("%H:%M:%S")
+
+
+def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id: str) -> Dict[str, Any]:
+    """Send unsent outcome events and persist per-event delivery state for retries."""
+    now_ms = int(time.time() * 1000)
+    legacy_cutoff = now_ms - 12 * 60 * 60 * 1000
+    for trade_id, record in journal.get("trades", {}).items():
+        anchor_id = record.get("telegram_message_id")
+        if not anchor_id:
+            continue
+        events = record.get("events", [])
+        delivery = record.setdefault("notification_state", {})
+        for index, event in enumerate(events):
+            key = str(index)
+            if key not in delivery:
+                timestamp = _safe_int(event.get("time_ms"), 0)
+                if timestamp and timestamp < legacy_cutoff:
+                    delivery[key] = {"status": "legacy"}
+        for index, event in enumerate(events):
+            key = str(index)
+            previous = delivery.get(key, {})
+            if previous.get("status") in {"sent", "legacy", "ignored"}:
+                continue
+            name = event.get("event")
+            symbol = str(record.get("signal", {}).get("symbol", "UNKNOWN"))
+            timestamp = _safe_int(event.get("time_ms"), 0)
+            delayed = bool(timestamp and now_ms - timestamp > 120000)
+            clock = _format_event_time_iran(event)
+            if name == "ENTRY":
+                intro = "🟡 ورود قبلاً فعال شده بود" if delayed else "🟡 ورود فعال شد"
+                label = f"{intro}؛ قیمت اجرا: {float(event.get('fill', record['signal']['entry'])):.8g}"
+            elif name == "TP1":
+                label = "🎯 تارگت اول خورد"
+            elif name == "TP2":
+                label = "🏆 تارگت دوم خورد؛ معامله به پایان رسید"
+            elif name == "SL":
+                label = "🛑 حد ضرر خورد"
+            else:
+                delivery[key] = {"status": "ignored"}
+                continue
+            message = label + "\nارز: " + symbol
+            if clock:
+                message += f"\nزمان لمس: {clock} (به وقت ایران)"
+            if delayed and name == "ENTRY":
+                message += "\nاین اعلان با تأخیر ارسال شده؛ مبنای ورود تازه نیست."
+            message += _event_price_result(record["signal"], event)
+            if event.get("ambiguous_same_candle"):
+                message += "\nترتیب لمس حد ضرر و تارگت در این کندل مشخص نیست."
+            delivery[key] = {
+                "status": "pending",
+                "attempts": _safe_int(previous.get("attempts"), 0) + 1,
+                "last_attempt_ms": now_ms,
+            }
+            save_outcome_journal(journal)
+            try:
+                sent_id = send_telegram(token, chat_id, message, reply_to_message_id=int(anchor_id))
+            except Exception as exc:
+                delivery[key]["last_error"] = f"{type(exc).__name__}: {exc}"
+                print(f"Outcome notification pending retry: trade={trade_id} event={name} index={index} error={type(exc).__name__}: {exc}")
+                save_outcome_journal(journal)
+                continue
+            delivery[key] = {
+                "status": "sent",
+                "attempts": delivery[key]["attempts"],
+                "sent_at_ms": int(time.time() * 1000),
+                "telegram_message_id": sent_id,
+            }
+            print(f"Outcome notification delivered: trade={trade_id} event={name} index={index} telegram_message_id={sent_id}")
+            save_outcome_journal(journal)
+    return journal
 
 def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[str, Any]:
     timestamp = int(now if now is not None else time.time())
@@ -507,45 +588,9 @@ def main() -> None:
         fetcher=client.fetch_ohlcv_candles,
         micro_fetcher=getattr(client, "fetch_ohlcv_1m_candles", None),
     )
-    for trade_id, record in outcome_journal.get("trades", {}).items():
-        anchor_id = record.get("telegram_message_id")
-        if not anchor_id:
-            continue
-        before = previous_events.get(trade_id, {"events": 0, "post_stop_tp1": False, "post_stop_tp2": False})
-        for event in record.get("events", [])[int(before["events"]):]:
-            name = event.get("event")
-            labels = {
-                "ENTRY": f"🟡 ورود فعال شد؛ قیمت اجرا: {float(event.get('fill', record['signal']['entry'])):.8g}",
-                "TP1": "🎯 تارگت اول خورد\n💰 مدیریت سرمایه: بخشی از سود را ذخیره کنید و حد ضررِ باقی‌مانده را به نقطه ورود منتقل کنید.",
-                "TP2": "🏆 تارگت دوم خورد؛ معامله به پایان رسید",
-            }
-            if name == "SL":
-                sl_time = int(event.get("time_ms", 0))
-                tp1_was_hit = any(
-                    prior.get("event") == "TP1"
-                    and int(prior.get("time_ms", 0)) < sl_time
-                    for prior in record.get("events", [])
-                )
-                label = (
-                    "🛑 حد ضرر بخش باقی‌مانده خورد؛ تارگت اول قبلاً ثبت شده"
-                    if tp1_was_hit else "🛑 حد ضرر قبل از تارگت اول خورد"
-                )
-            else:
-                label = labels.get(name)
-            if label:
-                ambiguity = " (در همین کندل تارگت هم لمس شده؛ ترتیب دقیق داخل کندل مشخص نیست)" if event.get("ambiguous_same_candle") else ""
-                result_pct = _event_price_result(record["signal"], event)
-                send_outcome_update(token, chat_id, label + "\nارز: " + str(record["signal"]["symbol"]) + result_pct + ambiguity,
-                                    reply_to_message_id=int(anchor_id))
-        if record.get("post_stop_tp1_reached") and not before["post_stop_tp1"]:
-            move_pct = float(record.get("post_stop_mfe_pct") or 0.0)
-            send_outcome_update(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت اول رسید.\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
-                                reply_to_message_id=int(anchor_id))
-        if record.get("post_stop_tp2_reached") and not before["post_stop_tp2"]:
-            move_pct = float(record.get("post_stop_mfe_pct") or 0.0)
-            send_outcome_update(token, chat_id, f"ℹ️ پس از خوردن حد ضرر، قیمت بعداً به تارگت دوم رسید.\nبیشترین حرکت مثبت از ورود: +{move_pct:.2f}%",
-                                reply_to_message_id=int(anchor_id))
+    # Save tracker changes first; notifications have a durable retry queue.
     save_outcome_journal(outcome_journal)
+    outcome_journal = dispatch_outcome_notifications(outcome_journal, token, chat_id)
     outcome_statuses = {}
     for trade in outcome_journal.get("trades", {}).values():
         status = trade.get("status", "UNKNOWN")
