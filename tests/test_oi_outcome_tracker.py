@@ -69,7 +69,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         journal, key = self.journal()
         journal["trades"][key]["status"] = "OPEN"
         journal["trades"][key]["entry_fill_price"] = 100.0
-        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000}]
+        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000, "fill": 100.0}]
         now = 100_000_000
         cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
         calls = {"15m": [], "1m": []}
@@ -95,7 +95,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         journal, key = self.journal()
         journal["trades"][key]["status"] = "OPEN"
         journal["trades"][key]["entry_fill_price"] = 100.0
-        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000}]
+        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000, "fill": 100.0}]
         now = 100_000_000
         cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
         fallback_calls = []
@@ -122,7 +122,7 @@ class OutcomeTrackerTests(unittest.TestCase):
         journal, key = self.journal()
         journal["trades"][key]["status"] = "OPEN"
         journal["trades"][key]["entry_fill_price"] = 100.0
-        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000}]
+        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000, "fill": 100.0}]
         now = 100_000_000
         cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
         calls = []
@@ -376,12 +376,14 @@ class OutcomeTrackerTests(unittest.TestCase):
             waiting["trade_id"]: waiting,
         }})
 
-        self.assertEqual(report["entry_touched"], 2)
-        self.assertEqual(report["not_entered"], 1)
-        self.assertEqual(report["entry_touched_decided"], 2)
-        self.assertEqual(report["sl_before_tp1"], 1)
-        self.assertEqual(report["tp1_before_sl"], 1)
-        self.assertEqual(report["entry_touched_win_rate_pct"], 50.0)
+        # Historical outcome labels without an auditable ENTRY fill are
+        # excluded rather than retroactively counted as real trades.
+        self.assertEqual(report["entry_touched"], 0)
+        self.assertEqual(report["not_entered"], 3)
+        self.assertEqual(report["entry_touched_decided"], 0)
+        self.assertEqual(report["sl_before_tp1"], 0)
+        self.assertEqual(report["tp1_before_sl"], 0)
+        self.assertIsNone(report["entry_touched_win_rate_pct"])
 
     def test_summary_win_rate_uses_only_entered_and_decided_trades(self):
         entered = make_trade_record(signal(), {}, 900000)
@@ -389,6 +391,7 @@ class OutcomeTrackerTests(unittest.TestCase):
             {"event": "ENTRY", "time_ms": 900001, "fill": 100.0},
             {"event": "TP1", "time_ms": 1000000, "fill": 102.0},
         ]
+        entered["entry_fill_price"] = 100.0
         entered["status"] = "TP1_HIT"
         waiting = make_trade_record({**signal(), "candle_close_time": 1800000}, {}, 1800000)
         report = summarize_outcomes({"trades": {
