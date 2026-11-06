@@ -42,10 +42,10 @@ class WatchlistTests(unittest.TestCase):
     def test_short_needs_sell_flow(self):
         self.assertTrue(coinalyze_confirms(signal("SHORT"),metrics(taker=.40)))
         self.assertFalse(coinalyze_confirms(signal("SHORT"),metrics(taker=.55)))
-    def test_optional_coinalyze_metrics_do_not_veto_signal(self):
+    def test_missing_optional_coinalyze_metrics_fail_closed(self):
         partial = {"oi_change_15m_window_pct": 0.4, "taker_buy_ratio": 0.60,
                    "data_quality": {"complete": False}}
-        self.assertTrue(coinalyze_confirms(signal(), partial))
+        self.assertFalse(coinalyze_confirms(signal(), partial))
 
     def test_missing_or_invalid_core_confirmation_fails_closed(self):
         self.assertFalse(coinalyze_confirms(signal(), {"oi_change_15m_window_pct": None, "taker_buy_ratio": 0.6}))
@@ -94,7 +94,7 @@ class WatchlistTests(unittest.TestCase):
         self.assertNotIn("لیکویید", message)
         self.assertNotIn("نسبت حساب‌های", message)
 
-    def test_coinalyze_rejection_does_not_veto_valid_pullback(self):
+    def test_coinalyze_rejection_blocks_pullback_signal(self):
         pending = {
             "side": "LONG", "level": 1.0,
             "breakout_close_time": 900000,
@@ -109,10 +109,9 @@ class WatchlistTests(unittest.TestCase):
                 {"ABCUSDT": {"status": "منتظر پولبک", "pending_setup": pending}},
                 FakeClient(metrics(taker=0.47)), now=1000
             )
-        self.assertEqual(len(found), 1)
-        self.assertFalse(found[0][1]["coinalyze_confirmed"])
-        self.assertEqual(updated["ABCUSDT"]["status"], "سیگنال LONG آماده ارسال")
-        self.assertNotIn("pending_setup", updated["ABCUSDT"])
+        self.assertEqual(found, [])
+        self.assertEqual(updated["ABCUSDT"]["status"], "منتظر تأیید مشتقات")
+        self.assertEqual(updated["ABCUSDT"]["pending_setup"], pending)
 
     def test_bos_is_blocked_while_pullback_setup_is_pending(self):
         pending = {
