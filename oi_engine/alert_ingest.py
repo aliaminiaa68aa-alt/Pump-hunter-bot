@@ -16,6 +16,8 @@ NON_CRYPTO_BASES = {
     "RIVN", "CSOPSKHYNIX2L", "SMCI", "GME", "TER", "ALAB",
     # Tokenized equity contracts observed in the live OI source feed.
     "PLTR", "MSFT", "GEV", "ASTS", "NVO", "GDX", "LITE", "FWDI",
+    # Additional non-crypto tickers observed in the live @oi_detector scan.
+    "CSOPSAMSUNG2L", "IBM", "LLY", "ABBV", "KLAC", "AAOI", "CRWV", "SOXS",
 }
 
 
