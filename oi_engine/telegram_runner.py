@@ -288,11 +288,13 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
     )
 
     selected = []
-    channel_fresh_limit = max(0, count - reserve_market)
+    # Reserve room for urgent channel pullbacks as well as a small market
+    # slice; this prevents a large fresh-alert backlog from starving setups.
+    pending_target = min(len(channel_pending), max(1, min(4, count // 3))) if channel_pending else 0
+    channel_fresh_limit = max(0, count - reserve_market - pending_target)
     selected.extend(channel_fresh[:channel_fresh_limit])
 
     # Urgent channel pullbacks outrank all market candidates.
-    pending_target = min(len(channel_pending), max(1, min(4, count // 3))) if channel_pending else 0
     for symbol in channel_pending:
         if len(selected) >= count - reserve_market or len([
             s for s in selected if s in channel_pending
