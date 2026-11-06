@@ -948,7 +948,7 @@ def main() -> None:
             raise
 
         tracked = outcome_journal.get("trades", {}).get(trade_id, trade_record)
-        tracked["telegram_message_id"] = int(message_id)
+        tracked["telegram_message_id"] = message_id if isinstance(message_id, int) else None
         tracked["telegram_delivery_status"] = "sent"
         tracked.pop("telegram_delivery_error", None)
         save_outcome_journal(outcome_journal)
