@@ -263,6 +263,36 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 6)
         self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 2)
 
+    def test_failed_market_candidates_rotate_behind_unattempted_candidates(self):
+        watchlist = {
+            **{
+                f"CHANNEL{i}USDT": {
+                    "source_type": "oi_channel",
+                    "last_alert_received_at": 200 + i,
+                    "last_checked": 0,
+                }
+                for i in range(20)
+            },
+            **{
+                f"MARKET{i}USDT": {
+                    "source_type": "market_universe",
+                    "last_checked": 0,
+                    "last_attempted_at": 0,
+                    "first_seen": i,
+                }
+                for i in range(8)
+            },
+        }
+        first_batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=8)
+        first_market = [s for s in first_batch if s.startswith("MARKET")]
+        self.assertEqual(first_market, ["MARKET0USDT", "MARKET1USDT"])
+        for symbol in first_market:
+            watchlist[symbol]["last_attempted_at"] = 500
+
+        second_batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=8)
+        second_market = [s for s in second_batch if s.startswith("MARKET")]
+        self.assertEqual(second_market, ["MARKET2USDT", "MARKET3USDT"])
+
     def test_oi_channel_pending_setup_precedes_market_pending_setup(self):
         watchlist = {
             "MARKETUSDT": {
