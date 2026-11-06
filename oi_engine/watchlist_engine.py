@@ -104,7 +104,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     taker_text = f"{float(taker_ratio):.0%}" if taker_ratio is not None else "—"
 
     entry_instruction = (
-        "⚡ <b>ورود مارکت</b>؛ قیمت ورود عبور کرده، با قیمت لحظه‌ای وارد شوید.\n"
+        "⚡ <b>ورود مارکت</b>؛ قیمت لحظه‌ای مبناست. به‌دلیل اسلیپیج، قبل از سفارش قیمت را بررسی کنید.\n"
         if getattr(signal, "execution_mode", "LIMIT") == "MARKET"
         else "⏳ ورود فقط بعد از لمس قیمت ورود فعال است؛ قبل از آن وارد نشوید.\n"
     )
