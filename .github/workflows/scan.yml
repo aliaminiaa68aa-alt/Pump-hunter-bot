@@ -41,27 +41,15 @@ jobs:
       - name: Compile-check channel signal engine
         run: python -m compileall -q oi_engine
       - name: Poll OI channel and confirm actionable signals
+        timeout-minutes: 4
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
           COINMARKETCAP_API_KEY: ${{ secrets.COINMARKETCAP_API_KEY }}
-        # GitHub scheduled workflows have a 5-minute minimum cadence.
-        # Keep this runner alive and repeat scans on an approximately 60-second
-        # cadence within each scheduled window, reusing the same on-disk state.
-        run: |
-          timeout 220s bash -c '
-            deadline=$((SECONDS + 205))
-            while (( SECONDS < deadline )); do
-              cycle_start=$SECONDS
-              python -m oi_engine.telegram_runner
-              elapsed=$((SECONDS - cycle_start))
-              wait_seconds=$((60 - elapsed))
-              if (( wait_seconds > 0 )); then
-                sleep "$wait_seconds"
-              fi
-            done
-          '
+        # One complete scan per scheduled run. The previous inner loop could
+        # consume the entire five-minute GitHub job window and delay state saving.
+        run: timeout 210s python -m oi_engine.telegram_runner
       - name: Save bot state
         if: always()
         uses: actions/cache/save@v4
