@@ -64,7 +64,7 @@ class WatchlistTests(unittest.TestCase):
                 FakeClient(fallback_metrics), now=1000
             )
         self.assertEqual(len(found), 1)
-        self.assertEqual(updated["ABCUSDT"]["status"], "تأیید LONG")
+        self.assertEqual(updated["ABCUSDT"]["status"], "سیگنال LONG آماده ارسال")
         self.assertIn("Coinalyze 15m fallback", updated["ABCUSDT"]["data_source"])
         self.assertNotIn("market_snapshot", updated["ABCUSDT"]["coinalyze"])
 
@@ -94,7 +94,7 @@ class WatchlistTests(unittest.TestCase):
         self.assertNotIn("لیکویید", message)
         self.assertNotIn("نسبت حساب‌های", message)
 
-    def test_coinalyze_rejection_preserves_pending_pullback_for_retry(self):
+    def test_coinalyze_rejection_does_not_veto_valid_pullback(self):
         pending = {
             "side": "LONG", "level": 1.0,
             "breakout_close_time": 900000,
@@ -109,9 +109,10 @@ class WatchlistTests(unittest.TestCase):
                 {"ABCUSDT": {"status": "منتظر پولبک", "pending_setup": pending}},
                 FakeClient(metrics(taker=0.47)), now=1000
             )
-        self.assertEqual(found, [])
-        self.assertEqual(updated["ABCUSDT"]["status"], "نزدیک شرایط ورود")
-        self.assertEqual(updated["ABCUSDT"]["pending_setup"], pending)
+        self.assertEqual(len(found), 1)
+        self.assertFalse(found[0][1]["coinalyze_confirmed"])
+        self.assertEqual(updated["ABCUSDT"]["status"], "سیگنال LONG آماده ارسال")
+        self.assertNotIn("pending_setup", updated["ABCUSDT"])
 
     def test_bos_is_blocked_while_pullback_setup_is_pending(self):
         pending = {
