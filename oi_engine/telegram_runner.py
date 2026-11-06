@@ -181,7 +181,9 @@ def _format_event_time_iran(event: Dict[str, Any]) -> str:
 def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id: str) -> Dict[str, Any]:
     """Send unsent outcome events and persist per-event delivery state for retries."""
     now_ms = int(time.time() * 1000)
-    legacy_cutoff = now_ms - 30 * 60 * 1000
+    # Keep unannounced outcomes retryable for the full active-trade window.
+    # A delayed/queued GitHub Actions run must not silently discard real fills.
+    legacy_cutoff = now_ms - 96 * 60 * 60 * 1000
     for trade_id, record in journal.get("trades", {}).items():
         anchor_id = record.get("telegram_message_id")
         if not anchor_id:
@@ -197,7 +199,12 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 # replay cycle. The old status gate silently discarded ENTRY,
                 # TP1, TP2 and SL for fast trades that completed before dispatch.
                 supported_event = event.get("event") in {"ENTRY", "TP1", "TP2", "SL"}
-                if not timestamp or timestamp < legacy_cutoff or not supported_event:
+                sent_at = _safe_int(record.get("sent_at_ms"), 0)
+                if (
+                    not timestamp or timestamp < legacy_cutoff
+                    or (sent_at and timestamp < sent_at)
+                    or not supported_event
+                ):
                     delivery[key] = {"status": "legacy"}
         for index, event in enumerate(events):
             key = str(index)
