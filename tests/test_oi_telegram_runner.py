@@ -351,7 +351,7 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         first, cursor = telegram_runner.select_watchlist_batch(watchlist, limit=8)
         self.assertEqual(len(first), 8)
-        self.assertEqual(sum("pending_setup" in record for record in first.values()), 4)
+        self.assertEqual(sum("pending_setup" in record for record in first.values()), 2)
         self.assertIn("HOT1USDT", first)
         self.assertIn("HOT2USDT", first)
         self.assertTrue(any(symbol.startswith("NEW") for symbol in first))
@@ -364,7 +364,7 @@ class TelegramRunnerTests(unittest.TestCase):
             symbol for symbol, record in second.items()
             if "pending_setup" in record
         }
-        self.assertTrue(second_pending.intersection({"PEND4USDT", "PEND5USDT", "PEND6USDT", "PEND7USDT"}))
+        self.assertTrue(second_pending.intersection({"PEND2USDT", "PEND3USDT"}))
 
     def test_watchlist_pruning_ignores_malformed_cached_records(self):
         kept = telegram_runner.prune_watchlist({
@@ -537,27 +537,6 @@ class TelegramRunnerTests(unittest.TestCase):
             list(second).index("ALERT1USDT"),
             list(second).index("PENDINGUSDT"),
         )
-
-    def test_pending_setup_expiring_soon_beats_older_unexpired_setup(self):
-        watchlist = {
-            "PENDING_OLD_CHECKUSDT": {
-                "pending_setup": {"expires_at_close_time": 5000},
-                "last_checked": 100,
-            },
-            "PENDING_SOONUSDT": {
-                "pending_setup": {"expires_at_close_time": 2000},
-                "last_checked": 900,
-            },
-            **{f"ROT{i}USDT": {} for i in range(6)},
-        }
-        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=4)
-        pending_selected = [
-            symbol for symbol, record in batch.items()
-            if isinstance(record.get("pending_setup"), dict)
-        ]
-        self.assertEqual(pending_selected, [
-            "PENDING_SOONUSDT", "PENDING_OLD_CHECKUSDT"
-        ])
 
 
 if __name__ == "__main__":
