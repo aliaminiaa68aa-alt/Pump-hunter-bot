@@ -58,7 +58,7 @@ def advance_pullback_setup(
     pending: Optional[Dict[str, Any]] = None,
     required_side: Optional[str] = None,
 ) -> Tuple[Optional[Signal], Optional[Dict[str, Any]], str]:
-    """Create a pending setup on breakout; emit only after a later retest candle confirms."""
+    """Emit a retest LIMIT as soon as a confirmed breakout is detected."""
     candles = snapshot.get("candles") or []
     oi_values = snapshot.get("oi_values") or []
     if len(candles) < 55 or len(oi_values) < 3:
@@ -132,6 +132,11 @@ def advance_pullback_setup(
     side = str(pending.get("side", ""))
     if side not in {"LONG", "SHORT"}:
         return None, None, "جهت setup نامعتبر بود؛ setup پاک شد"
+    # Discard setups persisted by the previous delayed-entry implementation.
+    # They have no pre-positioned signal and must not generate a stale entry
+    # after a retest that already happened.
+    if not pending.get("entry_signal_sent"):
+        return None, None, "setup قدیمیِ قبل از اصلاح ورود پاک شد؛ منتظر شکست تازه می‌مانیم"
     if close_time <= int(pending.get("breakout_close_time", 0)):
         return None, pending, "منتظر کندل بعد از شکست هستیم"
     if close_time > int(pending.get("expires_at_close_time", 0)):
