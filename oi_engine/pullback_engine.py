@@ -349,7 +349,7 @@ def advance_pullback_setup(
     quote_volume = float(last["quote_volume"])
     baseline = candles[-21:-1]
     average_volume = sum(float(c["quote_volume"]) for c in baseline) / len(baseline)
-    if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 0.80:
+    if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 0.90:
         return None, pending, "پولبک رخ داد اما حجم کندل برگشتی کافی نیست؛ setup تا پایان مهلت حفظ شد"
 
     # Place a resting limit near the broken structure, not at the confirmation
