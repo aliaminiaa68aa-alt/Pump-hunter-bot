@@ -30,7 +30,7 @@ def make_snapshot(side="LONG"):
         })
     return {
         "symbol": "TESTUSDT", "candles": candles,
-        "oi_values": [100, 100.3, 101.0],
+        "oi_values": [100, 100.3, 102.0],
         "oi_timestamp": candles[-1]["close_time"], "funding_rate": 0.0001,
     }
 
