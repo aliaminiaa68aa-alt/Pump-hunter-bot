@@ -133,6 +133,31 @@ class CoinalyzeClient:
         ))
         return str(matches[0]["symbol"])
 
+    def get_active_binance_usdt_perpetual_symbols(self) -> List[str]:
+        """Return the supported crypto USDT perpetual universe for the secondary scanner.
+
+        This is discovery only. Every candidate still passes the same 15m
+        OI/price/flow and pullback confirmation as channel-originated symbols.
+        """
+        from oi_engine.alert_ingest import _is_crypto_candidate
+
+        exchanges = self.get_binance_exchange_codes()
+        symbols = set()
+        for market in self.get_future_markets():
+            if (
+                str(market.get("exchange", "")).upper() not in exchanges
+                or str(market.get("quote_asset", "")).upper() != "USDT"
+                or market.get("is_perpetual") is not True
+            ):
+                continue
+            base = str(market.get("base_asset", "")).upper().strip()
+            if not base:
+                continue
+            symbol = f"{base}USDT"
+            if _is_crypto_candidate(symbol):
+                symbols.add(symbol)
+        return sorted(symbols)
+
     @staticmethod
     def _first(payload: Any, symbol: str) -> Optional[dict]:
         if not isinstance(payload, list):
