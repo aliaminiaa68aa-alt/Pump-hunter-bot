@@ -267,6 +267,7 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
     ]
     # The nearest expiry is the most urgent; age breaks ties.
     pending_all.sort(key=lambda symbol: (
+        0 if watchlist[symbol].get("source_type") == "oi_channel" else 1,
         _safe_int(watchlist[symbol].get("last_checked", 0)),
         _safe_int(watchlist[symbol]["pending_setup"].get("expires_at_close_time", 0)),
     ))
