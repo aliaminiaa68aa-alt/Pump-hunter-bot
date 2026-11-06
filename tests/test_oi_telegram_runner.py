@@ -194,6 +194,24 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(list(batch)[0], "OIUSDT")
         self.assertEqual(len(batch), 5)
 
+    def test_oi_channel_pending_setup_precedes_market_pending_setup(self):
+        watchlist = {
+            "MARKETUSDT": {
+                "source_type": "market_universe",
+                "pending_setup": {"expires_at_close_time": 100},
+                "last_checked": 1,
+            },
+            "OICHANNELUSDT": {
+                "source_type": "oi_channel",
+                "pending_setup": {"expires_at_close_time": 200},
+                "last_checked": 100,
+            },
+            **{f"OTHER{i}USDT": {} for i in range(10)},
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=2)
+        self.assertIn("OICHANNELUSDT", batch)
+        self.assertIn("MARKETUSDT", batch)
+
     def test_market_universe_queue_is_bounded_and_rotates(self):
         class UniverseClient:
             def get_active_binance_usdt_perpetual_symbols(self):
