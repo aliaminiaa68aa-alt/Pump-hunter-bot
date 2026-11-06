@@ -170,6 +170,19 @@ class WatchlistTests(unittest.TestCase):
         self.assertEqual(found,[])
         self.assertEqual(updated["ABCUSDT"]["status"],"در حال رصد")
 
+    def test_breakout_rejection_reason_is_not_hidden_by_generic_status(self):
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value={}), \
+             patch("oi_engine.watchlist_engine.evaluate_snapshot", return_value=signal()), \
+             patch("oi_engine.watchlist_engine.advance_pullback_setup",
+                   return_value=(None, None, "حجم شکست کافی نیست (0.80x؛ حداقل 1.50x)")):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {"status": "در حال رصد"}},
+                FakeClient(metrics()), now=1000
+            )
+        self.assertEqual(found, [])
+        self.assertIn("حجم شکست کافی نیست", updated["ABCUSDT"]["reason"])
+        self.assertNotIn("شتاب اولیه دیده شد", updated["ABCUSDT"]["reason"])
+
 
     def test_raw_funding_is_not_shown_in_compact_signal_card(self):
         extreme = metrics()
