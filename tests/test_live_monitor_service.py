@@ -46,6 +46,22 @@ class LiveMonitorServiceTests(unittest.TestCase):
             self.assertEqual(fetch_binance_last_prices(set()), {})
             get.assert_not_called()
 
+    def test_pending_telegram_delivery_is_not_monitored(self):
+        from oi_engine import service
+
+        journal, record = LiveOutcomePipelineTests()._trade_journal()
+        record["telegram_delivery_status"] = "pending"
+        with patch.dict("os.environ", {"BOT_TOKEN": "token", "CHAT_ID": "chat"}):
+            with patch.object(service, "load_outcome_journal", return_value=journal):
+                with patch.object(service, "save_outcome_journal"):
+                    with patch.object(service, "fetch_binance_last_prices") as fetch:
+                        result = service.monitor_live_outcomes_once()
+
+        fetch.assert_not_called()
+        self.assertEqual(result["active_symbols"], 0)
+        self.assertEqual(record["events"], [])
+        self.assertNotIn("live_last_price", record)
+
 
 class LiveOutcomePipelineTests(unittest.TestCase):
     def _trade_journal(self):
