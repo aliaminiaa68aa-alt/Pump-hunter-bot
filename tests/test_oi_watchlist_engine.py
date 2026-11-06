@@ -99,7 +99,8 @@ class WatchlistTests(unittest.TestCase):
         self.assertEqual(updated["ABCUSDT"]["status"], "خطای دریافت داده")
 
     def test_tp1_below_one_percent_is_rejected_for_long_and_short(self):
-        self.assertIn("حداقل مجاز 1.00٪", signal_price_geometry_rejection(signal()))
+        weak_long = Signal("ABCUSDT", "LONG", 1.0, .98, 1.005, 1.02, .8, .3, .56, 1.4, .0001, 82, 900000)
+        self.assertIn("حداقل مجاز 1.00٪", signal_price_geometry_rejection(weak_long))
         short = Signal("ABCUSDT", "SHORT", 1.0, 1.02, 0.995, 0.98, .8, .3, .40, 1.4, .0001, 82, 900000)
         self.assertIn("حداقل مجاز 1.00٪", signal_price_geometry_rejection(short))
 
