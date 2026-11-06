@@ -240,6 +240,29 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 10)
         self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 2)
 
+    def test_eight_symbol_batch_rotates_two_independent_market_candidates(self):
+        watchlist = {
+            **{
+                f"CHANNEL{i}USDT": {
+                    "source_type": "oi_channel",
+                    "last_alert_received_at": 200 + i,
+                    "last_checked": 0,
+                }
+                for i in range(20)
+            },
+            **{
+                f"MARKET{i}USDT": {
+                    "source_type": "market_universe",
+                    "last_checked": 0,
+                }
+                for i in range(8)
+            },
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=8)
+        self.assertEqual(len(batch), 8)
+        self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 6)
+        self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 2)
+
     def test_oi_channel_pending_setup_precedes_market_pending_setup(self):
         watchlist = {
             "MARKETUSDT": {
