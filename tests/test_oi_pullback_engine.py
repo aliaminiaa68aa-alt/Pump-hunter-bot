@@ -325,7 +325,7 @@ class PullbackEngineTests(unittest.TestCase):
         _, pending, _ = advance_pullback_setup(data)
         add_retest(data, "LONG")
         first = data["candles"][-1]
-        first.update({"low":99.95, "close":100.7, "open":100.6,
+        first.update({"low":99.95, "close":100.61, "open":100.6,
                       "taker_buy_quote":100000})
         _, pending, _ = advance_pullback_setup(data, pending)
         self.assertAlmostEqual(pending["pullback_extreme"], 99.95)
