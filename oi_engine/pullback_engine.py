@@ -12,7 +12,6 @@ SETUP_LIFETIME_CANDLES = 8
 STOP_BUFFER_ATR = 0.35
 MAX_STOP_ATR = 2.00
 MIN_STOP_PCT = 0.25
-MAX_ENTRY_EXTENSION_ATR = 1.25
 ENTRY_LIMIT_OFFSET_ATR = 0.02
 MIN_ENTRY_QUALITY = 45
 MIN_REJECTION_BODY_RATIO = 0.14
@@ -320,20 +319,13 @@ def advance_pullback_setup(
             f"(بدنه {body_ratio:.0%}؛ حداقل {MIN_REJECTION_BODY_RATIO:.0%}، "
             f"محل بسته‌شدن {close_location:.0%}؛ حداقل {MIN_REJECTION_CLOSE_LOCATION:.0%})"
         )
-    # Do not chase a confirmation candle that has already travelled too far
-    # from the broken structure. Keep the setup alive for a fresh retest.
-    entry_extension = (
-        (float(last["close"]) - level) / atr if side == "LONG"
-        else (level - float(last["close"])) / atr
-    )
+    # If price has lost the broken level, keep waiting. If it has already
+    # travelled far in the signal direction, do NOT silently discard the setup:
+    # the execution classifier below will emit MISSED (no-entry) instead of
+    # leaving the user unaware that the move has already run.
     if ((side == "LONG" and float(last["close"]) <= level)
             or (side == "SHORT" and float(last["close"]) >= level)):
         return None, pending, "قیمت دوباره سطح شکست را از دست داده؛ منتظر تثبیت مجدد می‌مانیم"
-    if entry_extension > MAX_ENTRY_EXTENSION_ATR:
-        return None, pending, (
-            f"کندل تأیید از نقطه ورود دور شده ({entry_extension:.2f} ATR)؛ "
-            "ورود تعقیبی ممنوع، منتظر پولبک تازه می‌مانیم"
-        )
     if not directional_flow:
         return None, pending, (
             f"پولبک رخ داد اما تأیید چندکندلی/EMA کامل نیست "
@@ -397,7 +389,7 @@ def advance_pullback_setup(
         risk = min_risk
     # Re-check the final stop after applying the minimum-distance floor.
     # A widened stop must never bypass the maximum ATR risk guard.
-    if risk > atr * MAX_STOP_ATR:
+    if risk > atr * MAX_STOP_ATR and execution_mode != "MISSED":
         return None, pending, "ریسک این کندل برای ورود بیش از حد دور است؛ setup حفظ شد تا فرصت پولبک معتبر بعدی بررسی شود"
 
     tp1 = entry + risk if side == "LONG" else entry - risk
