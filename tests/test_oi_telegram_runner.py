@@ -752,6 +752,55 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(record["notification_state"]["1"]["status"], "sent")
 
 
+    def test_recovers_old_false_missed_entry_and_sends_targets(self):
+        now_ms = 1_000_000 + 3 * 60 * 60 * 1000
+        journal = {
+            "trades": {
+                "old-false-missed": {
+                    "status": "MISSED_ENTRY",
+                    "entry_missed": True,
+                    "entry_missed_reason": "old stale rule",
+                    "sent_at_ms": 1_000_000,
+                    "telegram_message_id": 90,
+                    "signal": {
+                        "symbol": "AKEUSDT", "side": "SHORT",
+                        "entry": 100.0, "stop_loss": 101.0,
+                        "take_profit_1": 99.0, "take_profit_2": 98.0,
+                    },
+                    "events": [
+                        {"event": "ENTRY", "time_ms": 1_060_000, "fill": 100.0},
+                        {"event": "TP1", "time_ms": 1_120_000, "fill": 99.0},
+                        {"event": "TP2", "time_ms": 1_180_000, "fill": 98.0},
+                    ],
+                    "notification_state": {
+                        "0": {"status": "ignored", "reason": "missed_entry"},
+                        "1": {"status": "ignored", "reason": "missed_entry"},
+                        "2": {"status": "ignored", "reason": "missed_entry"},
+                    },
+                }
+            }
+        }
+        with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
+            with patch.object(telegram_runner, "save_outcome_journal"):
+                with patch.object(telegram_runner, "send_telegram", side_effect=[101, 102]) as send:
+                    result = telegram_runner.dispatch_outcome_notifications(
+                        journal, "token", "chat"
+                    )
+        self.assertEqual(send.call_count, 2)
+        self.assertIn("تارگت اول خورد", send.call_args_list[0].args[2])
+        self.assertIn("تارگت دوم خورد", send.call_args_list[1].args[2])
+        self.assertTrue(all(
+            "برای ورود جدید اقدام نکنید" in call.args[2]
+            for call in send.call_args_list
+        ))
+        record = result["trades"]["old-false-missed"]
+        self.assertEqual(record["status"], "CLOSED_TP2")
+        self.assertFalse(record["entry_missed"])
+        self.assertEqual(record["notification_state"]["0"]["reason"], "late_entry_notification")
+        self.assertEqual(record["notification_state"]["1"]["status"], "sent")
+        self.assertEqual(record["notification_state"]["2"]["status"], "sent")
+
+
     def test_entry_that_predates_signal_suppresses_all_outcomes(self):
         now_ms = 2_000_000
         journal = {
