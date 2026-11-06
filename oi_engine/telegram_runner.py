@@ -211,8 +211,8 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
     # smaller batches) for pending setups. A one-symbol batch remains
     # dedicated to fresh alerts so it cannot be blocked by an older setup.
     pending_target = (
-        min(len(pending_all), min(2, count // 4))
-        if count >= 4 and pending_all else 0
+        min(len(pending_all), max(1, min(2, count // 4)))
+        if count >= 2 and pending_all else 0
     )
     fresh_limit = max(0, count - pending_target)
     selected = fresh_alerts[:fresh_limit]
