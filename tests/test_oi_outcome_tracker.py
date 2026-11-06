@@ -270,13 +270,15 @@ class OutcomeTrackerTests(unittest.TestCase):
 
     def test_stopped_trade_skips_post_stop_calls_between_15m_closes(self):
         journal, key = self.journal()
-        stop_candle = [candle(900000, 100, 101, 97, 98)]
-        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: stop_candle)
+        entry_candle = [candle(900000, 100, 100.5, 99.5, 100)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: entry_candle)
+        stop_candle = [candle(1800000, 100, 101, 97, 98)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: stop_candle)
         calls = []
         fetcher = lambda *args: calls.append(args) or []
-        monitor_journal(journal, now_ms=2000000, fetcher=fetcher)
+        monitor_journal(journal, now_ms=2900000, fetcher=fetcher)
         self.assertEqual(calls, [])
-        monitor_journal(journal, now_ms=2700000, fetcher=fetcher)
+        monitor_journal(journal, now_ms=3600000, fetcher=fetcher)
         self.assertEqual(len(calls), 1)
 
     def test_provider_error_is_retained_without_closing_trade(self):
@@ -348,9 +350,10 @@ class OutcomeTrackerTests(unittest.TestCase):
         journal, key = self.journal("LONG")
         candles = [
             candle(900000, 100, 100.5, 99.5, 100.2),
-            candle(1800000, 100.2, 103, 98.5, 102.5),
+            candle(1800000, 100.2, 100.5, 99.5, 100.1),
+            candle(2700000, 100.1, 103, 98.5, 102.5),
         ]
-        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: candles)
+        monitor_journal(journal, now_ms=3600000, fetcher=lambda *_: candles)
         record = journal["trades"][key]
         self.assertAlmostEqual(record["mae_before_tp1_pct"], 0.5)
         self.assertAlmostEqual(record["mfe_before_tp1_pct"], 0.5)
