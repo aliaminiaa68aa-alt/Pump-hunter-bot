@@ -510,7 +510,7 @@ class TelegramRunnerTests(unittest.TestCase):
         batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=1)
         self.assertEqual(list(batch), ["NEVER_TRIEDUSDT"])
 
-    def test_unscanned_fresh_alerts_keep_priority_on_following_cycles(self):
+    def test_unscanned_fresh_alerts_keep_priority_while_pending_gets_reserved_slot(self):
         watchlist = {
             f"ALERT{i}USDT": {"last_alert": 1000 + i, "last_checked": 0}
             for i in range(1, 15)
@@ -521,24 +521,43 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         first, cursor = telegram_runner.select_watchlist_batch(watchlist, limit=12)
         self.assertEqual(len(first), 12)
-        self.assertTrue(all(symbol.startswith("ALERT") for symbol in first))
+        self.assertEqual(sum(symbol.startswith("ALERT") for symbol in first), 11)
+        self.assertIn("PENDINGUSDT", first)
+        self.assertEqual(list(first)[-1], "PENDINGUSDT")
+
         for record in first.values():
             record["last_checked"] = 2000
         second, _ = telegram_runner.select_watchlist_batch(watchlist, cursor, limit=12)
-        # Remaining fresh alerts must lead the next batch. The batch may
-        # also use its spare capacity for ordinary rotation candidates.
+        # Remaining fresh alerts still lead; pending setup is revisited too.
         self.assertEqual(
-            list(second)[:2], ["ALERT2USDT", "ALERT1USDT"]
+            list(second)[:3], ["ALERT3USDT", "ALERT2USDT", "ALERT1USDT"]
         )
         self.assertIn("PENDINGUSDT", second)
-        self.assertLess(
-            list(second).index("ALERT2USDT"),
-            list(second).index("PENDINGUSDT"),
-        )
         self.assertLess(
             list(second).index("ALERT1USDT"),
             list(second).index("PENDINGUSDT"),
         )
+
+    def test_pending_setup_expiring_soon_beats_older_unexpired_setup(self):
+        watchlist = {
+            "PENDING_OLD_CHECKUSDT": {
+                "pending_setup": {"expires_at_close_time": 5000},
+                "last_checked": 100,
+            },
+            "PENDING_SOONUSDT": {
+                "pending_setup": {"expires_at_close_time": 2000},
+                "last_checked": 900,
+            },
+            **{f"ROT{i}USDT": {} for i in range(6)},
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=4)
+        pending_selected = [
+            symbol for symbol, record in batch.items()
+            if isinstance(record.get("pending_setup"), dict)
+        ]
+        self.assertEqual(pending_selected, [
+            "PENDING_SOONUSDT", "PENDING_OLD_CHECKUSDT"
+        ])
 
 
 if __name__ == "__main__":
