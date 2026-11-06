@@ -27,25 +27,27 @@ class OutcomeTrackerTests(unittest.TestCase):
 
     def test_tp1_then_tp2_are_recorded_in_order(self):
         journal, key = self.journal()
-        first = [candle(900000, 100, 103, 99, 102.5)]
-        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: first)
+        entry = [candle(900000, 100, 100.5, 99.5, 100.2)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: entry)
+        self.assertEqual(journal["trades"][key]["status"], "OPEN")
+        first = [candle(1800000, 100.2, 103, 99.5, 102.5)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: first)
         self.assertEqual(journal["trades"][key]["status"], "TP1_HIT")
         self.assertEqual([e["event"] for e in journal["trades"][key]["events"]], ["ENTRY", "TP1"])
-
-        second = [candle(1800000, 102.5, 105, 102, 104.5)]
-        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: second)
+        second = [candle(2700000, 102.5, 105, 102, 104.5)]
+        monitor_journal(journal, now_ms=3600000, fetcher=lambda *_: second)
         self.assertEqual(journal["trades"][key]["status"], "CLOSED_TP2")
         self.assertEqual([e["event"] for e in journal["trades"][key]["events"]], ["ENTRY", "TP1", "TP2"])
 
-    def test_stop_wins_if_stop_and_target_are_in_same_candle(self):
+    def test_stop_and_target_on_entry_candle_are_marked_ambiguous(self):
         journal, key = self.journal()
         both = [candle(900000, 100, 103, 97, 101)]
         monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: both)
         record = journal["trades"][key]
-        self.assertEqual(record["status"], "CLOSED_SL")
-        self.assertEqual([e["event"] for e in record["events"]], ["ENTRY", "SL"])
+        self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_CANDLE")
+        self.assertEqual([e["event"] for e in record["events"]], ["ENTRY", "AMBIGUOUS_ENTRY_CANDLE"])
         self.assertEqual(record["mfe_pct"], 0.0)
-        self.assertEqual(record["mae_pct"], 2.0)
+        self.assertEqual(record["mae_pct"], 0.0)
 
     def test_one_minute_intrabar_entry_with_stop_or_target_is_ambiguous(self):
         record = make_trade_record(signal(), {}, 900000)
@@ -170,15 +172,16 @@ class OutcomeTrackerTests(unittest.TestCase):
 
     def test_long_moves_remaining_stop_to_entry_after_tp1(self):
         journal, key = self.journal("LONG")
-        first = [candle(900000, 100, 103, 99.5, 102.5)]
-        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: first)
+        entry = [candle(900000, 100, 100.5, 99.5, 100.2)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: entry)
+        first = [candle(1800000, 100.2, 103, 99.5, 102.5)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: first)
         record = journal["trades"][key]
         self.assertEqual(record["status"], "TP1_HIT")
         self.assertTrue(record["breakeven_stop_active"])
         self.assertEqual(record["breakeven_stop_price"], 100.0)
-
-        next_candle = [candle(1800000, 101, 101.5, 99.8, 100.2)]
-        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: next_candle)
+        next_candle = [candle(2700000, 101, 101.5, 99.8, 100.2)]
+        monitor_journal(journal, now_ms=3600000, fetcher=lambda *_: next_candle)
         record = journal["trades"][key]
         self.assertEqual(record["status"], "CLOSED_SL")
         stop_event = record["events"][-1]
@@ -188,15 +191,16 @@ class OutcomeTrackerTests(unittest.TestCase):
 
     def test_short_moves_remaining_stop_to_entry_after_tp1(self):
         journal, key = self.journal("SHORT")
-        first = [candle(900000, 100, 100.5, 97, 97.5)]
-        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: first)
+        entry = [candle(900000, 100, 100.5, 99.5, 100.2)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: entry)
+        first = [candle(1800000, 100, 100.5, 97, 97.5)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: first)
         record = journal["trades"][key]
         self.assertEqual(record["status"], "TP1_HIT")
         self.assertTrue(record["breakeven_stop_active"])
         self.assertEqual(record["breakeven_stop_price"], 100.0)
-
-        next_candle = [candle(1800000, 99, 100.2, 98.5, 99.8)]
-        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: next_candle)
+        next_candle = [candle(2700000, 99, 100.2, 98.5, 99.8)]
+        monitor_journal(journal, now_ms=3600000, fetcher=lambda *_: next_candle)
         record = journal["trades"][key]
         self.assertEqual(record["status"], "CLOSED_SL")
         stop_event = record["events"][-1]
@@ -206,23 +210,26 @@ class OutcomeTrackerTests(unittest.TestCase):
 
     def test_short_tp1_then_tp2(self):
         journal, key = self.journal("SHORT")
-        first = [candle(900000, 100, 101, 97, 97.5)]
-        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: first)
+        entry = [candle(900000, 100, 100.5, 99.5, 100.2)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: entry)
+        first = [candle(1800000, 100, 101, 97, 97.5)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: first)
         self.assertEqual(journal["trades"][key]["status"], "TP1_HIT")
-        second = [candle(1800000, 97, 98, 95, 95.5)]
-        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: second)
+        second = [candle(2700000, 97, 98, 95, 95.5)]
+        monitor_journal(journal, now_ms=3600000, fetcher=lambda *_: second)
         self.assertEqual(journal["trades"][key]["status"], "CLOSED_TP2")
 
     def test_stopped_trade_tracks_if_original_targets_are_reached_later(self):
         journal, key = self.journal("LONG")
-        stop_candle = [candle(900000, 100, 101, 97, 98)]
-        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: stop_candle)
+        entry = [candle(900000, 100, 100.5, 99.5, 100)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: entry)
+        stop_candle = [candle(1800000, 100, 101, 97, 98)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: stop_candle)
         record = journal["trades"][key]
         self.assertEqual(record["status"], "CLOSED_SL")
         self.assertEqual(record["post_stop_tracking"], "ACTIVE")
-
-        later = [candle(1800000, 99, 105, 98.5, 104)]
-        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: later)
+        later = [candle(2700000, 99, 105, 98.5, 104)]
+        monitor_journal(journal, now_ms=3600000, fetcher=lambda *_: later)
         self.assertEqual(record["status"], "CLOSED_SL")
         self.assertTrue(record["post_stop_tp1_reached"])
         self.assertTrue(record["post_stop_tp2_reached"])
@@ -230,11 +237,13 @@ class OutcomeTrackerTests(unittest.TestCase):
 
     def test_post_stop_tracking_is_supported_for_short(self):
         journal, key = self.journal("SHORT")
-        stop_candle = [candle(900000, 103, 103, 99, 102)]
-        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: stop_candle)
+        entry = [candle(900000, 100, 100.5, 99.5, 100)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: entry)
+        stop_candle = [candle(1800000, 103, 103, 99, 102)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: stop_candle)
         record = journal["trades"][key]
-        later = [candle(1800000, 101, 101.5, 95, 96)]
-        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: later)
+        later = [candle(2700000, 101, 101.5, 95, 96)]
+        monitor_journal(journal, now_ms=3600000, fetcher=lambda *_: later)
         self.assertTrue(record["post_stop_tp1_reached"])
         self.assertTrue(record["post_stop_tp2_reached"])
         self.assertEqual(record["status"], "CLOSED_SL")
