@@ -656,6 +656,19 @@ def main() -> None:
     provider_errors = sum(bool(trade.get("last_error")) for trade in outcome_journal.get("trades", {}).values())
     print(f"Outcome monitor: statuses={outcome_statuses}, provider_errors={provider_errors}")
     print(f"Outcome report: {json.dumps(summarize_outcomes(outcome_journal), ensure_ascii=False, sort_keys=True)}")
+    # Per-trade diagnostics distinguish missing market events from queued or failed Telegram delivery.
+    for trade_id, trade in outcome_journal.get("trades", {}).items():
+        events = [f"{event.get('event')}@{_safe_int(event.get('time_ms'), 0)}" for event in trade.get("events", [])]
+        delivery = trade.get("notification_state", {})
+        delivery_summary = {str(index): state.get("status", "unknown") for index, state in delivery.items() if isinstance(state, dict)}
+        print(
+            "Outcome trade diagnostic: "
+            f"trade={trade_id} status={trade.get('status')} "
+            f"events={events} notifications={delivery_summary} "
+            f"replay_count={trade.get('last_replay_candle_count', 'n/a')} "
+            f"replay_last_ms={trade.get('last_replay_last_candle_ms', 'n/a')} "
+            f"last_error={trade.get('last_error') or 'none'}"
+        )
     added = 0
     public_channel = os.getenv("OI_PUBLIC_CHANNEL", "oi_detector").strip()
     public_last_id = int(watch_state.get("public_channel_last_id", 0))
