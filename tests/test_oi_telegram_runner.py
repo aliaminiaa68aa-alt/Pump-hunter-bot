@@ -298,7 +298,7 @@ class TelegramRunnerTests(unittest.TestCase):
              patch.object(telegram_runner, "verify_telegram_connection"), \
              patch.object(telegram_runner, "poll_public_channel_alerts", return_value=public_result) as poll, \
              patch.object(telegram_runner, "scan_watchlist", return_value=scan_result), \
-             patch.object(telegram_runner, "send_telegram") as send, \
+             patch.object(telegram_runner, "send_telegram", side_effect=send_side_effect) as send, \
              patch.object(telegram_runner.time, "time", return_value=now if now is not None else 2000000):
             telegram_runner.main()
         return state_path, watch_path, poll, send
