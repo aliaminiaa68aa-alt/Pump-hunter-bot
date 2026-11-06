@@ -369,8 +369,11 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
 def summarize_scan_diagnostics(watchlist, scanned_batch):
     """Build compact counters explaining where the current scan batch stands."""
     statuses = {}
+    sources = {}
     reasons = {"coinalyze_rejected": 0, "pending_pullback": 0, "setup_invalidated_or_expired": 0, "data_errors": 0}
     for record in scanned_batch.values():
+        source = str(record.get("source_type", "oi_channel"))
+        sources[source] = sources.get(source, 0) + 1
         status = str(record.get("status", "نامشخص"))
         statuses[status] = statuses.get(status, 0) + 1
         reason = str(record.get("reason", ""))
@@ -396,6 +399,7 @@ def summarize_scan_diagnostics(watchlist, scanned_batch):
         "scanned": len(scanned_batch),
         "not_scanned_this_cycle": max(0, len(watchlist) - len(scanned_batch)),
         "statuses": statuses,
+        "sources": sources,
         "reasons": reasons,
     }
 
@@ -648,7 +652,7 @@ def main() -> None:
     for symbol, record in scanned_batch.items():
         print(
             f"Watchlist {symbol}: {record.get('status')} - {record.get('reason', '')} "
-            f"[market_source={record.get('data_source', 'unknown')}, "
+            f"[source={record.get('source_type', 'oi_channel')}, market_source={record.get('data_source', 'unknown')}, "
             f"alert_message_id={record.get('source_message_id', 'unknown')}]"
         )
 
