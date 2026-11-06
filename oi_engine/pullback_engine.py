@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
+import time
 
 from oi_engine.signal_engine import Signal, _atr, evaluate_snapshot, score_signal_components
 
@@ -352,34 +353,44 @@ def advance_pullback_setup(
     if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 0.85:
         return None, pending, (f"پولبک رخ داد اما حجم کندل برگشتی کافی نیست ({quote_volume / average_volume:.2f}x؛ حداقل 0.85x)؛ setup تا پایان مهلت حفظ شد")
 
-    # Place a resting limit near the broken structure, not at the confirmation
-    # candle close. The signal is sent only after confirmation, then waits for
-    # price to revisit this level; this avoids turning every signal into a
-    # next-candle market entry after an extended rejection candle.
-    entry = (
+    # Use the live ticker when the data provider supplies it; otherwise use
+    # the latest closed confirmation close (never label an old LIMIT as executable).
+    planned_entry = (
         level + atr * ENTRY_LIMIT_OFFSET_ATR if side == "LONG"
         else level - atr * ENTRY_LIMIT_OFFSET_ATR
     )
-    # If the confirmation candle has only just crossed the planned limit,
-    # switch to market execution at its close. Never chase beyond 0.15 ATR.
     confirmation_close = float(last["close"])
+    current_price = float(snapshot.get("current_price") or confirmation_close)
+    price_timestamp = snapshot.get("price_timestamp")
+    # A live quote older than 60 seconds is not safe for MARKET execution.
+    live_quote_fresh = (
+        price_timestamp is None
+        or (int(time.time() * 1000) - int(price_timestamp) <= 60_000)
+    )
     execution_mode = "LIMIT"
     crossed_entry = (
-        confirmation_close > entry if side == "LONG"
-        else confirmation_close < entry
+        current_price > planned_entry if side == "LONG"
+        else current_price < planned_entry
     )
     if crossed_entry:
         market_extension = (
-            (confirmation_close - entry) / atr if side == "LONG"
-            else (entry - confirmation_close) / atr
+            (current_price - level) / atr if side == "LONG"
+            else (level - current_price) / atr
         )
-        if market_extension <= 0.15:
-            entry = confirmation_close
-            execution_mode = "MARKET"
-        # Larger extensions remain passive limit setups; no market chasing.
-    elif ((side == "LONG" and entry >= confirmation_close)
-          or (side == "SHORT" and entry <= confirmation_close)):
-        return None, pending, "ورود محدود هنوز فعال نشده؛ قیمت به ناحیه سفارش نرسیده، منتظر پولبک معتبر می‌مانیم"
+        if market_extension > MAX_ENTRY_EXTENSION_ATR:
+            return None, pending, (
+                f"قیمت لحظه‌ای از سطح شکست بیش از حد دور شده ({market_extension:.2f} ATR)؛ "
+                "ورود مارکت تعقیبی صادر نشد"
+            )
+        if not live_quote_fresh and snapshot.get("current_price") is not None:
+            return None, pending, "قیمت لحظه‌ای قدیمی است؛ برای جلوگیری از ورود اشتباه منتظر داده تازه می‌مانیم"
+        entry = current_price
+        execution_mode = "MARKET"
+    else:
+        entry = planned_entry
+        if ((side == "LONG" and entry >= current_price)
+                or (side == "SHORT" and entry <= current_price)):
+            return None, pending, "ورود محدود هنوز فعال نشده؛ قیمت به ناحیه سفارش نرسیده، منتظر پولبک معتبر می‌مانیم"
     risk = entry - stop if side == "LONG" else stop - entry
     if risk <= 0:
         return None, None, "ساختار حد ضرر در سمت اشتباه ورود قرار گرفته؛ setup باطل شد"
