@@ -240,11 +240,10 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             # discovery feed, not a LONG/SHORT instruction.
             bos_signal = evaluate_snapshot(snapshot)
             previous_pending_setup = record.get("pending_setup")
-            # Spot-only execution: never publish SHORT setups, which require
-            # borrowing/margin and are not actionable in the user's cash-market plan.
-            # Derivatives OI/funding remain confirmation data only.
+            # Support both LONG and SHORT setups. SHORT signals are
+            # directional trade ideas and require a derivatives/short-capable venue.
             pullback_signal, pending_setup, setup_reason = advance_pullback_setup(
-                snapshot, previous_pending_setup, "LONG"
+                snapshot, previous_pending_setup, None
             )
             metrics.update(source_oi_priority(record.get("source_text", "")))
             record["oi_priority_score"] = metrics["oi_priority_score"]
