@@ -1,4 +1,5 @@
 import unittest
+import time
 
 from oi_engine.pullback_engine import advance_pullback_setup
 
@@ -45,6 +46,8 @@ def add_retest(data, side):
     data["candles"].append(row)
     data["oi_values"] = [100.2,101.0,101.8]
     data["oi_timestamp"] = row["close_time"]
+    data["current_price"] = row["close"]
+    data["price_timestamp"] = int(time.time() * 1000)
     return data
 
 
@@ -69,6 +72,17 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertEqual(pending["side"], "LONG")
         self.assertIn("منتظر برگشت", reason)
 
+    def test_crossed_entry_without_fresh_quote_does_not_fake_market_fill(self):
+        data = snapshot("LONG")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "LONG")
+        data.pop("current_price", None)
+        data.pop("price_timestamp", None)
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNone(signal)
+        self.assertIsNotNone(next_pending)
+        self.assertIn("قیمت لحظه‌ای تازه", reason)
+
     def test_long_only_signals_after_retest_confirmation(self):
         data = snapshot("LONG")
         _, pending, _ = advance_pullback_setup(data)
@@ -82,7 +96,7 @@ class PullbackEngineTests(unittest.TestCase):
         # The planned limit was crossed before delivery, so this must be
         # upgraded to MARKET at the latest executable quote/confirmation close.
         self.assertEqual(signal.execution_mode, "MARKET")
-        self.assertAlmostEqual(signal.entry, data["candles"][-1]["close"])
+        self.assertAlmostEqual(signal.entry, data["current_price"])
         self.assertGreater(signal.atr_15m, 0)
         self.assertGreater(signal.pullback_extreme, 0)
         self.assertGreater(signal.setup_level, 0)
@@ -178,6 +192,8 @@ class PullbackEngineTests(unittest.TestCase):
             "close":100.52, "quote_volume":200000,
             "taker_buy_quote":120000,
         })
+        data["current_price"] = 100.51
+        data["price_timestamp"] = int(time.time() * 1000)
         signal, next_pending, reason = advance_pullback_setup(data, pending)
         self.assertIsNone(signal)
         self.assertIsNotNone(next_pending)
@@ -210,6 +226,8 @@ class PullbackEngineTests(unittest.TestCase):
             "close":99.479, "quote_volume":200000,
             "taker_buy_quote":80000,
         })
+        data["current_price"] = 99.49
+        data["price_timestamp"] = int(time.time() * 1000)
         signal, next_pending, reason = advance_pullback_setup(data, pending)
         self.assertIsNone(signal)
         self.assertIsNotNone(next_pending)
