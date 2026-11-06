@@ -186,6 +186,19 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertIsNotNone(next_pending)
         self.assertIn("ورود محدود", reason)
 
+    def test_long_large_entry_overshoot_is_reported_as_missed_not_limit(self):
+        data = snapshot("LONG")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "LONG")
+        data["candles"][-1].update({
+            "open":100.5, "high":101.2, "low":100.4, "close":101.0,
+            "quote_volume":200000, "taker_buy_quote":120000,
+        })
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNotNone(signal, reason)
+        self.assertEqual(signal.execution_mode, "MISSED")
+        self.assertIsNone(next_pending)
+
     def test_long_small_entry_overshoot_switches_to_market(self):
         data = snapshot("LONG")
         _, pending, _ = advance_pullback_setup(data)
