@@ -281,7 +281,7 @@ class TelegramRunnerTests(unittest.TestCase):
             telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = original_limit
             telegram_runner.MARKET_DISCOVERY_PER_RUN = original_add
 
-    def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None):
+    def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None, send_side_effect=None):
         state_path = Path(directory) / "sent_signals.json"
         watch_path = Path(directory) / "watchlist.json"
         outcome_path = Path(directory) / "trade_outcomes.json"
@@ -355,6 +355,38 @@ class TelegramRunnerTests(unittest.TestCase):
                 sent_state={"UNSPECIFIED:TESTUSDT:LONG": 900000},
             )
             send.assert_not_called()
+
+    def test_ambiguous_initial_signal_delivery_is_recorded_and_not_retried(self):
+        timeout = telegram_runner.requests.exceptions.ReadTimeout("read timed out")
+        with tempfile.TemporaryDirectory() as directory:
+            state, _, _, send = self._run_main(
+                directory,
+                ([(sample_signal(), sample_metrics())], {"TESTUSDT": {"status": "تأیید LONG"}}),
+                send_side_effect=timeout,
+            )
+            send.assert_called_once()
+            saved_state = json.loads(state.read_text(encoding="utf-8"))
+            self.assertEqual(saved_state["UNSPECIFIED:TESTUSDT:LONG"], 900000)
+            journal = json.loads((Path(directory) / "trade_outcomes.json").read_text(encoding="utf-8"))
+            tracked = next(iter(journal["trades"].values()))
+            self.assertEqual(tracked["telegram_delivery_status"], "unknown")
+            self.assertIsNone(tracked["telegram_message_id"])
+
+    def test_definite_initial_signal_rejection_releases_reservation(self):
+        rejection = telegram_runner.requests.exceptions.HTTPError("400 Bad Request")
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(telegram_runner.requests.exceptions.HTTPError):
+                self._run_main(
+                    directory,
+                    ([(sample_signal(), sample_metrics())], {"TESTUSDT": {"status": "تأیید LONG"}}),
+                    send_side_effect=rejection,
+                )
+            state_path = Path(directory) / "sent_signals.json"
+            saved_state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertNotIn("UNSPECIFIED:TESTUSDT:LONG", saved_state)
+            journal_path = Path(directory) / "trade_outcomes.json"
+            journal = json.loads(journal_path.read_text(encoding="utf-8"))
+            self.assertEqual(journal["trades"], {})
 
     def test_confirmed_short_is_sent_and_tracked(self):
         short = Signal("TESTUSDT", "SHORT", 100.0, 102.0, 98.0, 96.0,
