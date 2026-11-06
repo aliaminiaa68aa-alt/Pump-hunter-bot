@@ -1,8 +1,17 @@
 name: OI Channel Signal Scanner
 
 on:
-  # Manual runs only; Termux is the active scanner.
+  # Run the scanner on GitHub-hosted runners; no phone or Termux process is needed.
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/scan.yml"
+      - "oi_engine/**"
+      - "requirements.txt"
 
 permissions:
   contents: read
