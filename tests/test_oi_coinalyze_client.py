@@ -52,6 +52,7 @@ class CoinalyzeClientTests(unittest.TestCase):
             {"exchange": "BINANCE", "base_asset": "ETH", "quote_asset": "USDT", "is_perpetual": True},
             {"exchange": "OTHER", "base_asset": "SOL", "quote_asset": "USDT", "is_perpetual": True},
             {"exchange": "BINANCE", "base_asset": "AAPL", "quote_asset": "USDT", "is_perpetual": True},
+            {"exchange": "BINANCE", "base_asset": "AMZN", "quote_asset": "USDT", "is_perpetual": True},
             {"exchange": "BINANCE", "base_asset": "XRP", "quote_asset": "USDT", "is_perpetual": False},
             {"exchange": "BINANCE", "base_asset": "BTC", "quote_asset": "BUSD", "is_perpetual": True},
         ]
