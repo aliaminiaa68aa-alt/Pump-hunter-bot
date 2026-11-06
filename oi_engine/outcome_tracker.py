@@ -327,7 +327,7 @@ def monitor_journal(
                     if stop_hit or tp1_hit or tp2_hit:
                         record["entry_candle_ambiguous"] = True
                         record.setdefault("events", []).append({
-                            "event": "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL",
+                            "event": "AMBIGUOUS_ENTRY_CANDLE",
                             "time_ms": close_ms,
                             "entry_fill": entry,
                             "stop_touched": stop_hit,
