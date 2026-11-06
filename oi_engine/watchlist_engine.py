@@ -152,12 +152,14 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 # Coinalyze's closed 15m candles drive setup detection. Fetch a
                 # separate recent 1m quote only for execution, never use the
                 # older 15m close as a substitute for a MARKET fill.
-                try:
-                    live_quote = client.fetch_live_price(symbol, now=timestamp)
-                    if live_quote:
-                        snapshot.update(live_quote)
-                except (CoinalyzeError, requests.RequestException, ValueError, TypeError) as quote_error:
-                    print(f"Live quote unavailable for {symbol}: {quote_error}")
+                live_quote_fetcher = getattr(client, "fetch_live_price", None)
+                if callable(live_quote_fetcher):
+                    try:
+                        live_quote = live_quote_fetcher(symbol, now=timestamp)
+                        if live_quote:
+                            snapshot.update(live_quote)
+                    except (CoinalyzeError, requests.RequestException, ValueError, TypeError) as quote_error:
+                        print(f"Live quote unavailable for {symbol}: {quote_error}")
             # Evaluate a confirmed closed-candle OI signal independently of
             # the direction label in the source channel. The channel is a
             # discovery feed, not a LONG/SHORT instruction.
