@@ -279,7 +279,7 @@ class PullbackEngineTests(unittest.TestCase):
         data = snapshot("LONG")
         _, pending, _ = advance_pullback_setup(data)
         add_retest(data, "LONG")
-        data["candles"][-1]["quote_volume"] = 85000
+        data["candles"][-1]["quote_volume"] = 80000
         data["candles"][-1]["taker_buy_quote"] = 60000
         signal, next_pending, reason = advance_pullback_setup(data, pending)
         self.assertIsNone(signal)
