@@ -729,7 +729,7 @@ class TelegramRunnerTests(unittest.TestCase):
                         "take_profit_1": 101.0, "take_profit_2": 102.0,
                     },
                     "events": [
-                        {"event": "ENTRY", "time_ms": sent_at_ms + 60_000, "fill": 100.0},
+                        {"event": "ENTRY", "time_ms": sent_at_ms + 20_000, "fill": 100.0},
                         {"event": "TP1", "time_ms": sent_at_ms + 120_000, "fill": 101.0},
                     ],
                 }
