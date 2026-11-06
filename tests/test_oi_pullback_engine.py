@@ -84,7 +84,7 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertLess(signal.entry, data["candles"][-1]["close"])
         self.assertAlmostEqual(
             signal.entry,
-            signal.setup_level + signal.atr_15m * 0.02,
+            signal.setup_level,
         )
         self.assertGreater(signal.atr_15m, 0)
         self.assertGreater(signal.pullback_extreme, 0)
@@ -106,7 +106,7 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertGreater(signal.entry, data["candles"][-1]["close"])
         self.assertAlmostEqual(
             signal.entry,
-            signal.setup_level - signal.atr_15m * 0.02,
+            signal.setup_level,
         )
 
     def test_long_limit_entry_must_be_below_confirmation_close(self):
