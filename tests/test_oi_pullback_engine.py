@@ -138,12 +138,12 @@ class PullbackEngineTests(unittest.TestCase):
         _, pending, _ = advance_pullback_setup(data)
         add_retest(data, "LONG")
         first = data["candles"][-1]
-        first.update({"open":100.55, "high":101.2, "low":100.4, "close":100.72,
+        first.update({"open":100.5, "high":100.7, "low":100.4, "close":100.56,
                       "quote_volume":180000, "taker_buy_quote":108000})
         previous = first["close_time"]
         data["candles"].append({
-            "open_time":previous+1, "open":101.22, "high":101.5,
-            "low":101.0, "close":101.30, "volume":1500,
+            "open_time":previous+1, "open":100.68, "high":100.9,
+            "low":100.4, "close":100.75, "volume":1500,
             "quote_volume":200000, "taker_buy_quote":125000,
             "close_time":previous+900000,
         })
@@ -159,12 +159,12 @@ class PullbackEngineTests(unittest.TestCase):
         _, pending, _ = advance_pullback_setup(data)
         add_retest(data, "SHORT")
         first = data["candles"][-1]
-        first.update({"open":99.45, "high":100.0, "low":99.2, "close":99.28,
+        first.update({"open":99.55, "high":99.9, "low":99.3, "close":99.45,
                       "quote_volume":180000, "taker_buy_quote":72000})
         previous = first["close_time"]
         data["candles"].append({
-            "open_time":previous+1, "open":98.78, "high":99.0,
-            "low":98.5, "close":98.70, "volume":1500,
+            "open_time":previous+1, "open":99.3, "high":99.9,
+            "low":98.9, "close":99.2, "volume":1500,
             "quote_volume":200000, "taker_buy_quote":75000,
             "close_time":previous+900000,
         })
