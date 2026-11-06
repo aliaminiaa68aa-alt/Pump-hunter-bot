@@ -861,7 +861,6 @@ def main() -> None:
             f"15m={'Binance USD-M Last Price' if binance_feed['15m'] else 'Coinalyze Binance fallback'}; "
             f"1m={'Binance USD-M Last Price' if binance_feed['1m'] else 'Coinalyze Binance fallback'}"
         )
-        # Save tracker changes first; notifications have a durable retry queue.
         save_outcome_journal(outcome_journal)
         outcome_journal = dispatch_outcome_notifications(outcome_journal, token, chat_id)
         outcome_statuses = {}
@@ -871,7 +870,6 @@ def main() -> None:
         provider_errors = sum(bool(trade.get("last_error")) for trade in outcome_journal.get("trades", {}).values())
         print(f"Outcome monitor: statuses={outcome_statuses}, provider_errors={provider_errors}")
         print(f"Outcome report: {json.dumps(summarize_outcomes(outcome_journal), ensure_ascii=False, sort_keys=True)}")
-        # Per-trade diagnostics distinguish missing market events from queued or failed Telegram delivery.
         for trade_id, trade in outcome_journal.get("trades", {}).items():
             events = [f"{event.get('event')}@{_safe_int(event.get('time_ms'), 0)}" for event in trade.get("events", [])]
             delivery = trade.get("notification_state", {})
@@ -887,9 +885,8 @@ def main() -> None:
         if len(state) > 500:
             state = dict(sorted(state.items(), key=lambda item: item[1])[-500:])
             save_state(state)
-    
         save_outcome_journal(outcome_journal)
-        else:
+    else:
         outcome_journal = load_outcome_journal()
         print("Outcome replay/dispatch delegated to continuous live monitor")
 
