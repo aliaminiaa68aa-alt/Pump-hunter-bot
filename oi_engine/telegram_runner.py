@@ -15,7 +15,7 @@ from oi_engine.telegram_public_source import poll_public_channel_alerts
 from oi_engine.alert_ingest import _is_crypto_candidate, parse_oi_alert_direction
 from oi_engine.coinalyze_client import CoinalyzeClient
 from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal, source_oi_priority
-from oi_engine.outcome_tracker import make_trade_record, monitor_journal, summarize_outcomes
+from oi_engine.outcome_tracker import (\n    make_trade_record, monitor_journal, summarize_outcomes,\n    _fetch_klines, _fetch_1m_klines,\n)
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
@@ -585,8 +585,41 @@ def main() -> None:
                 record["source_side"] = recovered_side
 
     client = CoinalyzeClient(api_key=api_key, include_optional_metrics=False)
-    # Binance Futures returns HTTP 451 on this runner; use the same Coinalyze
-    # 15m OHLCV fallback as the scanner so outcome tracking can still progress.
+    # Prefer Binance USD-M /fapi/v1/klines for BOTH 15m and 1m monitoring.
+    # These are traded contract (Last Price) candles, matching a normal
+    # Binance Futures chart in TradingView. Some GitHub runner regions receive
+    # HTTP 451 from Binance; in that case fall back to Coinalyze's Binance-
+    # exchange-specific USDT perpetual candles rather than stopping monitoring.
+    binance_feed = {"15m": None, "1m": None}
+
+    def fetch_trade_15m(symbol: str, start_ms: int, end_ms: int):
+        if binance_feed["15m"] is not False:
+            try:
+                rows = _fetch_klines(symbol, start_ms, end_ms)
+                binance_feed["15m"] = True
+                return rows
+            except Exception as exc:
+                binance_feed["15m"] = False
+                print(
+                    "Binance Last Price 15m unavailable; falling back to "
+                    f"Binance-mapped Coinalyze candles: {type(exc).__name__}: {exc}"
+                )
+        return client.fetch_ohlcv_candles(symbol, start_ms, end_ms)
+
+    def fetch_trade_1m(symbol: str, start_ms: int, end_ms: int):
+        if binance_feed["1m"] is not False:
+            try:
+                rows = _fetch_1m_klines(symbol, start_ms, end_ms)
+                binance_feed["1m"] = True
+                return rows
+            except Exception as exc:
+                binance_feed["1m"] = False
+                print(
+                    "Binance Last Price 1m unavailable; falling back to "
+                    f"Binance-mapped Coinalyze candles: {type(exc).__name__}: {exc}"
+                )
+        return client.fetch_ohlcv_1m_candles(symbol, start_ms, end_ms)
+
     previous_events = {
         trade_id: {
             "events": len(record.get("events", [])),
@@ -597,8 +630,13 @@ def main() -> None:
     }
     outcome_journal = monitor_journal(
         outcome_journal,
-        fetcher=client.fetch_ohlcv_candles,
-        micro_fetcher=getattr(client, "fetch_ohlcv_1m_candles", None),
+        fetcher=fetch_trade_15m,
+        micro_fetcher=fetch_trade_1m,
+    )
+    print(
+        "Outcome price feed: "
+        f"15m={'Binance USD-M Last Price' if binance_feed['15m'] else 'Coinalyze Binance fallback'}; "
+        f"1m={'Binance USD-M Last Price' if binance_feed['1m'] else 'Coinalyze Binance fallback'}"
     )
     # Save tracker changes first; notifications have a durable retry queue.
     save_outcome_journal(outcome_journal)
