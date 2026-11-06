@@ -740,7 +740,7 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assert_not_called = send.assert_not_called
+        send.assert_not_called()
         record = result["trades"]["delayed-trade"]
         self.assertEqual(record["status"], "MISSED_ENTRY")
         self.assertTrue(record["entry_missed"])
