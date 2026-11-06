@@ -91,6 +91,37 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(record["last_checked_ms"], cutoff + 60_000)
         self.assertEqual(record["status"], "OPEN")
 
+    def test_hybrid_replay_falls_back_when_minute_history_is_truncated_at_start(self):
+        journal, key = self.journal()
+        journal["trades"][key]["status"] = "OPEN"
+        journal["trades"][key]["entry_fill_price"] = 100.0
+        journal["trades"][key]["events"] = [{"event": "ENTRY", "time_ms": 900000, "fill": 100.0}]
+        now = 100_000_000
+        cutoff = ((now - 1400 * 60 * 1000) // 900_000) * 900_000
+        fallback_calls = []
+
+        def fetch_15m(symbol, start, end):
+            fallback_calls.append((start, end))
+            return [candle(start, 101.1, 101.5, 101.0, 101.2)]
+
+        # The rows are internally contiguous, but the provider omitted the
+        # first two minutes requested. Treat this as incomplete history.
+        minute_rows = [
+            candle(cutoff + 120_000, 101.1, 101.5, 101.0, 101.2),
+            candle(cutoff + 180_000, 101.1, 101.5, 101.0, 101.2),
+        ]
+        monitor_journal(
+            journal, now_ms=now, fetcher=fetch_15m,
+            micro_fetcher=lambda *_: minute_rows,
+        )
+        self.assertEqual(fallback_calls, [(900000, cutoff), (cutoff, now)])
+        self.assertEqual(journal["trades"][key]["status"], "OPEN")
+
+    def test_trade_ids_are_unique_for_multiple_alerts_on_same_candle(self):
+        first = make_trade_record(signal(), {}, 900000)
+        second = make_trade_record(signal(), {}, 900001)
+        self.assertNotEqual(first["trade_id"], second["trade_id"])
+
     def test_hybrid_replay_falls_back_when_minute_history_has_internal_gap(self):
         journal, key = self.journal()
         journal["trades"][key]["status"] = "OPEN"
