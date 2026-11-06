@@ -714,6 +714,42 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["1"]["status"], "sent")
 
 
+    def test_entry_ping_older_than_ninety_seconds_is_suppressed(self):
+        sent_at_ms = 1_000_000
+        now_ms = sent_at_ms + 160_000
+        journal = {
+            "trades": {
+                "slightly-delayed-entry": {
+                    "status": "TP1_HIT",
+                    "sent_at_ms": sent_at_ms,
+                    "telegram_message_id": 87,
+                    "signal": {
+                        "symbol": "QUICKUSDT", "side": "LONG",
+                        "entry": 100.0, "stop_loss": 99.0,
+                        "take_profit_1": 101.0, "take_profit_2": 102.0,
+                    },
+                    "events": [
+                        {"event": "ENTRY", "time_ms": sent_at_ms + 60_000, "fill": 100.0},
+                        {"event": "TP1", "time_ms": sent_at_ms + 120_000, "fill": 101.0},
+                    ],
+                }
+            }
+        }
+        with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
+            with patch.object(telegram_runner, "save_outcome_journal"):
+                with patch.object(telegram_runner, "send_telegram", return_value=98) as send:
+                    result = telegram_runner.dispatch_outcome_notifications(
+                        journal, "token", "chat"
+                    )
+        send.assert_called_once()
+        self.assertIn("تارگت اول خورد", send.call_args.args[2])
+        self.assertNotIn("ورود", send.call_args.args[2])
+        record = result["trades"]["slightly-delayed-entry"]
+        self.assertEqual(record["notification_state"]["0"]["status"], "ignored")
+        self.assertEqual(record["notification_state"]["0"]["reason"], "late_entry_notification")
+        self.assertEqual(record["notification_state"]["1"]["status"], "sent")
+
+
     def test_delayed_entry_ping_is_suppressed_but_later_outcome_is_sent(self):
         now_ms = 1_000_000 + 3 * 60 * 60 * 1000
         journal = {
