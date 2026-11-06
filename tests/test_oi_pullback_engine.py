@@ -112,16 +112,18 @@ class PullbackEngineTests(unittest.TestCase):
     def test_long_retest_extreme_is_recovered_when_intermediate_candle_was_not_scanned(self):
         data = snapshot("LONG")
         _, pending, _ = advance_pullback_setup(data)
-        # Two closed candles pass between scans. The first sweeps the level;
-        # the latest candle provides the rejection confirmation.
+        # Two closed candles pass between scans. The first sweeps and confirms
+        # the rejection; the latest candle is indecisive and must not erase it.
         first_time = data["candles"][-1]["close_time"]
         data["candles"].extend([
-            {"open_time": first_time + 1, "open":100.6, "high":100.8,
-             "low":100.35, "close":100.55, "volume":1200,
+            {"open_time": first_time + 1, "open":100.6, "high":100.95,
+             "low":100.35, "close":100.9, "volume":1200,
              "quote_volume":150000, "taker_buy_quote":90000,
              "close_time":first_time + 900000},
-            {"open_time": first_time + 900001, "open":100.5, "high":101.0,
-             "low":100.45, "close":100.9, "volume":1500,
+            # The latest candle is deliberately indecisive: the valid rejection
+            # happened in the previous candle while this symbol was not scanned.
+            {"open_time": first_time + 900001, "open":100.9, "high":101.0,
+             "low":100.7, "close":100.92, "volume":1500,
              "quote_volume":200000, "taker_buy_quote":120000,
              "close_time":first_time + 1800000},
         ])
