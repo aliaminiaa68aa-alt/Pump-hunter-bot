@@ -1,0 +1,152 @@
+"""Tick-based outcome monitor for continuously running hosts.
+
+This module consumes current Binance USD-M contract prices. It is deliberately
+separate from the scheduled signal scanner so a host can monitor open trades
+without repeating the expensive market-universe scan.
+"""
+from __future__ import annotations
+
+import time
+from typing import Any, Dict, Mapping
+
+
+ACTIVE_STATUSES = {"WAITING_ENTRY", "OPEN", "TP1_HIT"}
+TERMINAL_STATUSES = {
+    "CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY",
+    "AMBIGUOUS_ENTRY_CANDLE", "MISSED_ENTRY", "INVALID_NO_ENTRY",
+}
+
+
+def _finite_positive(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number > 0 and number < float("inf") else None
+
+
+def apply_live_prices(
+    journal: Dict[str, Any],
+    prices: Mapping[str, float],
+    now_ms: int | None = None,
+) -> Dict[str, Any]:
+    """Apply one price snapshot to every active trade, idempotently.
+
+    The first snapshot establishes a baseline. If the entry level has already
+    been crossed on that first observation, the setup is marked MISSED_ENTRY:
+    the monitor cannot prove that the touch happened after the signal.
+    Subsequent threshold crossings are timestamped at observation time.
+    """
+    now = int(now_ms if now_ms is not None else time.time() * 1000)
+    normalized = {
+        str(symbol).upper(): parsed
+        for symbol, value in prices.items()
+        if (parsed := _finite_positive(value)) is not None
+    }
+
+    for trade_id, record in journal.setdefault("trades", {}).items():
+        status = str(record.get("status", "")).upper()
+        if status not in ACTIVE_STATUSES:
+            continue
+        signal = record.get("signal") or {}
+        symbol = str(signal.get("symbol", "")).upper()
+        price = normalized.get(symbol)
+        if price is None:
+            continue
+
+        side = str(signal.get("side", "LONG")).upper()
+        if side not in {"LONG", "SHORT"}:
+            record["last_error"] = f"Unsupported side: {side}"
+            continue
+        try:
+            entry = float(signal["entry"])
+            original_stop = float(signal["stop_loss"])
+            tp1 = float(signal["take_profit_1"])
+            tp2 = float(signal["take_profit_2"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            record["last_error"] = "Invalid entry/SL/TP levels"
+            continue
+
+        previous_price = _finite_positive(record.get("live_last_price"))
+        if previous_price is None:
+            already_crossed = price <= entry if side == "LONG" else price >= entry
+            if status == "WAITING_ENTRY" and already_crossed:
+                record["status"] = "MISSED_ENTRY"
+                record["entry_missed"] = True
+                record["entry_missed_reason"] = (
+                    "First live price observation was already beyond the entry; "
+                    "a post-signal touch cannot be verified"
+                )
+            record["live_last_price"] = price
+            record["live_last_price_ms"] = now
+            record["live_monitor_started_ms"] = now
+            continue
+
+        if status == "WAITING_ENTRY":
+            crossed_entry = (
+                previous_price > entry and price <= entry
+                if side == "LONG"
+                else previous_price < entry and price >= entry
+            )
+            if not crossed_entry:
+                record["live_last_price"] = price
+                record["live_last_price_ms"] = now
+                continue
+            fill = entry
+            record["entry_fill_price"] = fill
+            record["entry_time_ms"] = now
+            record["status"] = "OPEN"
+            record.setdefault("events", []).append({
+                "event": "ENTRY", "time_ms": now, "fill": fill,
+                "source": "live_price_poll",
+            })
+            status = "OPEN"
+
+        events = record.setdefault("events", [])
+        event_names = {str(event.get("event")) for event in events}
+        stop = entry if "TP1" in event_names else original_stop
+
+        stop_crossed = (
+            price <= stop if side == "LONG" else price >= stop
+        )
+        tp1_crossed = (
+            price >= tp1 if side == "LONG" else price <= tp1
+        )
+        tp2_crossed = (
+            price >= tp2 if side == "LONG" else price <= tp2
+        )
+
+        # If a single poll interval spans adverse and favorable barriers, the
+        # order is unknowable. Resolve conservatively as stop-first.
+        if stop_crossed:
+            if "SL" not in event_names:
+                events.append({
+                    "event": "SL", "time_ms": now, "fill": price,
+                    "source": "live_price_poll",
+                    "ambiguous_same_poll": bool(tp1_crossed or tp2_crossed),
+                })
+            record["status"] = "CLOSED_SL"
+            record["exit_time_ms"] = now
+        else:
+            if tp1_crossed and "TP1" not in event_names:
+                events.append({
+                    "event": "TP1", "time_ms": now, "fill": tp1,
+                    "source": "live_price_poll",
+                })
+                record["status"] = "TP1_HIT"
+                record["breakeven_stop_active"] = True
+                record["breakeven_stop_price"] = entry
+            if tp2_crossed and "TP2" not in event_names:
+                events.append({
+                    "event": "TP2", "time_ms": now, "fill": tp2,
+                    "source": "live_price_poll",
+                })
+                record["status"] = "CLOSED_TP2"
+                record["exit_time_ms"] = now
+
+        record["live_last_price"] = price
+        record["live_last_price_ms"] = now
+        record["last_checked_ms"] = now
+
+    journal["updated_at_ms"] = now
+    return journal
