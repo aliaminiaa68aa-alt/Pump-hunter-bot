@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, Tuple
 from oi_engine.signal_engine import Signal, _atr, evaluate_snapshot, score_signal_components
 
 
-PULLBACK_TOLERANCE_ATR = 0.50
+PULLBACK_TOLERANCE_ATR = 0.35
 INVALIDATION_ATR = 0.85
 SETUP_LIFETIME_CANDLES = 8
 STOP_BUFFER_ATR = 0.35
