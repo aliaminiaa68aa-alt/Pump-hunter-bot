@@ -164,6 +164,11 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     oi_text = f"{float(oi_change):+.2f}%" if oi_change is not None else "—"
     taker_text = f"{float(taker_ratio):.0%}" if taker_ratio is not None else "—"
 
+    entry = float(signal.entry)
+    risk_pct = abs(entry - float(signal.stop_loss)) / entry * 100.0
+    tp1_pct = abs(float(signal.take_profit_1) - entry) / entry * 100.0
+    tp2_pct = abs(float(signal.take_profit_2) - entry) / entry * 100.0
+    rr_tp1 = tp1_pct / risk_pct if risk_pct > 0 else 0.0
     entry_instruction = (
         "⚡ <b>ورود مارکت</b>؛ قیمت لحظه‌ای مبناست. به‌دلیل اسلیپیج، قبل از سفارش قیمت را بررسی کنید.\n"
         if getattr(signal, "execution_mode", "LIMIT") == "MARKET"
@@ -174,9 +179,10 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         "━━━━━━━━━━━━━━\n"
         f"💵 ورود: <code>{signal.entry:.8g}</code>\n"
         f"{entry_instruction}"
-        f"🛡 حد ضرر: <code>{signal.stop_loss:.8g}</code>\n"
-        f"🎯 هدف ۱: <code>{signal.take_profit_1:.8g}</code>\n"
-        f"🚀 هدف ۲: <code>{signal.take_profit_2:.8g}</code>\n"
+        f"🛡 حد ضرر: <code>{signal.stop_loss:.8g}</code>  |  ریسک: <b>{risk_pct:.2f}%</b>\n"
+        f"🎯 هدف ۱: <code>{signal.take_profit_1:.8g}</code>  |  فاصله: <b>{tp1_pct:.2f}%</b>\n"
+        f"🚀 هدف ۲: <code>{signal.take_profit_2:.8g}</code>  |  فاصله: <b>{tp2_pct:.2f}%</b>\n"
+        f"⚖️ نسبت سود به ریسک تا هدف ۱: <b>{rr_tp1:.2f}R</b>\n"
         "━━━━━━━━━━━━━━\n"
         f"📊 OI ۱۵دقیقه: <b>{oi_text}</b>  |  جریان {taker_text}\n"
         f"⚙️ حجم: {signal.volume_ratio:.1f}x  |  روش: {engine}"
