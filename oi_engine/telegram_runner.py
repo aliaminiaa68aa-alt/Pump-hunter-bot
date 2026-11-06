@@ -207,11 +207,11 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         _safe_int(watchlist[symbol]["pending_setup"].get("expires_at_close_time", 0)),
     ))
 
-    # With a normal batch, reserve up to two of twelve slots (or one of
-    # smaller batches) for pending setups. A one-symbol batch remains
-    # dedicated to fresh alerts so it cannot be blocked by an older setup.
+    # Pending setups need frequent rechecks: reserve up to four of twelve
+    # slots, while keeping at least two thirds of capacity for fresh/hot
+    # candidates. Smaller batches retain the previous two-slot ceiling.
     pending_target = (
-        min(len(pending_all), max(1, min(2, count // 4)))
+        min(len(pending_all), max(2, min(4, count // 3)))
         if count >= 2 and pending_all else 0
     )
     fresh_limit = max(0, count - pending_target)
@@ -287,7 +287,10 @@ def summarize_scan_diagnostics(watchlist, scanned_batch):
         status = str(record.get("status", "نامشخص"))
         statuses[status] = statuses.get(status, 0) + 1
         reason = str(record.get("reason", ""))
-        if "Coinalyze رد کرد" in reason:
+        # Count both the legacy wording and the current live-engine wording.
+        # The latter used to be invisible in diagnostics, falsely reporting 0.
+        if ("Coinalyze رد کرد" in reason
+                or "تأیید مستقل Coinalyze کافی نیست" in reason):
             reasons["coinalyze_rejected"] += 1
         if (isinstance(record.get("pending_setup"), dict)
                 or status == "منتظر پولبک و تأیید"):
