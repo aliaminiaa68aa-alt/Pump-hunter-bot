@@ -123,23 +123,53 @@ def _event_price_result(signal: Dict[str, Any], event: Dict[str, Any]) -> str:
 def send_telegram(
     token: str, chat_id: str, message: str,
     reply_to_message_id: int | None = None, parse_mode: str | None = None,
-) -> int | None:
+) -> int:
+    """Send one Telegram message and return its confirmed message ID.
+
+    Retry only failures known not to have created a message (connect timeout,
+    or Telegram's explicit 429 rejection). A read timeout is ambiguous: retrying
+    could duplicate a message that Telegram already accepted.
+    """
     data = {
         "chat_id": chat_id, "text": message,
         **({"reply_to_message_id": int(reply_to_message_id)} if reply_to_message_id else {}),
         **({"parse_mode": parse_mode} if parse_mode else {}),
     }
-    response = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        data=data,
-        timeout=20,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not payload.get("ok"):
-        raise RuntimeError(f"Telegram rejected message: {payload}")
-    result = payload.get("result") or {}
-    return int(result["message_id"]) if result.get("message_id") is not None else None
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    for attempt in range(3):
+        try:
+            response = requests.post(url, data=data, timeout=(10, 25))
+        except requests.exceptions.ConnectTimeout:
+            if attempt == 2:
+                raise
+            time.sleep(attempt + 1)
+            continue
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            response.raise_for_status()
+            raise RuntimeError("Telegram returned a non-JSON sendMessage response") from exc
+
+        if response.status_code == 429:
+            retry_after = _safe_int(
+                (payload.get("parameters") or {}).get("retry_after"), attempt + 1
+            )
+            if attempt == 2:
+                raise RuntimeError(f"Telegram rate limit persisted after retries: {payload}")
+            time.sleep(max(1, min(retry_after, 30)))
+            continue
+
+        response.raise_for_status()
+        if not payload.get("ok"):
+            raise RuntimeError(f"Telegram rejected message: {payload}")
+        result = payload.get("result") or {}
+        message_id = result.get("message_id")
+        if message_id is None:
+            raise RuntimeError(f"Telegram accepted response without message_id: {payload}")
+        return int(message_id)
+
+    raise RuntimeError("Telegram message delivery failed after safe retries")
 
 
 def verify_telegram_connection(token: str, chat_id: str) -> None:
