@@ -969,7 +969,7 @@ class TelegramSendReliabilityTests(unittest.TestCase):
             {"ok": False, "description": "chat not found"}, status_code=400
         )
         with patch.object(telegram_runner.requests, "post", return_value=response):
-            with self.assertRaisesRegex(telegram_runner.requests.HTTPError, "400"):
+            with self.assertRaisesRegex(RuntimeError, "Telegram rejected message"):
                 telegram_runner.send_telegram("token", "chat", "hello")
 
 
