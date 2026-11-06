@@ -178,30 +178,29 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             # A BOS is only a setup trigger, never an immediate market entry.
             # Every directional entry must pass the later retest/rejection path below.
             if pullback_signal is not None:
-                if coinalyze_confirms(pullback_signal, metrics):
-                    pullback_metrics = dict(metrics)
-                    pullback_metrics["engine"] = "PULLBACK"
-                    candles_for_atr = snapshot.get("candles") or []
-                    atr_15m = _atr(candles_for_atr) if candles_for_atr else 0.0
-                    stop_distance = abs(pullback_signal.entry - pullback_signal.stop_loss)
-                    pullback_metrics["atr_15m"] = atr_15m if atr_15m > 0 else None
-                    pullback_metrics["stop_distance_pct"] = stop_distance / pullback_signal.entry * 100.0
-                    pullback_metrics["stop_distance_atr"] = stop_distance / atr_15m if atr_15m > 0 else None
-                    confirmed.append((pullback_signal, pullback_metrics))
-                    record.pop("pending_setup", None)
-                    record["status"] = f"تأیید {pullback_signal.side}"
-                    record["reason"] = "تأیید موتور Pullback و Coinalyze"
-                else:
-                    record["pending_setup"] = pending_setup or previous_pending_setup
-                    record["status"] = "نزدیک شرایط ورود"
-                    oi_value = metrics.get("oi_change_15m_window_pct")
-                    flow_value = metrics.get("taker_buy_ratio")
-                    oi_text = f"{float(oi_value):+.2f}%" if oi_value is not None else "ناموجود"
-                    flow_text = f"{float(flow_value):.1%}" if flow_value is not None else "ناموجود"
-                    record["reason"] = (
-                        "پولبک تأیید شد اما تأیید مستقل Coinalyze کافی نیست "
-                        f"(OI: {oi_text}؛ جریان خرید تهاجمی: {flow_text})"
-                    )
+                # The signal engine has already validated closed-candle price,
+                # OI and taker flow. Coinalyze is an independent cross-check,
+                # not a second veto: requiring it in the same 5m scan delayed
+                # or discarded the pre-positioned breakout LIMIT signal.
+                pullback_metrics = dict(metrics)
+                pullback_metrics["engine"] = "PULLBACK"
+                pullback_metrics["coinalyze_confirmed"] = coinalyze_confirms(
+                    pullback_signal, metrics
+                )
+                candles_for_atr = snapshot.get("candles") or []
+                atr_15m = _atr(candles_for_atr) if candles_for_atr else 0.0
+                stop_distance = abs(pullback_signal.entry - pullback_signal.stop_loss)
+                pullback_metrics["atr_15m"] = atr_15m if atr_15m > 0 else None
+                pullback_metrics["stop_distance_pct"] = stop_distance / pullback_signal.entry * 100.0
+                pullback_metrics["stop_distance_atr"] = stop_distance / atr_15m if atr_15m > 0 else None
+                confirmed.append((pullback_signal, pullback_metrics))
+                record.pop("pending_setup", None)
+                record["status"] = f"سیگنال {pullback_signal.side} آماده ارسال"
+                record["reason"] = (
+                    "تأیید موتور Pullback؛ تأیید Coinalyze ثبت شد"
+                    if pullback_metrics["coinalyze_confirmed"]
+                    else "تأیید موتور Pullback؛ Coinalyze فقط به‌عنوان داده تکمیلی ثبت شد"
+                )
             else:
                 record["pending_setup"] = pending_setup
                 record["status"] = "منتظر پولبک و تأیید" if pending_setup else "در حال رصد"
