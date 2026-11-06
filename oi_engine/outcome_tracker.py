@@ -450,24 +450,24 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
             if entered:
                 report["entry_touched_decided"] += 1
         elif first_tp1 is not None and (first_sl is None or first_tp1 < first_sl):
-            report["tp1_before_sl"] += 1
-            outcome = "tp1_before_sl"
+            outcome = "tp1_before_sl" if entered else "invalid_no_entry"
             if entered:
+                report["tp1_before_sl"] += 1
                 report["entry_touched_decided"] += 1
         elif first_sl is not None:
-            report["sl_before_tp1"] += 1
-            outcome = "sl_before_tp1"
+            outcome = "sl_before_tp1" if entered else "invalid_no_entry"
             if entered:
+                report["sl_before_tp1"] += 1
                 report["entry_touched_decided"] += 1
         else:
             outcome = status.lower()
-        if record.get("post_stop_tp1_reached"):
+        if entered and record.get("post_stop_tp1_reached"):
             report["sl_then_later_tp1"] += 1
         if entered and record.get("post_stop_tp2_reached"):
             report["sl_then_later_tp2"] += 1
         if entered and ("TP2" in names or record.get("post_stop_tp2_reached")):
             report["tp2_reached"] += 1
-        if any(event.get("ambiguous_same_candle") for event in events):
+        if entered and any(event.get("ambiguous_same_candle") for event in events):
             report["ambiguous_stop_target"] += 1
         if record.get("last_error") or record.get("post_stop_error"):
             report["provider_errors"] += 1
@@ -480,7 +480,7 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
             "mae_before_tp1_pct": record.get("mae_before_tp1_pct"),
             "mfe_before_tp1_pct": record.get("mfe_before_tp1_pct"),
         }
-        if record.get("tp1_candle_excursion_ambiguous"):
+        if entered and record.get("tp1_candle_excursion_ambiguous"):
             report.setdefault("tp1_excursion_ambiguous", 0)
             report["tp1_excursion_ambiguous"] += 1
         groups.setdefault(outcome, []).append(metrics)
