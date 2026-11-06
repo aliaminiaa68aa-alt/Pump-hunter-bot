@@ -42,10 +42,21 @@ class WatchlistTests(unittest.TestCase):
     def test_short_needs_sell_flow(self):
         self.assertTrue(coinalyze_confirms(signal("SHORT"),metrics(taker=.40)))
         self.assertFalse(coinalyze_confirms(signal("SHORT"),metrics(taker=.55)))
-    def test_missing_optional_coinalyze_metrics_fail_closed(self):
+    def test_missing_core_funding_still_fails_closed(self):
         partial = {"oi_change_15m_window_pct": 0.4, "taker_buy_ratio": 0.60,
                    "data_quality": {"complete": False}}
         self.assertFalse(coinalyze_confirms(signal(), partial))
+
+    def test_missing_ancillary_lsr_and_liquidations_do_not_block_core_setup(self):
+        core_only = {"oi_change_15m_window_pct": 0.4, "taker_buy_ratio": 0.60,
+                     "funding_rate": 0.0001,
+                     "data_quality": {"complete": False}}
+        self.assertTrue(coinalyze_confirms(signal(), core_only))
+
+    def test_invalid_supplied_long_short_ratio_is_rejected(self):
+        malformed = metrics()
+        malformed["long_short_ratio"] = float("nan")
+        self.assertFalse(coinalyze_confirms(signal(), malformed))
 
     def test_missing_or_invalid_core_confirmation_fails_closed(self):
         self.assertFalse(coinalyze_confirms(signal(), {"oi_change_15m_window_pct": None, "taker_buy_ratio": 0.6}))
