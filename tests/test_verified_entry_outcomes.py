@@ -41,15 +41,17 @@ class VerifiedEntryOutcomeTests(unittest.TestCase):
         # OHLC cannot establish which level was reached first.
         candles = [_candle(900000, 100, 105, 97, 101)]
         monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: candles)
-        self.assertEqual(record["status"], "OPEN")
-        self.assertEqual([event["event"] for event in record["events"]], ["ENTRY"])
+        self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_CANDLE")
+        self.assertEqual([event["event"] for event in record["events"]],
+                         ["ENTRY", "AMBIGUOUS_ENTRY_CANDLE"])
         self.assertTrue(record["entry_candle_excursion_ambiguous"])
+        self.assertTrue(record["entry_candle_ambiguous"])
         self.assertEqual(record["last_checked_ms"], 1800000)
 
     def test_exit_monitoring_starts_on_candle_after_entry(self):
         journal, key = self._journal()
         record = journal["trades"][key]
-        entry_candle = [_candle(900000, 100, 105, 97, 101)]
+        entry_candle = [_candle(900000, 100, 100.5, 99.5, 100.2)]
         monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: entry_candle)
         next_candle = [_candle(1800000, 101, 103, 99, 102.5)]
         monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: next_candle)
