@@ -1,0 +1,49 @@
+name: One-time Telegram delivery check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/telegram-delivery-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  telegram-delivery-check:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Run one-time Telegram delivery smoke test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Send a real test message to the configured Telegram chat
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          token = os.environ["BOT_TOKEN"].strip()
+          chat_id = os.environ["CHAT_ID"].strip()
+          if not token or not chat_id:
+              raise SystemExit("BOT_TOKEN or CHAT_ID secret is empty")
+          base = f"https://api.telegram.org/bot{token}"
+          def call(method, data=None):
+              body = urllib.parse.urlencode(data or {}).encode()
+              req = urllib.request.Request(f"{base}/{method}", data=body if data is not None else None)
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  payload = json.loads(response.read().decode())
+              if not payload.get("ok"):
+                  raise RuntimeError(f"{method} rejected: {payload}")
+              return payload["result"]
+          me = call("getMe")
+          chat = call("getChat", {"chat_id": chat_id})
+          sent = call("sendMessage", {
+              "chat_id": chat_id,
+              "text": "✅ تست واقعی ارسال تلگرام Pump Hunter موفق بود.\nربات احراز هویت شد، چت مقصد در دسترس است و پیام واقعاً ارسال شد."
+          })
+          message_id = sent.get("message_id")
+          if not message_id:
+              raise RuntimeError("Telegram accepted sendMessage without message_id")
+          print(f"TELEGRAM_DELIVERY_CONFIRMED bot=@{me.get('username')} chat_id={chat.get('id')} message_id={message_id}")
+          PY
