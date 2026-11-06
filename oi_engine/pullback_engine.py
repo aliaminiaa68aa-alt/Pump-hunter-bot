@@ -360,8 +360,9 @@ def advance_pullback_setup(
         level + atr * ENTRY_LIMIT_OFFSET_ATR if side == "LONG"
         else level - atr * ENTRY_LIMIT_OFFSET_ATR
     )
-    # If the confirmation candle has only just crossed the planned limit,
-    # switch to market execution at its close. Never chase beyond 0.15 ATR.
+    # Small overshoots become market entries. Larger moves, or moves that
+    # already reached the original TP1, are reported as missed rather than
+    # leaving a stale limit order behind.
     confirmation_close = float(last["close"])
     execution_mode = "LIMIT"
     crossed_entry = (
@@ -373,10 +374,17 @@ def advance_pullback_setup(
             (confirmation_close - entry) / atr if side == "LONG"
             else (entry - confirmation_close) / atr
         )
-        if market_extension <= 0.15:
+        planned_risk = entry - stop if side == "LONG" else stop - entry
+        planned_tp1 = entry + planned_risk if side == "LONG" else entry - planned_risk
+        target_already_reached = (
+            confirmation_close >= planned_tp1 if side == "LONG"
+            else confirmation_close <= planned_tp1
+        )
+        if target_already_reached or market_extension > 0.35:
+            execution_mode = "MISSED"
+        else:
             entry = confirmation_close
             execution_mode = "MARKET"
-        # Larger extensions remain passive limit setups; no market chasing.
     elif ((side == "LONG" and entry >= confirmation_close)
           or (side == "SHORT" and entry <= confirmation_close)):
         return None, pending, "ورود محدود هنوز فعال نشده؛ قیمت به ناحیه سفارش نرسیده، منتظر پولبک معتبر می‌مانیم"
