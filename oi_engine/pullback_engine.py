@@ -187,7 +187,7 @@ def advance_pullback_setup(
         )
 
     oi_change = (float(oi_values[-1]) / float(oi_values[-2]) - 1.0) * 100.0
-    if oi_change < 0.05:
+    if oi_change < 0.10:
         return None, pending, f"پولبک رخ داد اما رشد OI این کندل کافی نیست ({oi_change:+.2f}%)؛ setup تا پایان مهلت حفظ شد"
     quote_volume = float(last["quote_volume"])
     baseline = candles[-21:-1]
