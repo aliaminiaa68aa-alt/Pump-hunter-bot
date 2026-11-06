@@ -118,23 +118,47 @@ def advance_pullback_setup(
         return None, pending, "منتظر بسته‌شدن کندل بعد از شکست هستیم"
     pending = dict(pending)
     if side == "LONG":
-        observed_low = min(float(candle["low"]) for candle in post_breakout)
+        pullback_index = min(
+            range(len(post_breakout)),
+            key=lambda index: float(post_breakout[index]["low"]),
+        )
+        observed_low = float(post_breakout[pullback_index]["low"])
         pullback_extreme = min(
             float(pending.get("pullback_extreme", observed_low)),
-            observed_low,
+            min(float(candle["low"]) for candle in post_breakout),
         )
         pending["pullback_extreme"] = pullback_extreme
         touched = pullback_extreme <= level + tolerance
         valid_depth = pullback_extreme >= level - invalidation
-        candle_range = max(float(last["high"]) - float(last["low"]), 1e-12)
-        body_ratio = abs(float(last["close"]) - float(last["open"])) / candle_range
-        close_location = (float(last["close"]) - float(last["low"])) / candle_range
-        confirmed = (
-            float(last["close"]) > level
-            and float(last["close"]) > float(last["open"])
-            and body_ratio >= MIN_REJECTION_BODY_RATIO
-            and close_location >= MIN_REJECTION_CLOSE_LOCATION
-        )
+        confirmation_candle = None
+        for candidate in post_breakout[pullback_index:]:
+            candle_range = max(float(candidate["high"]) - float(candidate["low"]), 1e-12)
+            candidate_body = abs(float(candidate["close"]) - float(candidate["open"])) / candle_range
+            candidate_close_location = (
+                float(candidate["close"]) - float(candidate["low"])
+            ) / candle_range
+            if (
+                float(candidate["close"]) > level
+                and float(candidate["close"]) > float(candidate["open"])
+                and candidate_body >= MIN_REJECTION_BODY_RATIO
+                and candidate_close_location >= MIN_REJECTION_CLOSE_LOCATION
+            ):
+                confirmation_candle = candidate
+        confirmed = confirmation_candle is not None
+        if confirmation_candle is not None:
+            confirmation_range = max(
+                float(confirmation_candle["high"]) - float(confirmation_candle["low"]), 1e-12
+            )
+            body_ratio = abs(
+                float(confirmation_candle["close"]) - float(confirmation_candle["open"])
+            ) / confirmation_range
+            close_location = (
+                float(confirmation_candle["close"]) - float(confirmation_candle["low"])
+            ) / confirmation_range
+        else:
+            candle_range = max(float(last["high"]) - float(last["low"]), 1e-12)
+            body_ratio = abs(float(last["close"]) - float(last["open"])) / candle_range
+            close_location = (float(last["close"]) - float(last["low"])) / candle_range
         aggregate_flow, directional_candle_share = _recent_order_flow(candles, side)
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
@@ -146,23 +170,47 @@ def advance_pullback_setup(
         )
         stop = pullback_extreme - atr * STOP_BUFFER_ATR
     else:
-        observed_high = max(float(candle["high"]) for candle in post_breakout)
+        pullback_index = max(
+            range(len(post_breakout)),
+            key=lambda index: float(post_breakout[index]["high"]),
+        )
+        observed_high = float(post_breakout[pullback_index]["high"])
         pullback_extreme = max(
             float(pending.get("pullback_extreme", observed_high)),
-            observed_high,
+            max(float(candle["high"]) for candle in post_breakout),
         )
         pending["pullback_extreme"] = pullback_extreme
         touched = pullback_extreme >= level - tolerance
         valid_depth = pullback_extreme <= level + invalidation
-        candle_range = max(float(last["high"]) - float(last["low"]), 1e-12)
-        body_ratio = abs(float(last["close"]) - float(last["open"])) / candle_range
-        close_location = (float(last["high"]) - float(last["close"])) / candle_range
-        confirmed = (
-            float(last["close"]) < level
-            and float(last["close"]) < float(last["open"])
-            and body_ratio >= MIN_REJECTION_BODY_RATIO
-            and close_location >= MIN_REJECTION_CLOSE_LOCATION
-        )
+        confirmation_candle = None
+        for candidate in post_breakout[pullback_index:]:
+            candle_range = max(float(candidate["high"]) - float(candidate["low"]), 1e-12)
+            candidate_body = abs(float(candidate["close"]) - float(candidate["open"])) / candle_range
+            candidate_close_location = (
+                float(candidate["high"]) - float(candidate["close"])
+            ) / candle_range
+            if (
+                float(candidate["close"]) < level
+                and float(candidate["close"]) < float(candidate["open"])
+                and candidate_body >= MIN_REJECTION_BODY_RATIO
+                and candidate_close_location >= MIN_REJECTION_CLOSE_LOCATION
+            ):
+                confirmation_candle = candidate
+        confirmed = confirmation_candle is not None
+        if confirmation_candle is not None:
+            confirmation_range = max(
+                float(confirmation_candle["high"]) - float(confirmation_candle["low"]), 1e-12
+            )
+            body_ratio = abs(
+                float(confirmation_candle["close"]) - float(confirmation_candle["open"])
+            ) / confirmation_range
+            close_location = (
+                float(confirmation_candle["high"]) - float(confirmation_candle["close"])
+            ) / confirmation_range
+        else:
+            candle_range = max(float(last["high"]) - float(last["low"]), 1e-12)
+            body_ratio = abs(float(last["close"]) - float(last["open"])) / candle_range
+            close_location = (float(last["high"]) - float(last["close"])) / candle_range
         aggregate_flow, directional_candle_share = _recent_order_flow(candles, side)
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
@@ -187,7 +235,7 @@ def advance_pullback_setup(
         )
     if not confirmed:
         return None, pending, (
-            f"پولبک انجام شده اما کندل آخر تأیید برگشت نداده "
+            f"پولبک انجام شده اما کندل برگشتی معتبر بعد از لمس سطح پیدا نشد "
             f"(بدنه {body_ratio:.0%}؛ حداقل {MIN_REJECTION_BODY_RATIO:.0%}، "
             f"محل بسته‌شدن {close_location:.0%}؛ حداقل {MIN_REJECTION_CLOSE_LOCATION:.0%})"
         )
@@ -197,6 +245,9 @@ def advance_pullback_setup(
         (float(last["close"]) - level) / atr if side == "LONG"
         else (level - float(last["close"])) / atr
     )
+    if ((side == "LONG" and float(last["close"]) <= level)
+            or (side == "SHORT" and float(last["close"]) >= level)):
+        return None, pending, "قیمت دوباره سطح شکست را از دست داده؛ منتظر تثبیت مجدد می‌مانیم"
     if entry_extension > MAX_ENTRY_EXTENSION_ATR:
         return None, pending, (
             f"کندل تأیید از نقطه ورود دور شده ({entry_extension:.2f} ATR)؛ "
