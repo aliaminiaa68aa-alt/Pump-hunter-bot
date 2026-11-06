@@ -107,7 +107,7 @@ class WatchlistTests(unittest.TestCase):
                    return_value=(signal(), None, "پولبک تأیید شد")):
             found, updated = scan_watchlist(
                 {"ABCUSDT": {"status": "منتظر پولبک", "pending_setup": pending}},
-                FakeClient(metrics(taker=0.49)), now=1000
+                FakeClient(metrics(taker=0.47)), now=1000
             )
         self.assertEqual(found, [])
         self.assertEqual(updated["ABCUSDT"]["status"], "نزدیک شرایط ورود")
