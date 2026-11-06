@@ -237,6 +237,7 @@ def advance_pullback_setup(
                 )
             ):
                 confirmation_candle = candidate
+                break
         # Symmetric two-candle bearish follow-through after the retest.
         if confirmation_candle is None:
             post_touch = post_breakout[pullback_index:]
