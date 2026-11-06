@@ -295,6 +295,7 @@ class TelegramRunnerTests(unittest.TestCase):
              patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
              patch.dict(os.environ, env), \
              patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
+             patch.object(telegram_runner, "verify_telegram_connection"), \
              patch.object(telegram_runner, "poll_public_channel_alerts", return_value=public_result) as poll, \
              patch.object(telegram_runner, "scan_watchlist", return_value=scan_result), \
              patch.object(telegram_runner, "send_telegram") as send, \
@@ -339,6 +340,7 @@ class TelegramRunnerTests(unittest.TestCase):
                  patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
                  patch.dict(os.environ, env), \
                  patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
+                 patch.object(telegram_runner, "verify_telegram_connection"), \
                  patch.object(telegram_runner, "poll_public_channel_alerts", side_effect=ingest), \
                  patch.object(telegram_runner, "scan_watchlist", side_effect=scan), \
                  patch.object(telegram_runner, "send_telegram"), \
@@ -585,6 +587,7 @@ class TelegramRunnerTests(unittest.TestCase):
                  patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
                  patch.dict(os.environ, env), \
                  patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
+                 patch.object(telegram_runner, "verify_telegram_connection"), \
                  patch.object(telegram_runner, "poll_public_channel_alerts", return_value=(10, 0)), \
                  patch.object(telegram_runner, "scan_watchlist", side_effect=scan), \
                  patch.object(telegram_runner, "send_telegram"), \
