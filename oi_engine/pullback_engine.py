@@ -360,13 +360,26 @@ def advance_pullback_setup(
         level + atr * ENTRY_LIMIT_OFFSET_ATR if side == "LONG"
         else level - atr * ENTRY_LIMIT_OFFSET_ATR
     )
-    # A resting limit must be on the passive side of the current close:
-    # below market for LONG, above market for SHORT. Otherwise it would be
-    # marketable at signal time and defeat the wait-for-retest execution model.
+    # If the confirmation candle has only just crossed the planned limit,
+    # switch to market execution at its close. Never chase beyond 0.15 ATR.
     confirmation_close = float(last["close"])
-    if ((side == "LONG" and entry >= confirmation_close)
-            or (side == "SHORT" and entry <= confirmation_close)):
-        return None, pending, "قیمت هنوز از ورود محدود عبور نکرده؛ برای جلوگیری از ورود فوری، منتظر حرکت/پولبک معتبر می‌مانیم"
+    execution_mode = "LIMIT"
+    crossed_entry = (
+        confirmation_close > entry if side == "LONG"
+        else confirmation_close < entry
+    )
+    if crossed_entry:
+        market_extension = (
+            (confirmation_close - entry) / atr if side == "LONG"
+            else (entry - confirmation_close) / atr
+        )
+        if market_extension <= 0.15:
+            entry = confirmation_close
+            execution_mode = "MARKET"
+        # Larger extensions remain passive limit setups; no market chasing.
+    elif ((side == "LONG" and entry >= confirmation_close)
+          or (side == "SHORT" and entry <= confirmation_close)):
+        return None, pending, "قیمت هنوز به ناحیه سفارش نرسیده؛ منتظر پولبک معتبر می‌مانیم"
     risk = entry - stop if side == "LONG" else stop - entry
     if risk <= 0:
         return None, None, "ساختار حد ضرر در سمت اشتباه ورود قرار گرفته؛ setup باطل شد"
@@ -403,5 +416,6 @@ def advance_pullback_setup(
         movement_strength=movement_strength, entry_quality=entry_quality,
         setup_level=level, atr_15m=atr, pullback_extreme=pullback_extreme,
         ema20=ema20, ema50=ema50, stop_distance_atr=(risk / atr if atr > 0 else 0.0),
+        execution_mode=execution_mode,
     )
     return signal, None, "پولبک و کندل برگشتی تأیید شدند"
