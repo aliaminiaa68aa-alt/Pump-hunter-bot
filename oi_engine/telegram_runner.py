@@ -253,10 +253,42 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                     reply_to_message_id=int(anchor_id) if anchor_id else None,
                 )
             except Exception as exc:
-                delivery[key]["last_error"] = f"{type(exc).__name__}: {exc}"
-                print(f"Outcome notification pending retry: trade={trade_id} event={name} index={index} error={type(exc).__name__}: {exc}")
-                save_outcome_journal(journal)
-                continue
+                error_text = str(exc).lower()
+                # If Telegram rejects only the reply reference (for example,
+                # because the original signal was deleted), retry as a normal
+                # standalone message so the TP/SL alert is not lost.
+                reply_reference_rejected = bool(anchor_id) and any(
+                    phrase in error_text
+                    for phrase in (
+                        "reply message not found",
+                        "message to be replied not found",
+                        "reply_to_message_id",
+                        "message thread not found",
+                    )
+                )
+                if reply_reference_rejected:
+                    try:
+                        sent_id = send_telegram(token, chat_id, message)
+                        print(
+                            f"Outcome notification delivered standalone after reply-reference rejection: "
+                            f"trade={trade_id} event={name} index={index} telegram_message_id={sent_id}"
+                        )
+                    except Exception as fallback_exc:
+                        delivery[key]["last_error"] = (
+                            f"reply failed: {type(exc).__name__}: {exc}; "
+                            f"standalone retry failed: {type(fallback_exc).__name__}: {fallback_exc}"
+                        )
+                        print(
+                            f"Outcome notification pending retry: trade={trade_id} event={name} "
+                            f"index={index} standalone_error={type(fallback_exc).__name__}: {fallback_exc}"
+                        )
+                        save_outcome_journal(journal)
+                        continue
+                else:
+                    delivery[key]["last_error"] = f"{type(exc).__name__}: {exc}"
+                    print(f"Outcome notification pending retry: trade={trade_id} event={name} index={index} error={type(exc).__name__}: {exc}")
+                    save_outcome_journal(journal)
+                    continue
             delivery[key] = {
                 "status": "sent",
                 "attempts": delivery[key]["attempts"],
