@@ -38,7 +38,7 @@ def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
 def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> Dict[str, Any]:
     data = signal.to_dict() if hasattr(signal, "to_dict") else dict(signal)
     data["engine"] = metrics.get("engine", data.get("engine", "UNSPECIFIED"))
-    trade_id = f"{data['engine']}:{data['symbol']}:{data['side']}:{int(data['candle_close_time'])}"
+    trade_id = f"{data['engine']}:{data['symbol']}:{data['side']}:{int(data['candle_close_time'])}:{int(sent_at_ms)}"
     return {
         "trade_id": trade_id,
         "signal": data,
@@ -153,12 +153,19 @@ def monitor_journal(
             int(current[0]) - int(previous[0]) != 60 * 1000
             for previous, current in zip(minute_rows, minute_rows[1:])
         )
-        if minute_rows and not has_minute_gap:
+        # A contiguous response can still be truncated at its beginning.
+        # If its first returned minute is later than the requested start,
+        # silently accepting it would skip possible entry/SL touches.
+        expected_first_minute = ((cutoff + 60 * 1000 - 1) // (60 * 1000)) * (60 * 1000)
+        missing_leading_minutes = bool(
+            minute_rows and int(minute_rows[0][0]) > expected_first_minute
+        )
+        if minute_rows and not has_minute_gap and not missing_leading_minutes:
             combined.extend(row + [60 * 1000] for row in minute_rows)
         else:
-            # Fall back for the whole recent window if minute history is empty
-            # or internally discontinuous; mixing partial 1m with 15m could
-            # double-count or misorder the same price action.
+            # Fall back for the whole recent window if minute history is empty,
+            # internally discontinuous, or truncated at the beginning. Mixing
+            # partial 1m with 15m could skip/double-count price action.
             fallback = fetcher(symbol, cutoff, end_ms)
             combined.extend(
                 list(row) + [INTERVAL_MS] for row in fallback
@@ -246,6 +253,14 @@ def monitor_journal(
                 continue
             candles = fetch_replay_candles(signal["symbol"], cursor, now)
             candles = sorted(candles, key=lambda row: int(row[0]))
+            # Persist replay coverage diagnostics so a WAITING_ENTRY status can
+            # be distinguished from an empty/truncated market-data response.
+            record["last_replay_candle_count"] = len(candles)
+            record["last_replay_first_candle_ms"] = int(candles[0][0]) if candles else None
+            record["last_replay_last_candle_ms"] = int(candles[-1][0]) if candles else None
+            record["last_replay_interval_ms"] = (
+                int(candles[-1][6]) if candles and len(candles[-1]) > 6 else None
+            )
             for candle in candles:
                 open_ms = int(candle[0])
                 candle_interval_ms = int(candle[6]) if len(candle) > 6 else INTERVAL_MS
