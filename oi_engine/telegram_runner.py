@@ -342,7 +342,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 # delivered even when the trade has already closed in the same
                 # replay cycle. The old status gate silently discarded ENTRY,
                 # TP1, TP2 and SL for fast trades that completed before dispatch.
-                supported_event = event.get("event") in {"ENTRY", "TP1", "TP2", "SL"}
+                supported_event = event.get("event") in {"ENTRY", "TP1", "TP2", "SL", "AMBIGUOUS_ENTRY_POLL"}
                 sent_at = _safe_int(record.get("sent_at_ms"), 0)
                 if (
                     not timestamp or timestamp < legacy_cutoff
@@ -370,6 +370,8 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 label = "🏆 تارگت دوم خورد؛ معامله به پایان رسید"
             elif name == "SL":
                 label = "🛑 حد ضرر خورد"
+            elif name == "AMBIGUOUS_ENTRY_POLL":
+                label = "⚠️ ورود و حد ضرر در یک بازه پایش لمس شدند؛ نتیجه معامله قابل تأیید نیست"
             else:
                 delivery[key] = {"status": "ignored"}
                 continue
@@ -752,7 +754,7 @@ def summarize_scan_diagnostics(watchlist, scanned_batch):
 def blocked_by_active_symbol_trade(signal, outcome_journal: Dict[str, Any]) -> bool:
     """Allow at most one unresolved trade per symbol, regardless of side or engine."""
     symbol = str(signal.symbol).upper()
-    terminal_statuses = {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE", "INVALID_NO_ENTRY", "MISSED_ENTRY"}
+    terminal_statuses = {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL", "INVALID_NO_ENTRY", "MISSED_ENTRY"}
     for record in outcome_journal.get("trades", {}).values():
         prior_signal = record.get("signal", {})
         if str(prior_signal.get("symbol", "")).upper() != symbol:
