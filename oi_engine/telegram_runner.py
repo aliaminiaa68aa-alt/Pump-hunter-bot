@@ -25,7 +25,7 @@ STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
 OUTCOME_PATH = Path(".oi_state/trade_outcomes.json")
 MAX_WATCHLIST_SYMBOLS = 8  # Reserve up to 4 Coinalyze calls per symbol (metrics + 1m quote on Binance 451), 2 for discovery, and headroom for outcome monitoring.
-MAX_MARKET_QUEUE_SYMBOLS = 120
+MAX_MARKET_QUEUE_SYMBOLS = 60
 MARKET_DISCOVERY_PER_RUN = 12
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
 
@@ -513,6 +513,27 @@ def add_market_universe_candidates(
         symbol for symbol, record in watchlist.items()
         if isinstance(record, dict) and record.get("source_type") == "market_universe"
     }
+    # Migrate older persisted queues to the current 60-coin rotation cap.
+    # Keep pending setups first, then never-scanned/least-recently-scanned
+    # candidates so trimming does not starve the rotation.
+    if len(queued) > MAX_MARKET_QUEUE_SYMBOLS:
+        ranked_queue = sorted(
+            queued,
+            key=lambda symbol: (
+                0 if isinstance(watchlist[symbol].get("pending_setup"), dict) else 1,
+                _safe_int(watchlist[symbol].get("last_checked", 0)),
+                -_safe_float(watchlist[symbol].get("oi_priority_score", 0.0)),
+                _safe_int(watchlist[symbol].get("first_seen", 0)),
+            ),
+        )
+        keep = set(ranked_queue[:MAX_MARKET_QUEUE_SYMBOLS])
+        for symbol in queued - keep:
+            watchlist.pop(symbol, None)
+        queued = keep
+        print(
+            f"Independent market universe queue trimmed to {MAX_MARKET_QUEUE_SYMBOLS}; "
+            f"preserved={len(queued)}"
+        )
     free_slots = max(0, MAX_MARKET_QUEUE_SYMBOLS - len(queued))
     if free_slots == 0:
         return last_universe_symbol, 0
