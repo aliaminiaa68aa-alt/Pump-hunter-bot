@@ -111,8 +111,8 @@ class WatchlistTests(unittest.TestCase):
 
     def test_scan_blocks_sub_one_percent_tp1_even_when_derivatives_confirm(self):
         weak_target = Signal("ABCUSDT", "LONG", 1.0, .98, 1.005, 1.02, .8, .3, .56, 1.4, .0001, 82, 900000)
-        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value={}), \\
-             patch("oi_engine.watchlist_engine.evaluate_snapshot", return_value=None), \\
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value={}), \
+             patch("oi_engine.watchlist_engine.evaluate_snapshot", return_value=None), \
              patch("oi_engine.watchlist_engine.advance_pullback_setup", return_value=(weak_target, None, "candidate")):
             found, updated = scan_watchlist({"ABCUSDT": {}}, FakeClient(metrics()), now=1000)
         self.assertEqual(found, [])
