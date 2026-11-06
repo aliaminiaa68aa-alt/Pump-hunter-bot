@@ -193,6 +193,21 @@ def verify_telegram_connection(token: str, chat_id: str) -> None:
     print("Telegram preflight: bot authentication OK; target chat accessible")
 
 
+def _is_ambiguous_telegram_delivery(exc: BaseException) -> bool:
+    """True when Telegram may have accepted a message but its response was lost."""
+    return (
+        not isinstance(exc, requests.exceptions.ConnectTimeout)
+        and isinstance(
+            exc,
+            (
+                requests.exceptions.ReadTimeout,
+                requests.exceptions.ConnectionError,
+                requests.exceptions.ChunkedEncodingError,
+            ),
+        )
+    )
+
+
 def send_outcome_update(
     token: str, chat_id: str, message: str,
     reply_to_message_id: int | None = None,
@@ -888,19 +903,56 @@ def main() -> None:
         candle_id = int(signal.candle_close_time)
         if state.get(key) == candle_id:
             continue
-        message_id = send_telegram(token, chat_id, format_confirmed_signal(signal, metrics), parse_mode="HTML")
+
+        # Persist the trade and reserve this signal BEFORE the network request.
+        # Telegram sendMessage has no idempotency key: if the request succeeds
+        # but its response is lost, a restart must not send the same alert twice.
         trade_record = make_trade_record(signal, metrics, int(time.time() * 1000))
         trade_record["telegram_chat_id"] = str(chat_id)
-        trade_record["telegram_message_id"] = message_id if isinstance(message_id, int) else None
+        trade_record["telegram_message_id"] = None
+        trade_record["telegram_delivery_status"] = "pending"
+        trade_id = trade_record["trade_id"]
+        created_trade = trade_id not in outcome_journal.setdefault("trades", {})
+        outcome_journal["trades"].setdefault(trade_id, trade_record)
+        state[key] = candle_id
+        save_state(state)
         if os.getenv("PUMP_HUNTER_EXTERNAL_LIVE_MONITOR") == "1":
             register_outcome_trade(trade_record)
             outcome_journal = load_outcome_journal()
         else:
-            outcome_journal.setdefault("trades", {}).setdefault(trade_record["trade_id"], trade_record)
             save_outcome_journal(outcome_journal)
-        state[key] = candle_id
+
+        try:
+            message_id = send_telegram(
+                token, chat_id, format_confirmed_signal(signal, metrics), parse_mode="HTML"
+            )
+        except Exception as exc:
+            if _is_ambiguous_telegram_delivery(exc):
+                tracked = outcome_journal.get("trades", {}).get(trade_id, trade_record)
+                tracked["telegram_delivery_status"] = "unknown"
+                tracked["telegram_delivery_error"] = f"{type(exc).__name__}: {exc}"
+                save_outcome_journal(outcome_journal)
+                print(
+                    "Signal Telegram delivery UNKNOWN; duplicate retry suppressed: "
+                    f"trade={trade_id} symbol={signal.symbol} "
+                    f"error={type(exc).__name__}: {exc}"
+                )
+                continue
+
+            # A definite Telegram rejection is safe to retry on a later scan.
+            state.pop(key, None)
+            if created_trade:
+                outcome_journal.get("trades", {}).pop(trade_id, None)
+            save_state(state)
+            save_outcome_journal(outcome_journal)
+            raise
+
+        tracked = outcome_journal.get("trades", {}).get(trade_id, trade_record)
+        tracked["telegram_message_id"] = int(message_id)
+        tracked["telegram_delivery_status"] = "sent"
+        tracked.pop("telegram_delivery_error", None)
+        save_outcome_journal(outcome_journal)
         sent += 1
-        save_state(state)
 
     if os.getenv("PUMP_HUNTER_EXTERNAL_LIVE_MONITOR") != "1":
         previous_events = {
