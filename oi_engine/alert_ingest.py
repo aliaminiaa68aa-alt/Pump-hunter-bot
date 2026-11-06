@@ -18,6 +18,8 @@ NON_CRYPTO_BASES = {
     "PLTR", "MSFT", "GEV", "ASTS", "NVO", "GDX", "LITE", "FWDI",
     # Additional non-crypto tickers observed in the live @oi_detector scan.
     "CSOPSAMSUNG2L", "IBM", "LLY", "ABBV", "KLAC", "AAOI", "CRWV", "SOXS",
+    # Equity/ETF symbols seen in the latest live bot alerts; keep scanner crypto-only.
+    "MRNA", "EWY", "VST",
 }
 
 
