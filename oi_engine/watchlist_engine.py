@@ -28,9 +28,9 @@ def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
     # Funding, long/short ratio and liquidation history are supplementary context.
     # Missing optional endpoints must not veto an otherwise valid OI + taker-flow confirmation.
     if signal.side == "LONG":
-        return taker_ratio >= 0.50
+        return taker_ratio >= 0.48
     if signal.side == "SHORT":
-        return taker_ratio <= 0.50
+        return taker_ratio <= 0.52
     return False
 
 
