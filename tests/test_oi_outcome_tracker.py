@@ -280,7 +280,11 @@ class OutcomeTrackerTests(unittest.TestCase):
         record = make_trade_record(source, {"oi_change_15m_window_pct": 0.4}, 900000)
         self.assertEqual(record["signal"]["movement_strength"], 78)
         self.assertEqual(record["signal"]["entry_quality"], 42)
-        record["events"] = [{"event": "ENTRY", "time_ms": 999999}, {"event": "TP1", "time_ms": 1000000}]
+        record["entry_fill_price"] = 100.0
+        record["events"] = [
+            {"event": "ENTRY", "time_ms": 999999, "fill": 100.0},
+            {"event": "TP1", "time_ms": 1000000, "fill": 102.0},
+        ]
         record["status"] = "TP1_HIT"
         report = summarize_outcomes({"trades": {record["trade_id"]: record}})
         self.assertEqual(report["tp1_before_sl"], 1)
