@@ -46,7 +46,22 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
           COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
           COINMARKETCAP_API_KEY: ${{ secrets.COINMARKETCAP_API_KEY }}
-        run: timeout 240s python -m oi_engine.telegram_runner
+        # GitHub scheduled workflows have a 5-minute minimum cadence.
+        # Keep this runner alive and repeat scans on an approximately 60-second
+        # cadence within each scheduled window, reusing the same on-disk state.
+        run: |
+          timeout 220s bash -c '
+            deadline=$((SECONDS + 205))
+            while (( SECONDS < deadline )); do
+              cycle_start=$SECONDS
+              python -m oi_engine.telegram_runner
+              elapsed=$((SECONDS - cycle_start))
+              wait_seconds=$((60 - elapsed))
+              if (( wait_seconds > 0 )); then
+                sleep "$wait_seconds"
+              fi
+            done
+          '
       - name: Save bot state
         if: always()
         uses: actions/cache/save@v4
