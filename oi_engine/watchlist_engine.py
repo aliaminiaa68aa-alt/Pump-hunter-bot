@@ -103,13 +103,16 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     oi_text = f"{float(oi_change):+.2f}%" if oi_change is not None else "—"
     taker_text = f"{float(taker_ratio):.0%}" if taker_ratio is not None else "—"
 
+    entry_instruction = (
+        "⚡ <b>ورود مارکت</b>؛ قیمت ورود عبور کرده، با قیمت لحظه‌ای وارد شوید.\n"
+        if getattr(signal, "execution_mode", "LIMIT") == "MARKET"
+        else "⏳ ورود فقط بعد از لمس قیمت ورود فعال است؛ قبل از آن وارد نشوید.\n"
+    )
     return (
         f"{title}  <b>{symbol}</b>\n"
         "━━━━━━━━━━━━━━\n"
         f"💵 ورود: <code>{signal.entry:.8g}</code>\n"
-        + ("⚡ <b>ورود مارکت</b>؛ قیمت ورود عبور کرده، با قیمت لحظه‌ای وارد شوید.\n"
-           if getattr(signal, "execution_mode", "LIMIT") == "MARKET"
-           else "⏳ ورود فقط بعد از لمس قیمت ورود فعال است؛ قبل از آن وارد نشوید.\n")
+        f"{entry_instruction}"
         f"🛡 حد ضرر: <code>{signal.stop_loss:.8g}</code>\n"
         f"🎯 هدف ۱: <code>{signal.take_profit_1:.8g}</code>\n"
         f"🚀 هدف ۲: <code>{signal.take_profit_2:.8g}</code>\n"
