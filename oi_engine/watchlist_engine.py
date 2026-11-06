@@ -116,6 +116,35 @@ def source_oi_priority(source_text: str) -> Dict[str, Any]:
     }
 
 
+def signal_price_geometry_rejection(signal: Signal, min_tp1_distance_pct: float = 1.0) -> str | None:
+    """Fail closed on malformed levels or a first target that is too close."""
+    try:
+        entry = float(signal.entry)
+        stop = float(signal.stop_loss)
+        tp1 = float(signal.take_profit_1)
+        tp2 = float(signal.take_profit_2)
+    except (TypeError, ValueError, AttributeError, OverflowError):
+        return "قیمت ورود، حد ضرر یا اهداف معتبر نیست"
+    if not all(math.isfinite(value) and value > 0 for value in (entry, stop, tp1, tp2)):
+        return "قیمت ورود، حد ضرر یا اهداف معتبر نیست"
+    side = str(signal.side).upper()
+    if side == "LONG":
+        if not stop < entry < tp1 < tp2:
+            return "چیدمان قیمت LONG نامعتبر است؛ باید حد ضرر < ورود < هدف ۱ < هدف ۲ باشد"
+    elif side == "SHORT":
+        if not stop > entry > tp1 > tp2:
+            return "چیدمان قیمت SHORT نامعتبر است؛ باید حد ضرر > ورود > هدف ۱ > هدف ۲ باشد"
+    else:
+        return "جهت سیگنال نامعتبر است"
+    tp1_pct = abs(tp1 - entry) / entry * 100.0
+    if tp1_pct + 1e-9 < min_tp1_distance_pct:
+        return (
+            f"فاصله هدف اول فقط {tp1_pct:.2f}٪ است؛ "
+            f"حداقل مجاز {min_tp1_distance_pct:.2f}٪ است"
+        )
+    return None
+
+
 def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     """Compact, colorful Telegram card; keep only actionable signal details."""
     import html
@@ -214,7 +243,15 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["coinalyze"] = metrics
             # A BOS is only a setup trigger, never an immediate market entry.
             # Every directional entry must pass the later retest/rejection path below.
-            if pullback_signal is not None and coinalyze_confirms(pullback_signal, metrics):
+            geometry_rejection = (
+                signal_price_geometry_rejection(pullback_signal)
+                if pullback_signal is not None else None
+            )
+            if pullback_signal is not None and geometry_rejection:
+                record["status"] = "رد سیگنال به‌دلیل کیفیت قیمت‌ها"
+                record["reason"] = geometry_rejection
+                record["pending_setup"] = pending_setup or previous_pending_setup
+            elif pullback_signal is not None and coinalyze_confirms(pullback_signal, metrics):
                 pullback_metrics = dict(metrics)
                 pullback_metrics["engine"] = "PULLBACK"
                 pullback_metrics["coinalyze_confirmed"] = True
