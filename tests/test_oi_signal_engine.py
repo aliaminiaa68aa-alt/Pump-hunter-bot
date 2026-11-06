@@ -106,6 +106,29 @@ class SignalEngineTests(unittest.TestCase):
         self.assertGreater(signal.stop_loss, signal.entry)
         self.assertLess(signal.take_profit_2, signal.take_profit_1)
 
+    def test_signal_records_real_entry_and_stop_geometry(self):
+        long_signal = evaluate_snapshot(make_snapshot("LONG"))
+        short_signal = evaluate_snapshot(make_snapshot("SHORT"))
+        self.assertIsNotNone(long_signal)
+        self.assertIsNotNone(short_signal)
+
+        for signal in (long_signal, short_signal):
+            self.assertGreater(signal.atr_15m, 0)
+            self.assertGreater(signal.ema20, 0)
+            self.assertIsNone(signal.ema50)  # Fixture has only 22 candles.
+            self.assertAlmostEqual(
+                signal.stop_distance_atr,
+                abs(signal.entry - signal.stop_loss) / signal.atr_15m,
+            )
+            self.assertIsNone(signal.pullback_extreme)
+
+        self.assertEqual(long_signal.setup_level, max(
+            row["high"] for row in make_snapshot("LONG")["candles"][-6:-1]
+        ))
+        self.assertEqual(short_signal.setup_level, min(
+            row["low"] for row in make_snapshot("SHORT")["candles"][-6:-1]
+        ))
+
     def test_live_oi_cadence_requires_exact_15m_intervals(self):
         valid = [
             {"timestamp": 0},
