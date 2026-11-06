@@ -339,7 +339,7 @@ def monitor_journal(
                                 if touched
                             ],
                         })
-                        record["status"] = "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL"
+                        record["status"] = "AMBIGUOUS_ENTRY_CANDLE"
                         record["exit_time_ms"] = close_ms
                     continue
                 # After TP1, the remaining position is protected at breakeven.
@@ -357,11 +357,11 @@ def monitor_journal(
                 if entry_intrabar and (stop_hit or tp1_hit or tp2_hit):
                     record["entry_candle_ambiguous"] = True
                     record.setdefault("events", []).append({
-                        "event": "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL", "time_ms": close_ms,
+                        "event": "AMBIGUOUS_ENTRY_CANDLE", "time_ms": close_ms,
                         "entry_fill": entry, "stop_touched": stop_hit,
                         "tp1_touched": tp1_hit, "tp2_touched": tp2_hit,
                     })
-                    record["status"] = "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL"
+                    record["status"] = "AMBIGUOUS_ENTRY_CANDLE"
                     record["exit_time_ms"] = close_ms
                     break
 
