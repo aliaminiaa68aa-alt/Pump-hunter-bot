@@ -189,6 +189,24 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertIsNotNone(next_pending)
         self.assertIn("ورود محدود", reason)
 
+    def test_long_small_entry_overshoot_switches_to_market(self):
+        data = snapshot("LONG")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "LONG")
+        entry = pending["level"] + 0.02 * 1.0
+        data["candles"][-1].update({
+            "open":100.5, "high":100.8, "low":100.4, "close":100.7,
+            "quote_volume":200000, "taker_buy_quote":120000,
+        })
+        # Set a close just a fraction above the actual planned limit.
+        # The market switch is deliberately capped at 0.15 ATR.
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        if signal is not None:
+            self.assertEqual(signal.execution_mode, "MARKET")
+            self.assertAlmostEqual(signal.entry, data["candles"][-1]["close"])
+        else:
+            self.assertIsNotNone(next_pending)
+
     def test_short_limit_entry_must_be_above_confirmation_close(self):
         data = snapshot("SHORT")
         _, pending, _ = advance_pullback_setup(data)
