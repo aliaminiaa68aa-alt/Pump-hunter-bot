@@ -163,7 +163,7 @@ class PullbackEngineTests(unittest.TestCase):
                       "quote_volume":180000, "taker_buy_quote":72000})
         previous = first["close_time"]
         data["candles"].append({
-            "open_time":previous+1, "open":99.3, "high":99.9,
+            "open_time":previous+1, "open":99.34, "high":99.9,
             "low":98.9, "close":99.2, "volume":1500,
             "quote_volume":200000, "taker_buy_quote":75000,
             "close_time":previous+900000,
