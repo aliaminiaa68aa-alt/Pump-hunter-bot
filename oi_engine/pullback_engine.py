@@ -9,13 +9,20 @@ from oi_engine.signal_engine import Signal, _atr, evaluate_snapshot, score_signa
 
 PULLBACK_TOLERANCE_ATR = 0.45
 INVALIDATION_ATR = 0.85
-SETUP_LIFETIME_CANDLES = 8
+SETUP_LIFETIME_CANDLES = 4
 STOP_BUFFER_ATR = 0.35
 MAX_STOP_ATR = 2.00
 MIN_STOP_PCT = 0.25
 MAX_ENTRY_EXTENSION_ATR = 1.75
 ENTRY_LIMIT_OFFSET_ATR = 0.02
-MIN_ENTRY_QUALITY = 45
+MIN_ENTRY_QUALITY = 55
+MIN_MOVEMENT_STRENGTH = 60
+MIN_BREAKOUT_OI_CHANGE_PCT = 0.30
+MIN_BREAKOUT_PRICE_CHANGE_PCT = 0.15
+MIN_BREAKOUT_VOLUME_RATIO = 1.50
+MIN_DIRECTIONAL_TAKER_RATIO = 0.55
+MIN_TP2_DISTANCE_PCT = 1.00
+MAX_CROWDED_FUNDING_RATE = 0.0005
 MIN_REJECTION_BODY_RATIO = 0.08
 MIN_REJECTION_CLOSE_LOCATION = 0.35
 EMA_TOLERANCE_ATR = 0.18
@@ -81,9 +88,40 @@ def advance_pullback_setup(
             return None, None, "شکست اولیه هنوز تأیید نشده"
         if required_side is not None and breakout.side != required_side:
             return None, None, f"جهت موتور {breakout.side} با جهت کانال {required_side} هم‌خوان نیست؛ سیگنال رد شد"
+        # Hard quality gates: a breakout is only a candidate. Require strong
+        # participation, directional flow, trend alignment and usable reward
+        # before publishing the pre-positioned retest order.
+        if breakout.oi_change_pct < MIN_BREAKOUT_OI_CHANGE_PCT:
+            return None, None, f"رشد OI شکست ضعیف است ({breakout.oi_change_pct:+.2f}٪؛ حداقل {MIN_BREAKOUT_OI_CHANGE_PCT:.2f}٪)"
+        if abs(breakout.price_change_pct) < MIN_BREAKOUT_PRICE_CHANGE_PCT:
+            return None, None, f"شتاب قیمت شکست کافی نیست ({breakout.price_change_pct:+.2f}٪)"
+        if breakout.volume_ratio < MIN_BREAKOUT_VOLUME_RATIO:
+            return None, None, f"حجم شکست کافی نیست ({breakout.volume_ratio:.2f}x؛ حداقل {MIN_BREAKOUT_VOLUME_RATIO:.2f}x)"
+        directional_taker = breakout.taker_buy_ratio if breakout.side == "LONG" else 1.0 - breakout.taker_buy_ratio
+        if directional_taker < MIN_DIRECTIONAL_TAKER_RATIO:
+            return None, None, f"جریان سفارش هم‌جهت کافی نیست ({directional_taker:.1%}؛ حداقل {MIN_DIRECTIONAL_TAKER_RATIO:.0%})"
+        if breakout.movement_strength < MIN_MOVEMENT_STRENGTH:
+            return None, None, f"قدرت حرکت پایین است ({breakout.movement_strength}/100؛ حداقل {MIN_MOVEMENT_STRENGTH})"
+        if breakout.entry_quality < MIN_ENTRY_QUALITY:
+            return None, None, f"کیفیت شکست/ورود پایین است ({breakout.entry_quality}/100؛ حداقل {MIN_ENTRY_QUALITY})"
+        funding = float(snapshot.get("funding_rate", breakout.funding_rate))
+        if breakout.side == "LONG" and funding > MAX_CROWDED_FUNDING_RATE:
+            return None, None, f"Funding مثبت و ازدحام LONG بالاست ({funding:.5%})"
+        if breakout.side == "SHORT" and funding < -MAX_CROWDED_FUNDING_RATE:
+            return None, None, f"Funding منفی و ازدحام SHORT بالاست ({funding:.5%})"
+        if breakout.ema20 is None or breakout.ema50 is None:
+            return None, None, "داده EMA20/EMA50 برای تأیید روند کامل نیست"
+        if breakout.side == "LONG" and not (breakout.ema20 > breakout.ema50):
+            return None, None, "روند EMA20 بالای EMA50 نیست؛ شکست LONG رد شد"
+        if breakout.side == "SHORT" and not (breakout.ema20 < breakout.ema50):
+            return None, None, "روند EMA20 زیر EMA50 نیست؛ شکست SHORT رد شد"
         prior = candles[-6:-1]
         level = (max(float(c["high"]) for c in prior) if breakout.side == "LONG"
                  else min(float(c["low"]) for c in prior))
+        if breakout.side == "LONG" and not (float(last["close"]) > level and float(last["close"]) > float(last["open"])):
+            return None, None, "شکست سقف با بسته‌شدن معتبر کندل تأیید نشد"
+        if breakout.side == "SHORT" and not (float(last["close"]) < level and float(last["close"]) < float(last["open"])):
+            return None, None, "شکست کف با بسته‌شدن معتبر کندل تأیید نشد"
         # Publish the retest LIMIT before price comes back to the broken
         # structure. The previous implementation waited for the retest and
         # rejection candle first, which routinely made the entry arrive late.
@@ -98,6 +136,12 @@ def advance_pullback_setup(
             return None, None, "فاصله ساختاری ورود تا ابطال برای این شکست بیش از حد است"
         tp1 = entry + risk if breakout.side == "LONG" else entry - risk
         tp2 = entry + 2.0 * risk if breakout.side == "LONG" else entry - 2.0 * risk
+        tp2_distance_pct = abs(tp2 - entry) / entry * 100.0
+        if tp2_distance_pct < MIN_TP2_DISTANCE_PCT:
+            return None, None, (
+                f"ظرفیت حرکت کافی نیست؛ فاصله هدف دوم فقط {tp2_distance_pct:.2f}٪ است "
+                f"(حداقل {MIN_TP2_DISTANCE_PCT:.2f}٪)"
+            )
         limit_signal = Signal(
             symbol=breakout.symbol, side=breakout.side, entry=entry,
             stop_loss=stop, take_profit_1=tp1, take_profit_2=tp2,
@@ -413,13 +457,13 @@ def advance_pullback_setup(
         )
 
     oi_change = (float(oi_values[-1]) / float(oi_values[-2]) - 1.0) * 100.0
-    if oi_change < 0.05:
-        return None, pending, f"پولبک رخ داد اما رشد OI این کندل کافی نیست ({oi_change:+.2f}%)؛ setup تا پایان مهلت حفظ شد"
+    if oi_change < MIN_BREAKOUT_OI_CHANGE_PCT:
+        return None, pending, f"رشد OI پولبک کافی نیست ({oi_change:+.2f}٪؛ حداقل {MIN_BREAKOUT_OI_CHANGE_PCT:.2f}٪)"
     quote_volume = float(last["quote_volume"])
     baseline = candles[-21:-1]
     average_volume = sum(float(c["quote_volume"]) for c in baseline) / len(baseline)
-    if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 0.85:
-        return None, pending, (f"پولبک رخ داد اما حجم کندل برگشتی کافی نیست ({quote_volume / average_volume:.2f}x؛ حداقل 0.85x)؛ setup تا پایان مهلت حفظ شد")
+    if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < MIN_BREAKOUT_VOLUME_RATIO:
+        return None, pending, (f"پولبک رخ داد اما حجم کندل برگشتی کافی نیست ({quote_volume / average_volume:.2f}x؛ حداقل {MIN_BREAKOUT_VOLUME_RATIO:.2f}x)؛ setup تا پایان مهلت حفظ شد")
 
     # A MARKET entry is allowed only from a timestamped, fresh executable quote.
     # A closed 15m candle close is analysis data, not a live fill price.
@@ -477,12 +521,26 @@ def advance_pullback_setup(
 
     tp1 = entry + risk if side == "LONG" else entry - risk
     tp2 = entry + 2.0 * risk if side == "LONG" else entry - 2.0 * risk
+    tp2_distance_pct = abs(tp2 - entry) / entry * 100.0
+    if tp2_distance_pct < MIN_TP2_DISTANCE_PCT:
+        return None, pending, (
+            f"فاصله هدف دوم کافی نیست ({tp2_distance_pct:.2f}٪؛ حداقل {MIN_TP2_DISTANCE_PCT:.2f}٪)"
+        )
     taker_ratio = float(last["taker_buy_quote"]) / quote_volume
     price_change = (float(last["close"]) / float(candles[-2]["close"]) - 1.0) * 100.0
     movement_strength, entry_quality = score_signal_components(
         candles, side, oi_change, price_change, taker_ratio,
         quote_volume / average_volume, atr, level,
     )
+    if movement_strength < MIN_MOVEMENT_STRENGTH:
+        return None, pending, (
+            f"قدرت حرکت پس از پولبک پایین است ({movement_strength}/100؛ حداقل {MIN_MOVEMENT_STRENGTH})"
+        )
+    directional_taker = taker_ratio if side == "LONG" else 1.0 - taker_ratio
+    if directional_taker < MIN_DIRECTIONAL_TAKER_RATIO:
+        return None, pending, (
+            f"جریان سفارش هم‌جهت ضعیف است ({directional_taker:.1%}؛ حداقل {MIN_DIRECTIONAL_TAKER_RATIO:.0%})"
+        )
     if entry_quality < MIN_ENTRY_QUALITY:
         return None, pending, (
             f"کیفیت محل ورود پایین است ({entry_quality}/100؛ حداقل "
