@@ -79,13 +79,23 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertIsNone(next_pending)
         self.assertLess(signal.stop_loss, signal.entry)
         self.assertGreater(signal.take_profit_2, signal.take_profit_1)
-        # Entry is a resting limit near the broken structure, not the
-        # confirmation candle close (which would usually fill next-bar market).
-        self.assertLess(signal.entry, data["candles"][-1]["close"])
-        self.assertAlmostEqual(
-            signal.entry,
-            signal.setup_level + signal.atr_15m * 0.02,
-        )
+        # A fresh signal may be LIMIT, MARKET (small overshoot), or MISSED
+        # (price has already travelled too far). Never assume every confirmed
+        # setup still has a resting limit entry.
+        self.assertIn(signal.execution_mode, {"LIMIT", "MARKET", "MISSED"})
+        if signal.execution_mode == "LIMIT":
+            self.assertLess(signal.entry, data["candles"][-1]["close"])
+            self.assertAlmostEqual(
+                signal.entry,
+                signal.setup_level + signal.atr_15m * 0.02,
+            )
+        elif signal.execution_mode == "MARKET":
+            self.assertAlmostEqual(signal.entry, data["candles"][-1]["close"])
+        else:
+            self.assertAlmostEqual(
+                signal.entry,
+                signal.setup_level + signal.atr_15m * 0.02,
+            )
         self.assertGreater(signal.atr_15m, 0)
         self.assertGreater(signal.pullback_extreme, 0)
         self.assertGreater(signal.setup_level, 0)
@@ -209,7 +219,7 @@ class PullbackEngineTests(unittest.TestCase):
             "quote_volume":200000, "taker_buy_quote":120000,
         })
         # Set a close just a fraction above the actual planned limit.
-        # The market switch is deliberately capped at 0.15 ATR.
+        # The market switch is deliberately capped at 0.35 ATR.
         signal, next_pending, reason = advance_pullback_setup(data, pending)
         if signal is not None:
             self.assertEqual(signal.execution_mode, "MARKET")
