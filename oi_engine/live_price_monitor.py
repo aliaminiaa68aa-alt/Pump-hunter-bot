@@ -127,6 +127,29 @@ def apply_live_prices(
                 "source": "live_price_poll",
             })
             status = "OPEN"
+            # One polling snapshot can jump across entry and the protective
+            # stop. The tick sequence inside the polling gap is unknowable;
+            # never report a definite loss/win from that single observation.
+            entry_stop_also_crossed = (
+                price <= original_stop if side == "LONG"
+                else price >= original_stop
+            )
+            if entry_stop_also_crossed:
+                record["status"] = "AMBIGUOUS_ENTRY_POLL"
+                record["entry_poll_ambiguous"] = True
+                record["exit_time_ms"] = now
+                record.setdefault("events", []).append({
+                    "event": "AMBIGUOUS_ENTRY_POLL",
+                    "time_ms": now,
+                    "entry_fill": fill,
+                    "observed_price": price,
+                    "stop_also_crossed": True,
+                    "source": "live_price_poll",
+                })
+                record["live_last_price"] = price
+                record["live_last_price_ms"] = now
+                record["last_checked_ms"] = now
+                continue
 
         events = record.setdefault("events", [])
         event_names = {str(event.get("event")) for event in events}
