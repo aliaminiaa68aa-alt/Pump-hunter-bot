@@ -120,6 +120,10 @@ def _event_price_result(signal: Dict[str, Any], event: Dict[str, Any]) -> str:
     return ""
 
 
+class TelegramAmbiguousDeliveryError(RuntimeError):
+    """Telegram may have accepted a message despite returning a server error."""
+
+
 def send_telegram(
     token: str, chat_id: str, message: str,
     reply_to_message_id: int | None = None, parse_mode: str | None = None,
@@ -148,8 +152,19 @@ def send_telegram(
         try:
             payload = response.json()
         except ValueError as exc:
+            if response.status_code >= 500:
+                raise TelegramAmbiguousDeliveryError(
+                    f"Telegram returned HTTP {response.status_code} without a readable response"
+                ) from exc
             response.raise_for_status()
             raise RuntimeError("Telegram returned a non-JSON sendMessage response") from exc
+
+        # A 5xx response is ambiguous: the request reached Telegram's server,
+        # and we cannot prove that no message was created before the failure.
+        if response.status_code >= 500:
+            raise TelegramAmbiguousDeliveryError(
+                f"Telegram returned HTTP {response.status_code}: {payload}"
+            )
 
         if response.status_code == 429:
             retry_after = _safe_int(
@@ -160,9 +175,11 @@ def send_telegram(
             time.sleep(max(1, min(retry_after, 30)))
             continue
 
-        response.raise_for_status()
         if not payload.get("ok"):
+            # Preserve Telegram's description (e.g. "reply message not found")
+            # so outcome notifications can safely fall back to a standalone post.
             raise RuntimeError(f"Telegram rejected message: {payload}")
+        response.raise_for_status()
         result = payload.get("result") or {}
         message_id = result.get("message_id")
         if message_id is None:
@@ -195,7 +212,7 @@ def verify_telegram_connection(token: str, chat_id: str) -> None:
 
 def _is_ambiguous_telegram_delivery(exc: BaseException) -> bool:
     """True when Telegram may have accepted a message but its response was lost."""
-    return (
+    return isinstance(exc, TelegramAmbiguousDeliveryError) or (
         not isinstance(exc, requests.exceptions.ConnectTimeout)
         and isinstance(
             exc,
@@ -382,17 +399,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 # broken connection can happen AFTER Telegram accepted the post.
                 # Mark delivery unknown and never auto-retry it: retrying could
                 # duplicate a real ENTRY/TP/SL notification.
-                ambiguous_delivery = (
-                    not isinstance(exc, requests.exceptions.ConnectTimeout)
-                    and isinstance(
-                        exc,
-                        (
-                            requests.exceptions.ReadTimeout,
-                            requests.exceptions.ConnectionError,
-                            requests.exceptions.ChunkedEncodingError,
-                        ),
-                    )
-                )
+                ambiguous_delivery = _is_ambiguous_telegram_delivery(exc)
                 if ambiguous_delivery:
                     delivery[key] = {
                         "status": "unknown",
