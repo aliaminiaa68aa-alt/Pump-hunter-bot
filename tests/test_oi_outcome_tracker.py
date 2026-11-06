@@ -461,5 +461,30 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(result["events"], [])
 
 
+    def test_long_limit_entry_fills_when_candle_opens_below_entry(self):
+        journal, key = self.journal("LONG")
+        gap_candle = [900000, "99.0", "99.5", "98.5", "99.2", "1"]
+        monitor_journal(
+            journal, now_ms=960000, fetcher=lambda *_: [],
+            micro_fetcher=lambda *_: [gap_candle],
+        )
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "OPEN")
+        self.assertEqual(record["entry_fill_price"], 99.0)
+        self.assertEqual([event["event"] for event in record["events"]], ["ENTRY"])
+
+    def test_short_limit_entry_fills_when_candle_opens_above_entry(self):
+        journal, key = self.journal("SHORT")
+        gap_candle = [900000, "101.0", "101.5", "100.5", "100.8", "1"]
+        monitor_journal(
+            journal, now_ms=960000, fetcher=lambda *_: [],
+            micro_fetcher=lambda *_: [gap_candle],
+        )
+        record = journal["trades"][key]
+        self.assertEqual(record["status"], "OPEN")
+        self.assertEqual(record["entry_fill_price"], 101.0)
+        self.assertEqual([event["event"] for event in record["events"]], ["ENTRY"])
+
+
 if __name__ == "__main__":
     unittest.main()
