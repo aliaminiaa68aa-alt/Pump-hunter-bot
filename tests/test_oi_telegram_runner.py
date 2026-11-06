@@ -366,6 +366,33 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         self.assertTrue(second_pending.intersection({"PEND2USDT", "PEND3USDT"}))
 
+    def test_current_coinalyze_rejection_wording_is_counted(self):
+        result = telegram_runner.summarize_scan_diagnostics(
+            {"AUSDT": {}},
+            {"AUSDT": {
+                "status": "نزدیک شرایط ورود",
+                "reason": "پولبک تأیید شد اما تأیید مستقل Coinalyze کافی نیست (OI: +0.02%)",
+            }},
+        )
+        self.assertEqual(result["reasons"]["coinalyze_rejected"], 1)
+
+    def test_twelve_symbol_batch_reserves_four_pending_setups(self):
+        watchlist = {
+            **{
+                f"PEND{i}USDT": {
+                    "pending_setup": {"expires_at_close_time": 10000 + i},
+                    "last_checked": 0,
+                }
+                for i in range(6)
+            },
+            **{f"NEW{i}USDT": {} for i in range(12)},
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=12)
+        self.assertEqual(
+            sum("pending_setup" in record for record in batch.values()), 4
+        )
+        self.assertEqual(len(batch), 12)
+
     def test_watchlist_pruning_ignores_malformed_cached_records(self):
         kept = telegram_runner.prune_watchlist({
             "BTCUSDT": {"last_alert": "not-a-timestamp"},
