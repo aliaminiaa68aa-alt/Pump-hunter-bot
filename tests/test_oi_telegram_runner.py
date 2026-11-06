@@ -995,5 +995,18 @@ class TelegramSendReliabilityTests(unittest.TestCase):
                 telegram_runner.send_telegram("token", "chat", "hello")
 
 
+
+    def test_scan_diagnostics_count_explicit_derivatives_rejections(self):
+        batch = {
+            "TESTUSDT": {
+                "source_type": "oi_channel",
+                "status": "منتظر تأیید مشتقات",
+                "reason": "رد تأیید مشتقات: جریان خرید کافی نیست (47٪؛ حداقل 55٪)",
+            }
+        }
+        diagnostics = telegram_runner.summarize_scan_diagnostics(batch, batch)
+        self.assertEqual(diagnostics["reasons"]["coinalyze_rejected"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
