@@ -149,6 +149,15 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                         "enough aligned 15m OHLCV/OI history for a safe fallback"
                     )
                 record["data_source"] = "Coinalyze 15m fallback (Binance HTTP 451)"
+                # Coinalyze's closed 15m candles drive setup detection. Fetch a
+                # separate recent 1m quote only for execution, never use the
+                # older 15m close as a substitute for a MARKET fill.
+                try:
+                    live_quote = client.fetch_live_price(symbol, now=timestamp)
+                    if live_quote:
+                        snapshot.update(live_quote)
+                except (CoinalyzeError, requests.RequestException, ValueError, TypeError) as quote_error:
+                    print(f"Live quote unavailable for {symbol}: {quote_error}")
             # Evaluate a confirmed closed-candle OI signal independently of
             # the direction label in the source channel. The channel is a
             # discovery feed, not a LONG/SHORT instruction.
