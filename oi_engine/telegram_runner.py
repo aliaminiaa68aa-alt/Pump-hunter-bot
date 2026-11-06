@@ -203,16 +203,16 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
     ]
     # The nearest expiry is the most urgent; age breaks ties.
     pending_all.sort(key=lambda symbol: (
-        _safe_int(watchlist[symbol]["pending_setup"].get("expires_at_close_time", 0)),
         _safe_int(watchlist[symbol].get("last_checked", 0)),
+        _safe_int(watchlist[symbol]["pending_setup"].get("expires_at_close_time", 0)),
     ))
 
     # With a normal batch, reserve up to two of twelve slots (or one of
     # smaller batches) for pending setups. A one-symbol batch remains
     # dedicated to fresh alerts so it cannot be blocked by an older setup.
     pending_target = (
-        min(len(pending_all), max(1, count // 6))
-        if count >= 2 and pending_all else 0
+        min(len(pending_all), min(2, count // 4))
+        if count >= 4 and pending_all else 0
     )
     fresh_limit = max(0, count - pending_target)
     selected = fresh_alerts[:fresh_limit]
@@ -239,9 +239,15 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
     ranked = sorted(remaining, key=score, reverse=True)
     pending_remaining = [symbol for symbol in pending_all if symbol not in selected]
 
-    # Keep pending setups ahead of routine hot/rotation candidates.
-    pending_extra = pending_remaining[:remaining_slots]
-    selected.extend(pending_extra)
+    # If every watchlist symbol is pending, use otherwise-idle capacity
+    # to revisit more setups. Otherwise preserve slots for hot and rotating
+    # candidates instead of letting a large pending queue monopolize a batch.
+    if len(selected) < count and len(pending_all) == len(symbols):
+        for symbol in pending_remaining:
+            if symbol not in selected:
+                selected.append(symbol)
+                if len(selected) >= count:
+                    break
     remaining_slots = count - len(selected)
 
     hot = [
