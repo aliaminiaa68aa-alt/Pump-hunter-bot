@@ -171,6 +171,55 @@ class TelegramRunnerTests(unittest.TestCase):
             "\nضرر قیمتی: -2.00%",
         )
 
+    def test_independent_market_candidates_are_added_after_channel_alerts(self):
+        class UniverseClient:
+            def get_active_binance_usdt_perpetual_symbols(self):
+                return ["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT"]
+
+        watchlist = {
+            "OIUSDT": {
+                "last_alert_received_at": 200,
+                "last_checked": 0,
+                "source_text": "OI +1.2%",
+                "source_type": "oi_channel",
+            }
+        }
+        cursor, added = telegram_runner.add_market_universe_candidates(
+            watchlist, UniverseClient(), "", now=300
+        )
+        self.assertEqual(added, 4)
+        self.assertEqual(cursor, "DDDUSDT")
+        self.assertEqual(watchlist["AAAUSDT"]["source_type"], "market_universe")
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=5)
+        self.assertEqual(list(batch)[0], "OIUSDT")
+        self.assertEqual(len(batch), 5)
+
+    def test_market_universe_queue_is_bounded_and_rotates(self):
+        class UniverseClient:
+            def get_active_binance_usdt_perpetual_symbols(self):
+                return [f"COIN{i}USDT" for i in range(30)]
+
+        watchlist = {}
+        original_limit = telegram_runner.MAX_MARKET_QUEUE_SYMBOLS
+        original_add = telegram_runner.MARKET_DISCOVERY_PER_RUN
+        try:
+            telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = 5
+            telegram_runner.MARKET_DISCOVERY_PER_RUN = 3
+            cursor, added = telegram_runner.add_market_universe_candidates(
+                watchlist, UniverseClient(), "", now=300
+            )
+            self.assertEqual(added, 3)
+            self.assertEqual(cursor, "COIN2USDT")
+            cursor, added = telegram_runner.add_market_universe_candidates(
+                watchlist, UniverseClient(), cursor, now=301
+            )
+            self.assertEqual(added, 2)
+            self.assertEqual(cursor, "COIN4USDT")
+            self.assertEqual(len(watchlist), 5)
+        finally:
+            telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = original_limit
+            telegram_runner.MARKET_DISCOVERY_PER_RUN = original_add
+
     def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None):
         state_path = Path(directory) / "sent_signals.json"
         watch_path = Path(directory) / "watchlist.json"
