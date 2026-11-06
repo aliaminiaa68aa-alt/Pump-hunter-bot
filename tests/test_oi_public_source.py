@@ -89,6 +89,7 @@ class PublicTelegramSourceTests(unittest.TestCase):
         self.assertEqual(added, 1)
         self.assertIn("TESTUSDT", watchlist)
         self.assertEqual(watchlist["TESTUSDT"]["source"], "telegram_public_preview")
+        self.assertEqual(watchlist["TESTUSDT"]["source_type"], "oi_channel")
         self.assertEqual(watchlist["TESTUSDT"]["source_side"], "LONG")
 
     def test_alert_is_added_even_when_watchlist_already_has_four_symbols(self):
