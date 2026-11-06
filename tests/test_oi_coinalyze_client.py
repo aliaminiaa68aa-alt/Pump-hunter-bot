@@ -44,6 +44,22 @@ class CoinalyzeClientTests(unittest.TestCase):
         ]
         self.assertEqual(client.resolve_market("BTCUSDT"), "BTCUSDT_PERP.A")
 
+    def test_discovers_only_supported_binance_crypto_usdt_perpetuals(self):
+        client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
+        client.get_binance_exchange_codes = lambda: {"BINANCE"}
+        client.get_future_markets = lambda: [
+            {"exchange": "BINANCE", "base_asset": "BTC", "quote_asset": "USDT", "is_perpetual": True},
+            {"exchange": "BINANCE", "base_asset": "ETH", "quote_asset": "USDT", "is_perpetual": True},
+            {"exchange": "OTHER", "base_asset": "SOL", "quote_asset": "USDT", "is_perpetual": True},
+            {"exchange": "BINANCE", "base_asset": "AAPL", "quote_asset": "USDT", "is_perpetual": True},
+            {"exchange": "BINANCE", "base_asset": "XRP", "quote_asset": "USDT", "is_perpetual": False},
+            {"exchange": "BINANCE", "base_asset": "BTC", "quote_asset": "BUSD", "is_perpetual": True},
+        ]
+        self.assertEqual(
+            client.get_active_binance_usdt_perpetual_symbols(),
+            ["BTCUSDT", "ETHUSDT"],
+        )
+
     def test_rejects_unmapped_symbol(self):
         client = CoinalyzeClient(api_key="test", sleeper=lambda _: None)
         client.get_binance_exchange_codes = lambda: {"BINANCE"}
