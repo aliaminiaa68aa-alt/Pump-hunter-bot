@@ -40,9 +40,11 @@ def fetch_binance_last_prices(symbols: set[str]) -> Dict[str, float]:
                 continue
             if price > 0 and price < float("inf"):
                 result[symbol] = price
-    missing = wanted - result.keys()
-    if missing:
-        raise RuntimeError(f"Binance ticker missing active symbols: {sorted(missing)}")
+    # A partial ticker response must not block every other active trade.
+    # Missing symbols remain untouched by apply_live_prices; only a completely
+    # empty usable snapshot fails closed so stale data can never create fills.
+    if not result:
+        raise RuntimeError(f"Binance ticker returned no usable active symbols: {sorted(wanted)}")
     return result
 
 
@@ -65,6 +67,7 @@ def monitor_live_outcomes_once() -> dict:
         active.discard("")
         before = sum(len(record.get("events", [])) for record in journal.get("trades", {}).values())
         prices = fetch_binance_last_prices(active) if active else {}
+        missing_symbols = sorted(active - prices.keys())
         if prices:
             apply_live_prices(journal, prices)
         save_outcome_journal(journal)
@@ -75,6 +78,7 @@ def monitor_live_outcomes_once() -> dict:
             "active_symbols": len(active),
             "events": max(0, after - before),
             "prices_received": len(prices),
+            "missing_symbols": missing_symbols,
         }
 
 
@@ -116,8 +120,8 @@ def main() -> None:
         started = time.monotonic()
         try:
             result = monitor_live_outcomes_once()
-            if result.get("events"):
-                print(f"Live outcome events: {result}", flush=True)
+            if result.get("events") or result.get("missing_symbols"):
+                print(f"Live outcome monitor update: {result}", flush=True)
         except Exception as exc:
             print(f"ERROR live outcome monitor: {type(exc).__name__}: {exc}", flush=True)
         elapsed = time.monotonic() - started
