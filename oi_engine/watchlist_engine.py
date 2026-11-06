@@ -23,14 +23,14 @@ def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
         return False
     if not math.isfinite(oi_change) or not math.isfinite(taker_ratio):
         return False
-    if oi_change < 0.15 or not 0.0 <= taker_ratio <= 1.0:
+    if oi_change < 0.05 or not 0.0 <= taker_ratio <= 1.0:
         return False
     # Funding, long/short ratio and liquidation history are supplementary context.
     # Missing optional endpoints must not veto an otherwise valid OI + taker-flow confirmation.
     if signal.side == "LONG":
-        return taker_ratio >= 0.505
+        return taker_ratio >= 0.50
     if signal.side == "SHORT":
-        return taker_ratio <= 0.495
+        return taker_ratio <= 0.50
     return False
 
 
