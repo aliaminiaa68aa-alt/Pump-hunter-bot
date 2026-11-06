@@ -318,6 +318,13 @@ def monitor_journal(
                     })
                     entry = fill
                     event_names.add("ENTRY")
+                    # OHLC does not reveal whether the entry level was touched
+                    # before or after a stop/target in this same candle. Never
+                    # count an exit from the entry candle; begin exit monitoring
+                    # with the next fully closed candle to avoid phantom fills.
+                    record["entry_candle_excursion_ambiguous"] = True
+                    record["last_checked_ms"] = close_ms + 1
+                    continue
                 # After TP1, the remaining position is protected at breakeven.
                 # The TP1 candle itself is still evaluated against the original
                 # stop because OHLC cannot establish intrabar event ordering.
