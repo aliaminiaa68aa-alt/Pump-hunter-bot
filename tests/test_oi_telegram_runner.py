@@ -841,6 +841,50 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["1"]["status"], "sent")
 
 
+    def test_dispatches_ambiguous_entry_candle_notification(self):
+        now_ms = 1_000_000
+        journal = {
+            "trades": {
+                "ambiguous-entry-candle": {
+                    "status": "AMBIGUOUS_ENTRY_CANDLE",
+                    "sent_at_ms": 980_000,
+                    "telegram_message_id": 78,
+                    "signal": {
+                        "symbol": "AMBIGUOUSUSDT", "side": "LONG",
+                        "entry": 100.0, "stop_loss": 98.0,
+                        "take_profit_1": 102.0, "take_profit_2": 104.0,
+                    },
+                    "events": [
+                        {"event": "ENTRY", "time_ms": 990_000, "fill": 100.0},
+                        {
+                            "event": "AMBIGUOUS_ENTRY_CANDLE",
+                            "time_ms": 995_000,
+                            "entry_fill": 100.0,
+                            "stop_touched": True,
+                            "tp1_touched": True,
+                            "tp2_touched": False,
+                        },
+                    ],
+                }
+            }
+        }
+        with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
+            with patch.object(telegram_runner, "save_outcome_journal"):
+                with patch.object(telegram_runner, "send_telegram", side_effect=[201, 202]) as send:
+                    result = telegram_runner.dispatch_outcome_notifications(
+                        journal, "token", "chat"
+                    )
+        self.assertEqual(send.call_count, 2)
+        self.assertIn("ورود فعال شد", send.call_args_list[0].args[2])
+        ambiguity_message = send.call_args_list[1].args[2]
+        self.assertIn("ترتیب برخورد مشخص نیست", ambiguity_message)
+        self.assertIn("نتیجه معامله قابل تأیید نیست", ambiguity_message)
+        self.assertEqual(
+            result["trades"]["ambiguous-entry-candle"]["notification_state"]["1"]["status"],
+            "sent",
+        )
+
+
     def test_entry_ping_older_than_ninety_seconds_is_suppressed(self):
         sent_at_ms = 1_000_000
         now_ms = sent_at_ms + 160_000
