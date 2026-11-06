@@ -169,8 +169,24 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 snapshot, previous_pending_setup, None
             )
             if metrics is None:
-                metrics = client.fetch_metrics(symbol, now=timestamp)
-                metrics.pop("market_snapshot", None)
+                # Coinalyze is supplementary confirmation/ranking only. A
+                # transient Coinalyze outage must not discard a valid signal
+                # already confirmed by the closed-candle signal engine.
+                try:
+                    metrics = client.fetch_metrics(symbol, now=timestamp)
+                    metrics.pop("market_snapshot", None)
+                except CoinalyzeError as metrics_error:
+                    print(
+                        f"Coinalyze supplementary metrics unavailable for {symbol}: "
+                        f"{type(metrics_error).__name__}: {metrics_error}"
+                    )
+                    metrics = {
+                        "oi_change_15m_window_pct": pullback_signal.oi_change_pct
+                        if pullback_signal is not None else None,
+                        "taker_buy_ratio": pullback_signal.taker_buy_ratio
+                        if pullback_signal is not None else None,
+                        "coinalyze_unavailable": True,
+                    }
             metrics.update(source_oi_priority(record.get("source_text", "")))
             record["oi_priority_score"] = metrics["oi_priority_score"]
             record["oi_priority_tier"] = metrics["oi_priority_tier"]
