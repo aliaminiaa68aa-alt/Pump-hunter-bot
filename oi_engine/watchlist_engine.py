@@ -10,44 +10,60 @@ from oi_engine.signal_engine import MarketDataError, Signal, _atr, diagnose_snap
 from oi_engine.pullback_engine import advance_pullback_setup
 
 
-def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
-    """Require fresh core derivatives evidence; treat ancillary metrics as optional."""
+def coinalyze_rejection_reasons(signal: Signal, metrics: Dict[str, Any]) -> List[str]:
+    """Return precise derivatives-gate failures for diagnostics; never loosen a gate."""
     try:
         oi_change = float(metrics["oi_change_15m_window_pct"])
         taker_ratio = float(metrics["taker_buy_ratio"])
         funding = float(metrics["funding_rate"])
     except (KeyError, TypeError, ValueError, OverflowError):
-        return False
+        return ["داده اصلی OI، جریان خرید/فروش یا Funding ناقص است"]
 
     if not all(math.isfinite(value) for value in (oi_change, taker_ratio, funding)):
-        return False
-    if not 0.0 <= taker_ratio <= 1.0 or oi_change < 0.30:
-        return False
+        return ["داده OI، جریان یا Funding معتبر نیست"]
+    reasons = []
+    if oi_change < 0.30:
+        reasons.append(f"رشد OI کافی نیست ({oi_change:+.2f}٪؛ حداقل +0.30٪)")
+    if not 0.0 <= taker_ratio <= 1.0:
+        reasons.append("نسبت جریان خرید/فروش خارج از محدوده معتبر است")
 
-    # Long/short account ratio is a supplementary crowding check. If the
-    # provider omits it, do not block an otherwise valid setup; if supplied,
-    # reject malformed values and excessive crowding.
     raw_lsr = metrics.get("long_short_ratio")
     long_share = None
     if raw_lsr is not None:
         try:
             ratio = float(raw_lsr)
         except (TypeError, ValueError, OverflowError):
-            return False
-        if not math.isfinite(ratio) or ratio <= 0:
-            return False
-        long_share = ratio / (1.0 + ratio)
+            reasons.append("نسبت لانگ/شورت نامعتبر است")
+            ratio = None
+        if ratio is not None:
+            if not math.isfinite(ratio) or ratio <= 0:
+                reasons.append("نسبت لانگ/شورت نامعتبر است")
+            else:
+                long_share = ratio / (1.0 + ratio)
 
     if signal.side == "LONG":
-        return taker_ratio >= 0.55 and funding <= 0.0005 and (
-            long_share is None or long_share <= 0.70
-        )
-    if signal.side == "SHORT":
+        if taker_ratio < 0.55:
+            reasons.append(f"جریان خرید کافی نیست ({taker_ratio:.1%}؛ حداقل 55٪)")
+        if funding > 0.0005:
+            reasons.append(f"Funding برای LONG بیش از حد مثبت است ({funding:+.5%})")
+        if long_share is not None and long_share > 0.70:
+            reasons.append(f"ازدحام لانگ بالاست ({long_share:.1%}؛ حداکثر 70٪)")
+    elif signal.side == "SHORT":
         short_share = None if long_share is None else 1.0 - long_share
-        return taker_ratio <= 0.45 and funding >= -0.0005 and (
-            short_share is None or short_share <= 0.70
-        )
-    return False
+        if taker_ratio > 0.45:
+            reasons.append(f"جریان فروش کافی نیست ({1.0-taker_ratio:.1%}؛ حداقل 55٪)")
+        if funding < -0.0005:
+            reasons.append(f"Funding برای SHORT بیش از حد منفی است ({funding:+.5%})")
+        if short_share is not None and short_share > 0.70:
+            reasons.append(f"ازدحام شورت بالاست ({short_share:.1%}؛ حداکثر 70٪)")
+    else:
+        reasons.append("جهت سیگنال نامعتبر است")
+    return reasons
+
+
+def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
+    """Require fresh core derivatives evidence; treat ancillary metrics as optional."""
+    return not coinalyze_rejection_reasons(signal, metrics)
 
 
 def source_oi_priority(source_text: str) -> Dict[str, Any]:
@@ -214,7 +230,8 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 record["pending_setup"] = pending_setup or previous_pending_setup
                 if pullback_signal is not None:
                     record["status"] = "منتظر تأیید مشتقات"
-                    record["reason"] = "ساختار قیمت تأیید شد، اما OI/Funding/جریان/ازدحام بازار یا داده لیکوییدیشن از فیلتر عبور نکرد"
+                    gate_reasons = coinalyze_rejection_reasons(pullback_signal, metrics)
+                    record["reason"] = "رد تأیید مشتقات: " + " | ".join(gate_reasons[:4])
                 else:
                     record["status"] = "منتظر پولبک و تأیید" if pending_setup else "در حال رصد"
                     if pending_setup:
