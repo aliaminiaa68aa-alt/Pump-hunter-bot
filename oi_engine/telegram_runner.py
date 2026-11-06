@@ -199,6 +199,40 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
             entry_time = _safe_int(entry_event.get("time_ms"), 0)
             sent_at = _safe_int(record.get("sent_at_ms"), 0)
             entry_predates_signal = bool(entry_time and sent_at and entry_time <= sent_at)
+            # Repair records classified by the previous overly broad rule:
+            # a valid post-signal entry was marked MISSED_ENTRY solely because
+            # the five-minute runner noticed it more than two minutes later.
+            if (
+                record.get("entry_missed")
+                and entry_time and sent_at and entry_time > sent_at
+            ):
+                record["entry_missed"] = False
+                record.pop("entry_missed_reason", None)
+                event_names = [event.get("event") for event in events]
+                if "TP2" in event_names:
+                    record["status"] = "CLOSED_TP2"
+                elif "SL" in event_names:
+                    record["status"] = "CLOSED_SL"
+                elif "TP1" in event_names:
+                    record["status"] = "TP1_HIT"
+                else:
+                    record["status"] = "OPEN"
+                delivery = record.setdefault("notification_state", {})
+                for index, event in enumerate(events):
+                    previous = delivery.get(str(index), {})
+                    if previous.get("reason") == "missed_entry":
+                        if event.get("event") == "ENTRY":
+                            delivery[str(index)] = {
+                                "status": "ignored",
+                                "reason": "late_entry_notification",
+                            }
+                        else:
+                            delivery[str(index)] = {"status": "pending", "attempts": 0}
+                print(
+                    f"Recovered valid delayed trade outcomes: trade={trade_id} "
+                    f"entry_time_ms={entry_time} sent_at_ms={sent_at} "
+                    f"events={event_names}"
+                )
             late_entry_notification = bool(
                 entry_time and now_ms - entry_time > 120000 and not entry_predates_signal
             )
