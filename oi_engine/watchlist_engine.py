@@ -11,26 +11,45 @@ from oi_engine.pullback_engine import advance_pullback_setup
 
 
 def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
-    """Fail closed unless Coinalyze OI and taker flow independently align."""
-    oi_change = metrics.get("oi_change_15m_window_pct")
-    taker_ratio = metrics.get("taker_buy_ratio")
-    if oi_change is None or taker_ratio is None:
-        return False
+    """Mandatory independent derivatives/risk gate before a signal is admitted."""
     try:
-        oi_change = float(oi_change)
-        taker_ratio = float(taker_ratio)
-    except (TypeError, ValueError):
+        oi_change = float(metrics["oi_change_15m_window_pct"])
+        taker_ratio = float(metrics["taker_buy_ratio"])
+        funding = float(metrics["funding_rate"])
+        long_short_ratio = float(metrics["long_short_ratio"])
+        long_liquidations = float(metrics["long_liquidations"])
+        short_liquidations = float(metrics["short_liquidations"])
+    except (KeyError, TypeError, ValueError, OverflowError):
         return False
-    if not math.isfinite(oi_change) or not math.isfinite(taker_ratio):
+
+    values = (oi_change, taker_ratio, funding, long_short_ratio,
+              long_liquidations, short_liquidations)
+    if not all(math.isfinite(value) for value in values):
         return False
-    if oi_change < 0.05 or not 0.0 <= taker_ratio <= 1.0:
+    if not (0.0 <= taker_ratio <= 1.0) or long_short_ratio <= 0:
         return False
-    # Funding, long/short ratio and liquidation history are supplementary context.
-    # Missing optional endpoints must not veto an otherwise valid OI + taker-flow confirmation.
+    quality = metrics.get("data_quality")
+    if not isinstance(quality, dict) or quality.get("complete") is not True:
+        return False
+    if oi_change < 0.30 or long_liquidations < 0 or short_liquidations < 0:
+        return False
+
+    # Coinalyze r is the long/short account ratio. Convert it to long share
+    # so that an already overcrowded side (over 70%) is rejected.
+    long_share = long_short_ratio / (1.0 + long_short_ratio)
     if signal.side == "LONG":
-        return taker_ratio >= 0.48
+        return (
+            taker_ratio >= 0.55
+            and funding <= 0.0005
+            and long_share <= 0.70
+        )
     if signal.side == "SHORT":
-        return taker_ratio <= 0.52
+        short_share = 1.0 - long_share
+        return (
+            taker_ratio <= 0.45
+            and funding >= -0.0005
+            and short_share <= 0.70
+        )
     return False
 
 
@@ -160,6 +179,12 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                             snapshot.update(live_quote)
                     except (CoinalyzeError, requests.RequestException, ValueError, TypeError) as quote_error:
                         print(f"Live quote unavailable for {symbol}: {quote_error}")
+            # Derivatives context is a mandatory pre-signal gate, not a
+            # post-signal annotation. Missing optional endpoints fail closed.
+            if metrics is None:
+                metrics = client.fetch_metrics(symbol, now=timestamp)
+            metrics.pop("market_snapshot", None)
+
             # Evaluate a confirmed closed-candle OI signal independently of
             # the direction label in the source channel. The channel is a
             # discovery feed, not a LONG/SHORT instruction.
@@ -168,41 +193,16 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             pullback_signal, pending_setup, setup_reason = advance_pullback_setup(
                 snapshot, previous_pending_setup, None
             )
-            if metrics is None:
-                # Coinalyze is supplementary confirmation/ranking only. A
-                # transient Coinalyze outage must not discard a valid signal
-                # already confirmed by the closed-candle signal engine.
-                try:
-                    metrics = client.fetch_metrics(symbol, now=timestamp)
-                    metrics.pop("market_snapshot", None)
-                except CoinalyzeError as metrics_error:
-                    print(
-                        f"Coinalyze supplementary metrics unavailable for {symbol}: "
-                        f"{type(metrics_error).__name__}: {metrics_error}"
-                    )
-                    metrics = {
-                        "oi_change_15m_window_pct": pullback_signal.oi_change_pct
-                        if pullback_signal is not None else None,
-                        "taker_buy_ratio": pullback_signal.taker_buy_ratio
-                        if pullback_signal is not None else None,
-                        "coinalyze_unavailable": True,
-                    }
             metrics.update(source_oi_priority(record.get("source_text", "")))
             record["oi_priority_score"] = metrics["oi_priority_score"]
             record["oi_priority_tier"] = metrics["oi_priority_tier"]
             record["coinalyze"] = metrics
             # A BOS is only a setup trigger, never an immediate market entry.
             # Every directional entry must pass the later retest/rejection path below.
-            if pullback_signal is not None:
-                # The signal engine has already validated closed-candle price,
-                # OI and taker flow. Coinalyze is an independent cross-check,
-                # not a second veto: requiring it in the same 5m scan delayed
-                # or discarded the pre-positioned breakout LIMIT signal.
+            if pullback_signal is not None and coinalyze_confirms(pullback_signal, metrics):
                 pullback_metrics = dict(metrics)
                 pullback_metrics["engine"] = "PULLBACK"
-                pullback_metrics["coinalyze_confirmed"] = coinalyze_confirms(
-                    pullback_signal, metrics
-                )
+                pullback_metrics["coinalyze_confirmed"] = True
                 candles_for_atr = snapshot.get("candles") or []
                 atr_15m = _atr(candles_for_atr) if candles_for_atr else 0.0
                 stop_distance = abs(pullback_signal.entry - pullback_signal.stop_loss)
@@ -212,21 +212,21 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 confirmed.append((pullback_signal, pullback_metrics))
                 record.pop("pending_setup", None)
                 record["status"] = f"سیگنال {pullback_signal.side} آماده ارسال"
-                record["reason"] = (
-                    "تأیید موتور Pullback؛ تأیید Coinalyze ثبت شد"
-                    if pullback_metrics["coinalyze_confirmed"]
-                    else "تأیید موتور Pullback؛ Coinalyze فقط به‌عنوان داده تکمیلی ثبت شد"
-                )
+                record["reason"] = "تأیید ساختار، قدرت حرکت، کیفیت ورود و فیلترهای Coinalyze کامل شد"
             else:
-                record["pending_setup"] = pending_setup
-                record["status"] = "منتظر پولبک و تأیید" if pending_setup else "در حال رصد"
-                if pending_setup:
-                    record["reason"] = setup_reason
-                elif bos_signal is None:
-                    reasons = diagnose_snapshot(snapshot)
-                    record["reason"] = "رد شرایط ورود: " + " | ".join(reasons[:3])
+                record["pending_setup"] = pending_setup or previous_pending_setup
+                if pullback_signal is not None:
+                    record["status"] = "منتظر تأیید مشتقات"
+                    record["reason"] = "ساختار قیمت تأیید شد، اما OI/Funding/جریان/ازدحام بازار یا داده لیکوییدیشن از فیلتر عبور نکرد"
                 else:
-                    record["reason"] = "شکست/شتاب اولیه دیده شد اما ورود بدون پولبک و تأیید صادر نمی‌شود"
+                    record["status"] = "منتظر پولبک و تأیید" if pending_setup else "در حال رصد"
+                    if pending_setup:
+                        record["reason"] = setup_reason
+                    elif bos_signal is None:
+                        reasons = diagnose_snapshot(snapshot)
+                        record["reason"] = "رد شرایط ورود: " + " | ".join(reasons[:3])
+                    else:
+                        record["reason"] = "شکست/شتاب اولیه دیده شد اما ورود بدون پولبک و تأیید صادر نمی‌شود"
             # Only a completed market-data/evaluation pass consumes the fresh-alert
             # priority. Failed requests remain eligible for retry.
             record["last_checked"] = timestamp
