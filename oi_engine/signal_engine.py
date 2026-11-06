@@ -49,6 +49,7 @@ class Signal:
     ema20: Optional[float] = None
     ema50: Optional[float] = None
     stop_distance_atr: Optional[float] = None
+    execution_mode: str = "LIMIT"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
