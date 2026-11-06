@@ -19,7 +19,9 @@ from oi_engine.outcome_tracker import make_trade_record, monitor_journal, summar
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
 OUTCOME_PATH = Path(".oi_state/trade_outcomes.json")
-MAX_WATCHLIST_SYMBOLS = 12  # Core Coinalyze scan uses 3 calls/symbol; keep below the 40/min limit with normal outcome load
+MAX_WATCHLIST_SYMBOLS = 12  # Keep Coinalyze use within its 40 requests/minute budget.
+MAX_MARKET_QUEUE_SYMBOLS = 120
+MARKET_DISCOVERY_PER_RUN = 12
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
 
 
@@ -169,6 +171,68 @@ def _has_supported_perpetual(client: CoinalyzeClient, symbol: str) -> bool:
         if str(exc).startswith("No Binance USDT perpetual mapping"):
             return False
         raise
+
+
+def add_market_universe_candidates(
+    watchlist: Dict[str, Any],
+    client: CoinalyzeClient,
+    last_universe_symbol: str = "",
+    now: int | None = None,
+) -> tuple[str, int]:
+    """Add a rotating slice of non-channel crypto perps as the SECOND scan source.
+
+    Channel alerts remain first priority. Market-universe candidates are queued
+    behind fresh channel alerts and pending setups, and all use the same engine.
+    """
+    discover = getattr(client, "get_active_binance_usdt_perpetual_symbols", None)
+    if not callable(discover):
+        print("Market-universe scan unavailable: provider has no symbol discovery method")
+        return last_universe_symbol, 0
+    symbols = discover()
+    if not symbols:
+        print("Market-universe scan: provider returned no supported USDT perpetuals")
+        return last_universe_symbol, 0
+
+    queued = {
+        symbol for symbol, record in watchlist.items()
+        if isinstance(record, dict) and record.get("source_type") == "market_universe"
+    }
+    free_slots = max(0, MAX_MARKET_QUEUE_SYMBOLS - len(queued))
+    if free_slots == 0:
+        return last_universe_symbol, 0
+
+    try:
+        start = symbols.index(last_universe_symbol) + 1
+    except ValueError:
+        start = 0
+    added = 0
+    next_cursor = last_universe_symbol
+    timestamp = int(now if now is not None else time.time())
+    max_add = min(free_slots, MARKET_DISCOVERY_PER_RUN)
+    for offset in range(len(symbols)):
+        symbol = symbols[(start + offset) % len(symbols)]
+        if symbol in watchlist or not _is_crypto_candidate(symbol):
+            continue
+        watchlist[symbol] = {
+            "source_type": "market_universe",
+            "first_seen": timestamp,
+            "last_checked": 0,
+            "oi_priority_score": 0.0,
+            "oi_priority_tier": "MARKET",
+            "status": "در صف اسکن مستقل بازار",
+            "reason": "نامزد اسکن بازار؛ هنوز هشدار کانال OI برای این ارز ثبت نشده است",
+        }
+        next_cursor = symbol
+        added += 1
+        if added >= max_add:
+            break
+
+    print(
+        f"Independent market universe: supported={len(symbols)}, "
+        f"queued_before={len(queued)}, added={added}, "
+        f"queued_after={len(queued) + added}, cursor={next_cursor}"
+    )
+    return next_cursor, added
 
 
 def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIST_SYMBOLS):
