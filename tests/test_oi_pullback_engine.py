@@ -133,6 +133,48 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertIsNone(next_pending)
         self.assertAlmostEqual(signal.pullback_extreme, 100.35)
 
+    def test_long_two_candle_follow_through_confirms_moderate_first_rejection(self):
+        data = snapshot("LONG")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "LONG")
+        first = data["candles"][-1]
+        first.update({"open":100.55, "high":101.2, "low":100.4, "close":100.72,
+                      "quote_volume":180000, "taker_buy_quote":108000})
+        previous = first["close_time"]
+        data["candles"].append({
+            "open_time":previous+1, "open":101.22, "high":101.5,
+            "low":101.0, "close":101.30, "volume":1500,
+            "quote_volume":200000, "taker_buy_quote":125000,
+            "close_time":previous+900000,
+        })
+        data["oi_values"] = [100.2,101.0,101.8]
+        data["oi_timestamp"] = data["candles"][-1]["close_time"]
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNotNone(signal, reason)
+        self.assertEqual(signal.side, "LONG")
+        self.assertIsNone(next_pending)
+
+    def test_short_two_candle_follow_through_confirms_moderate_first_rejection(self):
+        data = snapshot("SHORT")
+        _, pending, _ = advance_pullback_setup(data)
+        add_retest(data, "SHORT")
+        first = data["candles"][-1]
+        first.update({"open":99.45, "high":100.0, "low":99.2, "close":99.28,
+                      "quote_volume":180000, "taker_buy_quote":72000})
+        previous = first["close_time"]
+        data["candles"].append({
+            "open_time":previous+1, "open":98.78, "high":99.0,
+            "low":98.5, "close":98.70, "volume":1500,
+            "quote_volume":200000, "taker_buy_quote":75000,
+            "close_time":previous+900000,
+        })
+        data["oi_values"] = [100.2,101.0,101.8]
+        data["oi_timestamp"] = data["candles"][-1]["close_time"]
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNotNone(signal, reason)
+        self.assertEqual(signal.side, "SHORT")
+        self.assertIsNone(next_pending)
+
     def test_long_limit_entry_must_be_below_confirmation_close(self):
         data = snapshot("LONG")
         _, pending, _ = advance_pullback_setup(data)
