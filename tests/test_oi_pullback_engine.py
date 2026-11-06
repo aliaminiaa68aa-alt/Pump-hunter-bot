@@ -5,24 +5,34 @@ from oi_engine.pullback_engine import advance_pullback_setup
 def make_snapshot(side="LONG"):
     candles = []
     for i in range(60):
+        if side == "LONG":
+            close = 100.0 + i * 0.05
+        else:
+            close = 103.0 - i * 0.05
         candles.append({
-            "open_time": i * 900000, "open": 99.8, "high": 100.5,
-            "low": 99.5, "close": 100.0, "volume": 1000,
-            "quote_volume": 100000, "taker_buy_quote": 50000,
+            "open_time": i * 900000, "open": close - 0.02,
+            "high": close + 0.35, "low": close - 0.35, "close": close,
+            "volume": 1000, "quote_volume": 100000,
+            "taker_buy_quote": 50000,
             "close_time": (i + 1) * 900000 - 1,
         })
     if side == "LONG":
-        candles[-1].update({"open":101, "high":104, "low":100.8, "close":103,
-                            "quote_volume":200000, "taker_buy_quote":120000})
-        for c in candles[-4:-1]:
-            c.update({"open":100.0, "high":100.5, "low":99.9, "close":100.2,
-                      "quote_volume":100000, "taker_buy_quote":60000})
+        candles[-2]["high"] = 103.90
+        candles[-1].update({
+            "open": 103.75, "high": 104.20, "low": 103.65, "close": 104.05,
+            "quote_volume": 200000, "taker_buy_quote": 140000,
+        })
     else:
-        candles[-1].update({"open":99, "high":99.2, "low":96, "close":97,
-                            "quote_volume":200000, "taker_buy_quote":80000})
-    return {"symbol":"TESTUSDT", "candles":candles, "oi_values":[100,100.2,101],
-            "oi_timestamp":candles[-1]["close_time"], "funding_rate":0.0001}
-
+        candles[-2]["low"] = 99.10
+        candles[-1].update({
+            "open": 99.25, "high": 99.35, "low": 98.80, "close": 98.90,
+            "quote_volume": 200000, "taker_buy_quote": 60000,
+        })
+    return {
+        "symbol": "TESTUSDT", "candles": candles,
+        "oi_values": [100, 100.3, 101.0],
+        "oi_timestamp": candles[-1]["close_time"], "funding_rate": 0.0001,
+    }
 
 class PullbackEngineTests(unittest.TestCase):
     def test_long_breakout_sends_limit_before_retest(self):
