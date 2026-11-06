@@ -342,7 +342,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 # delivered even when the trade has already closed in the same
                 # replay cycle. The old status gate silently discarded ENTRY,
                 # TP1, TP2 and SL for fast trades that completed before dispatch.
-                supported_event = event.get("event") in {"ENTRY", "TP1", "TP2", "SL", "AMBIGUOUS_ENTRY_POLL"}
+                supported_event = event.get("event") in {"ENTRY", "TP1", "TP2", "SL", "AMBIGUOUS_ENTRY_POLL", "AMBIGUOUS_ENTRY_CANDLE"}
                 sent_at = _safe_int(record.get("sent_at_ms"), 0)
                 if (
                     not timestamp or timestamp < legacy_cutoff
@@ -372,6 +372,8 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 label = "🛑 حد ضرر خورد"
             elif name == "AMBIGUOUS_ENTRY_POLL":
                 label = "⚠️ ورود و حد ضرر در یک بازه پایش لمس شدند؛ نتیجه معامله قابل تأیید نیست"
+            elif name == "AMBIGUOUS_ENTRY_CANDLE":
+                label = "⚠️ ورود و حد ضرر/تارگت داخل یک کندل ۱۵دقیقه‌ای لمس شدند؛ ترتیب برخورد مشخص نیست و نتیجه معامله قابل تأیید نیست"
             else:
                 delivery[key] = {"status": "ignored"}
                 continue
