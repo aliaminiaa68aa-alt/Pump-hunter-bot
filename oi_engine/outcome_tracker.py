@@ -256,7 +256,7 @@ def monitor_journal(
                 record["post_stop_error"] = f"{type(exc).__name__}: {exc}"
             continue
 
-        if status in {"CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE"}:
+        if status in {"CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE", "MISSED_ENTRY"}:
             continue
         side = signal["side"]
         entry = float(record.get("entry_fill_price") or signal["entry"])
@@ -486,7 +486,7 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         # Older journal records predate explicit ENTRY events. A recorded
         # TP/SL event or an active/closed trade status proves the entry was
         # reached, so keep historical outcome statistics backward-compatible.
-        entered = _has_confirmed_entry(record)
+        entered = _has_confirmed_entry(record) and not record.get("entry_missed")
         if entered:
             report["entry_touched"] += 1
         else:
