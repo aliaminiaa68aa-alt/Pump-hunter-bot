@@ -79,13 +79,10 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertIsNone(next_pending)
         self.assertLess(signal.stop_loss, signal.entry)
         self.assertGreater(signal.take_profit_2, signal.take_profit_1)
-        # Entry is a resting limit near the broken structure, not the
-        # confirmation candle close (which would usually fill next-bar market).
-        self.assertLess(signal.entry, data["candles"][-1]["close"])
-        self.assertAlmostEqual(
-            signal.entry,
-            signal.setup_level + signal.atr_15m * 0.02,
-        )
+        # The planned limit was crossed before delivery, so this must be
+        # upgraded to MARKET at the latest executable quote/confirmation close.
+        self.assertEqual(signal.execution_mode, "MARKET")
+        self.assertAlmostEqual(signal.entry, data["candles"][-1]["close"])
         self.assertGreater(signal.atr_15m, 0)
         self.assertGreater(signal.pullback_extreme, 0)
         self.assertGreater(signal.setup_level, 0)
