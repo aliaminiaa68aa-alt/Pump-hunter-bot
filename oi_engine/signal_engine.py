@@ -270,20 +270,20 @@ def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
 
     long_break = close > prior_high and close > open_price
     short_break = close < prior_low and close < open_price
-    active_volume = volume_ratio >= 1.05
+    active_volume = volume_ratio >= 1.00
 
     long_fail = []
     short_fail = []
     if price_change < 0.05:
         long_fail.append(f"تغییر قیمت LONG کافی نیست ({price_change:+.2f}%؛ حداقل +0.05%)")
-    if taker_ratio < 0.52:
+    if taker_ratio < 0.51:
         long_fail.append(f"خرید تهاجمی پایین است ({taker_ratio:.1%}؛ حداقل 52%)")
     if not (active_volume or long_break):
         long_fail.append(f"حجم پایین است ({volume_ratio:.2f}x؛ حداقل 1.05x) و شکست سقف هم تأیید نشده")
 
     if price_change > -0.05:
         short_fail.append(f"تغییر قیمت SHORT کافی نیست ({price_change:+.2f}%؛ حداکثر -0.05%)")
-    if taker_ratio > 0.48:
+    if taker_ratio > 0.49:
         short_fail.append(f"فروش تهاجمی کافی نیست ({taker_ratio:.1%}؛ حداکثر 48%)")
     if not (active_volume or short_break):
         short_fail.append(f"حجم پایین است ({volume_ratio:.2f}x؛ حداقل 1.05x) و شکست کف هم تأیید نشده")
@@ -381,13 +381,13 @@ def evaluate_snapshot(snapshot: Dict[str, Any], required_side: Optional[str] = N
     long_valid = (
         oi_change >= 0.15
         and price_change >= 0.05
-        and taker_ratio >= 0.52
+        and taker_ratio >= 0.51
         and (active_volume or long_break)
     )
     short_valid = (
         oi_change >= 0.15
         and price_change <= -0.05
-        and taker_ratio <= 0.48
+        and taker_ratio <= 0.49
         and (active_volume or short_break)
     )
 
