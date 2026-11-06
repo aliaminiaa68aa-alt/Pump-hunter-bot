@@ -122,8 +122,8 @@ class PullbackEngineTests(unittest.TestCase):
              "close_time":first_time + 900000},
             # The latest candle is deliberately indecisive: the valid rejection
             # happened in the previous candle while this symbol was not scanned.
-            {"open_time": first_time + 900001, "open":100.9, "high":101.0,
-             "low":100.7, "close":100.92, "volume":1500,
+            {"open_time": first_time + 900001, "open":100.94, "high":101.0,
+             "low":100.75, "close":100.98, "volume":1500,
              "quote_volume":200000, "taker_buy_quote":120000,
              "close_time":first_time + 1800000},
         ])
