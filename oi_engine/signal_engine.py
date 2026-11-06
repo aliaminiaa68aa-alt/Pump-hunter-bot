@@ -141,6 +141,17 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
     if not premium:
         raise MarketDataError("Funding data unavailable")
 
+    # Independent live quote for executable MARKET entries. A ticker outage
+    # must not invalidate otherwise usable closed-candle analysis.
+    current_price = None
+    price_timestamp = None
+    try:
+        ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
+        current_price = _float(ticker.get("price"), "live ticker price")
+        price_timestamp = int(time.time() * 1000)
+    except (requests.RequestException, MarketDataError, AttributeError, TypeError):
+        pass
+
     parsed = []
     for row in candles:
         parsed.append({
@@ -187,6 +198,8 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
         "oi_values": oi_values,
         "oi_timestamp": latest_oi_timestamp,
         "funding_rate": _float(premium.get("lastFundingRate"), "funding"),
+        "current_price": current_price,
+        "price_timestamp": price_timestamp,
     }
 
 
