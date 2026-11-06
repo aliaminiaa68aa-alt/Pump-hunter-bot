@@ -125,6 +125,27 @@ def send_telegram(
     return int(result["message_id"]) if result.get("message_id") is not None else None
 
 
+def verify_telegram_connection(token: str, chat_id: str) -> None:
+    """Verify bot authentication and target-chat access before scanning."""
+    me_response = requests.get(
+        f"https://api.telegram.org/bot{token}/getMe", timeout=15
+    )
+    me_response.raise_for_status()
+    me_payload = me_response.json()
+    if not me_payload.get("ok"):
+        raise RuntimeError(f"Telegram bot authentication failed: {me_payload}")
+
+    chat_response = requests.get(
+        f"https://api.telegram.org/bot{token}/getChat",
+        params={"chat_id": chat_id}, timeout=15,
+    )
+    chat_response.raise_for_status()
+    chat_payload = chat_response.json()
+    if not chat_payload.get("ok"):
+        raise RuntimeError(f"Telegram target chat is unavailable: {chat_payload}")
+    print("Telegram preflight: bot authentication OK; target chat accessible")
+
+
 def send_outcome_update(
     token: str, chat_id: str, message: str,
     reply_to_message_id: int | None = None,
@@ -451,6 +472,7 @@ def main() -> None:
         raise SystemExit("BOT_TOKEN and CHAT_ID GitHub secrets are required")
     if not api_key:
         raise SystemExit("COINALYZE_API_KEY GitHub secret is required")
+    verify_telegram_connection(token, chat_id)
 
     state = load_state()
     watch_state = load_watchlist_state()
