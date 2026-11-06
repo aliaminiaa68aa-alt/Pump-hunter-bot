@@ -964,6 +964,25 @@ class TelegramSendReliabilityTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "without message_id"):
                 telegram_runner.send_telegram("token", "chat", "hello")
 
+    def test_send_telegram_marks_server_error_as_ambiguous(self):
+        response = self._response(
+            {"ok": False, "description": "internal server error"}, status_code=500
+        )
+        with patch.object(telegram_runner.requests, "post", return_value=response) as post:
+            with self.assertRaises(telegram_runner.TelegramAmbiguousDeliveryError):
+                telegram_runner.send_telegram("token", "chat", "hello")
+        post.assert_called_once()
+
+    def test_send_telegram_preserves_reply_rejection_description(self):
+        response = self._response(
+            {"ok": False, "description": "reply message not found"}, status_code=400
+        )
+        with patch.object(telegram_runner.requests, "post", return_value=response):
+            with self.assertRaisesRegex(RuntimeError, "reply message not found"):
+                telegram_runner.send_telegram(
+                    "token", "chat", "hello", reply_to_message_id=123
+                )
+
     def test_send_telegram_surfaces_telegram_rejection(self):
         response = self._response(
             {"ok": False, "description": "chat not found"}, status_code=400
