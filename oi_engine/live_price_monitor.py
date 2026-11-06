@@ -11,6 +11,7 @@ from typing import Any, Dict, Mapping
 
 
 ACTIVE_STATUSES = {"WAITING_ENTRY", "OPEN", "TP1_HIT"}
+MAX_PENDING_ENTRY_MS = 60 * 60 * 1000
 TERMINAL_STATUSES = {
     "CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY",
     "AMBIGUOUS_ENTRY_CANDLE", "MISSED_ENTRY", "INVALID_NO_ENTRY",
@@ -50,6 +51,16 @@ def apply_live_prices(
             continue
         signal = record.get("signal") or {}
         symbol = str(signal.get("symbol", "")).upper()
+        # Pending entries expire one hour after the alert was sent, even if
+        # the current symbol price is temporarily unavailable.
+        if status == "WAITING_ENTRY":
+            sent_at = _finite_positive(record.get("sent_at_ms"))
+            if sent_at is not None and now - int(sent_at) >= MAX_PENDING_ENTRY_MS:
+                record["status"] = "EXPIRED_NO_ENTRY"
+                record["entry_expired_reason"] = "Pending entry exceeded the one-hour validity window"
+                record["exit_time_ms"] = now
+                continue
+
         price = normalized.get(symbol)
         if price is None:
             continue
@@ -66,6 +77,21 @@ def apply_live_prices(
         except (KeyError, TypeError, ValueError, OverflowError):
             record["last_error"] = "Invalid entry/SL/TP levels"
             continue
+
+        # A setup is no longer actionable if price reaches its first target
+        # before the planned entry is filled. Do not chase the move or later
+        # activate this stale entry if price retraces.
+        if status == "WAITING_ENTRY":
+            target_reached_before_entry = (
+                price >= tp1 if side == "LONG" else price <= tp1
+            )
+            if target_reached_before_entry:
+                record["status"] = "EXPIRED_NO_ENTRY"
+                record["entry_expired_reason"] = "TP1 reached before entry; setup is no longer actionable"
+                record["exit_time_ms"] = now
+                record["live_last_price"] = price
+                record["live_last_price_ms"] = now
+                continue
 
         previous_price = _finite_positive(record.get("live_last_price"))
         if previous_price is None:
