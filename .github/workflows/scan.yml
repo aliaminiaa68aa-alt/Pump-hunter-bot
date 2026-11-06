@@ -1,8 +1,6 @@
 name: OI Channel Signal Scanner
 
 on:
-  push:
-    branches: [main]
   # Scan @oi_detector alerts first, then rotate through the wider crypto perpetual universe.
   workflow_dispatch:
   schedule:
