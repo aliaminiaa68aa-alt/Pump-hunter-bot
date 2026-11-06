@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: pump-hunter-scan
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   scan:
