@@ -194,6 +194,29 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(list(batch)[0], "OIUSDT")
         self.assertEqual(len(batch), 5)
 
+    def test_market_universe_gets_scan_slots_during_large_channel_backlog(self):
+        watchlist = {
+            **{
+                f"CHANNEL{i}USDT": {
+                    "source_type": "oi_channel",
+                    "last_alert_received_at": 200 + i,
+                    "last_checked": 0,
+                }
+                for i in range(20)
+            },
+            **{
+                f"MARKET{i}USDT": {
+                    "source_type": "market_universe",
+                    "last_checked": 0,
+                }
+                for i in range(8)
+            },
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=12)
+        self.assertEqual(len(batch), 12)
+        self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 10)
+        self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 2)
+
     def test_oi_channel_pending_setup_precedes_market_pending_setup(self):
         watchlist = {
             "MARKETUSDT": {
