@@ -277,14 +277,14 @@ def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
     if price_change < 0.05:
         long_fail.append(f"تغییر قیمت LONG کافی نیست ({price_change:+.2f}%؛ حداقل +0.05%)")
     if taker_ratio < 0.51:
-        long_fail.append(f"خرید تهاجمی پایین است ({taker_ratio:.1%}؛ حداقل 52%)")
+        long_fail.append(f"خرید تهاجمی پایین است ({taker_ratio:.1%}؛ حداقل 51%)")
     if not (active_volume or long_break):
-        long_fail.append(f"حجم پایین است ({volume_ratio:.2f}x؛ حداقل 1.05x) و شکست سقف هم تأیید نشده")
+        long_fail.append(f"حجم پایین است ({volume_ratio:.2f}x؛ حداقل 1.00x) و شکست سقف هم تأیید نشده")
 
     if price_change > -0.05:
         short_fail.append(f"تغییر قیمت SHORT کافی نیست ({price_change:+.2f}%؛ حداکثر -0.05%)")
     if taker_ratio > 0.49:
-        short_fail.append(f"فروش تهاجمی کافی نیست ({taker_ratio:.1%}؛ حداکثر 48%)")
+        short_fail.append(f"فروش تهاجمی کافی نیست ({taker_ratio:.1%}؛ حداکثر 49%)")
     if not (active_volume or short_break):
         short_fail.append(f"حجم پایین است ({volume_ratio:.2f}x؛ حداقل 1.05x) و شکست کف هم تأیید نشده")
 
