@@ -223,7 +223,12 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                         reasons = diagnose_snapshot(snapshot)
                         record["reason"] = "رد شرایط ورود: " + " | ".join(reasons[:3])
                     else:
-                        record["reason"] = "شکست/شتاب اولیه دیده شد اما ورود بدون پولبک و تأیید صادر نمی‌شود"
+                        # Preserve the pullback engine's exact rejection reason.
+                        # Previously this branch replaced it with a generic
+                        # message, hiding which breakout quality gate failed.
+                        record["reason"] = setup_reason or (
+                            "شکست/شتاب اولیه دیده شد اما ورود بدون پولبک و تأیید صادر نمی‌شود"
+                        )
             # Only a completed market-data/evaluation pass consumes the fresh-alert
             # priority. Failed requests remain eligible for retry.
             record["last_checked"] = timestamp
