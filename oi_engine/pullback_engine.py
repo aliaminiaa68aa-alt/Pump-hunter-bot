@@ -379,7 +379,7 @@ def advance_pullback_setup(
         # Larger extensions remain passive limit setups; no market chasing.
     elif ((side == "LONG" and entry >= confirmation_close)
           or (side == "SHORT" and entry <= confirmation_close)):
-        return None, pending, "قیمت هنوز به ناحیه سفارش نرسیده؛ منتظر پولبک معتبر می‌مانیم"
+        return None, pending, "ورود محدود هنوز فعال نشده؛ قیمت به ناحیه سفارش نرسیده، منتظر پولبک معتبر می‌مانیم"
     risk = entry - stop if side == "LONG" else stop - entry
     if risk <= 0:
         return None, None, "ساختار حد ضرر در سمت اشتباه ورود قرار گرفته؛ setup باطل شد"
