@@ -41,12 +41,14 @@ class Signal:
     movement_strength: int = 0
     entry_quality: int = 0
     # Entry/stop diagnostics captured at signal time; these do not affect execution.
-    setup_level: float = 0.0
-    atr_15m: float = 0.0
-    pullback_extreme: float = 0.0
-    ema20: float = 0.0
-    ema50: float = 0.0
-    stop_distance_atr: float = 0.0
+    setup_level: Optional[float] = None
+    atr_15m: Optional[float] = None
+    # This engine enters on the confirmed breakout close; no pullback extreme
+    # exists for this entry model, so keep the field explicitly unavailable.
+    pullback_extreme: Optional[float] = None
+    ema20: Optional[float] = None
+    ema50: Optional[float] = None
+    stop_distance_atr: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -199,6 +201,18 @@ def _atr(candles: List[dict], period: int = 14) -> float:
     if not true_ranges:
         return 0.0
     return sum(true_ranges) / len(true_ranges)
+
+
+def _ema(candles: List[dict], period: int) -> Optional[float]:
+    """Calculate an EMA only when a full period of closed candles is available."""
+    if period <= 0 or len(candles) < period:
+        return None
+    closes = [float(row["close"]) for row in candles]
+    value = sum(closes[:period]) / period
+    alpha = 2.0 / (period + 1.0)
+    for close in closes[period:]:
+        value = close * alpha + value * (1.0 - alpha)
+    return value
 
 
 def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
@@ -392,6 +406,10 @@ def evaluate_snapshot(snapshot: Dict[str, Any], required_side: Optional[str] = N
 
     entry = last["close"]
     risk = max(atr * 1.25, entry * 0.002)
+    stop_distance_atr = risk / atr
+    ema20 = _ema(candles, 20)
+    ema50 = _ema(candles, 50)
+    setup_level = prior_high if side == "LONG" else prior_low
     if side == "LONG":
         stop = entry - risk
         tp1, tp2 = entry + risk, entry + risk * 2
@@ -422,6 +440,11 @@ def evaluate_snapshot(snapshot: Dict[str, Any], required_side: Optional[str] = N
         candle_close_time=last["close_time"],
         movement_strength=movement_strength,
         entry_quality=entry_quality,
+        setup_level=setup_level,
+        atr_15m=atr,
+        ema20=ema20,
+        ema50=ema50,
+        stop_distance_atr=stop_distance_atr,
     )
 
 
