@@ -15,7 +15,10 @@ from oi_engine.telegram_public_source import poll_public_channel_alerts
 from oi_engine.alert_ingest import _is_crypto_candidate, parse_oi_alert_direction
 from oi_engine.coinalyze_client import CoinalyzeClient
 from oi_engine.watchlist_engine import scan_watchlist, format_confirmed_signal, source_oi_priority
-from oi_engine.outcome_tracker import (\n    make_trade_record, monitor_journal, summarize_outcomes,\n    _fetch_klines, _fetch_1m_klines,\n)
+from oi_engine.outcome_tracker import (
+    make_trade_record, monitor_journal, summarize_outcomes,
+    _fetch_klines, _fetch_1m_klines,
+)
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
