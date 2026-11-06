@@ -621,6 +621,13 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         if watchlist[symbol].get("source_type") == "market_universe"
         and not isinstance(watchlist[symbol].get("pending_setup"), dict)
     ]
+    # Failed market-data attempts remain in the queue. Move recently attempted
+    # candidates behind never-attempted/older candidates so they cannot occupy
+    # the same reserved slots on every run.
+    market_candidates.sort(key=lambda symbol: (
+        _safe_int(watchlist[symbol].get("last_attempted_at", 0)),
+        _safe_int(watchlist[symbol].get("first_seen", 0)),
+    ))
     # Guarantee up to two independent-market slots in the 8-symbol batch.
     # This keeps the 60-coin universe moving while preserving channel priority.
     market_reserve = (
