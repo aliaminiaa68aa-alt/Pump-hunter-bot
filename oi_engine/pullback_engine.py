@@ -151,8 +151,12 @@ def advance_pullback_setup(
                     or (candidate_body >= 0.05 and candidate_close_location >= 0.85)
                 )
             ):
-                confirmation_candle = candidate
-                break
+                if confirmation_candle is None:
+                    confirmation_candle = candidate
+                candidate_flow = float(candidate["taker_buy_quote"]) / max(float(candidate["quote_volume"]), 1e-12)
+                if candidate_flow >= 0.505:
+                    confirmation_candle = candidate
+                    break
         # Also accept a two-candle rejection: the first candle reacts above
         # the retest level, and the next candle confirms by closing above its
         # high. This avoids discarding valid retests whose first candle has a
@@ -176,8 +180,12 @@ def advance_pullback_setup(
                     and follow_body >= 0.10
                     and follow_close_location >= 0.60
                 ):
-                    confirmation_candle = follow_through
-                    break
+                    if confirmation_candle is None:
+                        confirmation_candle = follow_through
+                    follow_flow = float(follow_through["taker_buy_quote"]) / max(float(follow_through["quote_volume"]), 1e-12)
+                    if follow_flow >= 0.505:
+                        confirmation_candle = follow_through
+                        break
         confirmed = confirmation_candle is not None
         if confirmation_candle is not None:
             confirmation_range = max(
@@ -236,8 +244,12 @@ def advance_pullback_setup(
                     or (candidate_body >= 0.05 and candidate_close_location >= 0.85)
                 )
             ):
-                confirmation_candle = candidate
-                break
+                if confirmation_candle is None:
+                    confirmation_candle = candidate
+                candidate_flow = float(candidate["taker_buy_quote"]) / max(float(candidate["quote_volume"]), 1e-12)
+                if candidate_flow <= 0.495:
+                    confirmation_candle = candidate
+                    break
         # Symmetric two-candle bearish follow-through after the retest.
         if confirmation_candle is None:
             post_touch = post_breakout[pullback_index:]
@@ -258,8 +270,12 @@ def advance_pullback_setup(
                     and follow_body >= 0.10
                     and follow_close_location >= 0.60
                 ):
-                    confirmation_candle = follow_through
-                    break
+                    if confirmation_candle is None:
+                        confirmation_candle = follow_through
+                    follow_flow = float(follow_through["taker_buy_quote"]) / max(float(follow_through["quote_volume"]), 1e-12)
+                    if follow_flow <= 0.495:
+                        confirmation_candle = follow_through
+                        break
         confirmed = confirmation_candle is not None
         if confirmation_candle is not None:
             confirmation_range = max(
