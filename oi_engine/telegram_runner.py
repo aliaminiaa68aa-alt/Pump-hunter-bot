@@ -367,13 +367,16 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 # broken connection can happen AFTER Telegram accepted the post.
                 # Mark delivery unknown and never auto-retry it: retrying could
                 # duplicate a real ENTRY/TP/SL notification.
-                ambiguous_delivery = isinstance(
-                    exc,
-                    (
-                        requests.exceptions.ReadTimeout,
-                        requests.exceptions.ConnectionError,
-                        requests.exceptions.ChunkedEncodingError,
-                    ),
+                ambiguous_delivery = (
+                    not isinstance(exc, requests.exceptions.ConnectTimeout)
+                    and isinstance(
+                        exc,
+                        (
+                            requests.exceptions.ReadTimeout,
+                            requests.exceptions.ConnectionError,
+                            requests.exceptions.ChunkedEncodingError,
+                        ),
+                    )
                 )
                 if ambiguous_delivery:
                     delivery[key] = {
