@@ -1,0 +1,22 @@
+[Unit]
+Description=Pump Hunter signal scanner and live outcome monitor
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/pump-hunter-bot
+EnvironmentFile=/etc/pump-hunter-bot.env
+Environment=PYTHONUNBUFFERED=1
+Environment=SIGNAL_SCAN_INTERVAL_SECONDS=300
+Environment=LIVE_MONITOR_INTERVAL_SECONDS=10
+ExecStart=/opt/pump-hunter-bot/.venv/bin/python -m oi_engine.service
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/pump-hunter-bot/.oi_state
+
+[Install]
+WantedBy=multi-user.target
