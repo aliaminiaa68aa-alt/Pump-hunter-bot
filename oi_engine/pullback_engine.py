@@ -6,17 +6,17 @@ from typing import Any, Dict, Optional, Tuple
 from oi_engine.signal_engine import Signal, _atr, evaluate_snapshot, score_signal_components
 
 
-PULLBACK_TOLERANCE_ATR = 0.35
-INVALIDATION_ATR = 0.80
+PULLBACK_TOLERANCE_ATR = 0.50
+INVALIDATION_ATR = 0.85
 SETUP_LIFETIME_CANDLES = 8
 STOP_BUFFER_ATR = 0.35
 MAX_STOP_ATR = 2.00
 MIN_STOP_PCT = 0.25
-MAX_ENTRY_EXTENSION_ATR = 0.75
+MAX_ENTRY_EXTENSION_ATR = 0.95
 ENTRY_LIMIT_OFFSET_ATR = 0.02
-MIN_ENTRY_QUALITY = 55
-MIN_REJECTION_BODY_RATIO = 0.25
-MIN_REJECTION_CLOSE_LOCATION = 0.60
+MIN_ENTRY_QUALITY = 50
+MIN_REJECTION_BODY_RATIO = 0.18
+MIN_REJECTION_CLOSE_LOCATION = 0.55
 FLOW_LOOKBACK_CANDLES = 3
 
 
@@ -130,9 +130,9 @@ def advance_pullback_setup(
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
         directional_flow = (
-            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.505
-            and aggregate_flow >= 0.50
-            and directional_candle_share >= 0.34
+            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.50
+            and aggregate_flow >= 0.48
+            and directional_candle_share >= 0.20
             and float(last["close"]) > ema20
         )
         stop = pullback_extreme - atr * STOP_BUFFER_ATR
@@ -157,9 +157,9 @@ def advance_pullback_setup(
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
         directional_flow = (
-            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.495
-            and aggregate_flow <= 0.50
-            and directional_candle_share >= 0.34
+            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.50
+            and aggregate_flow <= 0.52
+            and directional_candle_share >= 0.20
             and float(last["close"]) < ema20
         )
         stop = pullback_extreme + atr * STOP_BUFFER_ATR
@@ -187,12 +187,12 @@ def advance_pullback_setup(
         )
 
     oi_change = (float(oi_values[-1]) / float(oi_values[-2]) - 1.0) * 100.0
-    if oi_change < 0.10:
+    if oi_change < 0.05:
         return None, pending, f"پولبک رخ داد اما رشد OI این کندل کافی نیست ({oi_change:+.2f}%)؛ setup تا پایان مهلت حفظ شد"
     quote_volume = float(last["quote_volume"])
     baseline = candles[-21:-1]
     average_volume = sum(float(c["quote_volume"]) for c in baseline) / len(baseline)
-    if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 1.00:
+    if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 0.90:
         return None, pending, "پولبک رخ داد اما حجم کندل برگشتی کافی نیست؛ setup تا پایان مهلت حفظ شد"
 
     # Place a resting limit near the broken structure, not at the confirmation
