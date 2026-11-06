@@ -12,7 +12,6 @@ permissions:
 
 jobs:
   telegram-delivery-check:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Run one-time Telegram delivery smoke test'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
