@@ -248,7 +248,10 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
             }
             save_outcome_journal(journal)
             try:
-                sent_id = send_telegram(token, chat_id, message, reply_to_message_id=int(anchor_id))
+                sent_id = send_telegram(
+                    token, chat_id, message,
+                    reply_to_message_id=int(anchor_id) if anchor_id else None,
+                )
             except Exception as exc:
                 delivery[key]["last_error"] = f"{type(exc).__name__}: {exc}"
                 print(f"Outcome notification pending retry: trade={trade_id} event={name} index={index} error={type(exc).__name__}: {exc}")
