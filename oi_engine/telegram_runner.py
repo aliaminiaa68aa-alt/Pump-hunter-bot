@@ -621,10 +621,10 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         if watchlist[symbol].get("source_type") == "market_universe"
         and not isinstance(watchlist[symbol].get("pending_setup"), dict)
     ]
-    # Guarantee a small independent-market slice without displacing fresh
-    # channel alerts or urgent pending setups.
+    # Guarantee up to two independent-market slots in the 8-symbol batch.
+    # This keeps the 60-coin universe moving while preserving channel priority.
     market_reserve = (
-        min(len(market_candidates), max(1, count // 6))
+        min(len(market_candidates), min(2, max(1, count // 4)))
         if market_candidates and count >= 3 else 0
     )
     fresh_limit = max(0, count - pending_target - market_reserve)
