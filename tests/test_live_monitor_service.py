@@ -22,12 +22,22 @@ class LiveMonitorServiceTests(unittest.TestCase):
         response.raise_for_status.assert_called_once()
 
     @patch("oi_engine.service.requests.get")
-    def test_missing_active_symbol_fails_closed(self, get):
+    def test_partial_snapshot_keeps_available_symbols(self, get):
         response = Mock()
         response.json.return_value = [{"symbol": "BTCUSDT", "price": "67000"}]
         get.return_value = response
 
-        with self.assertRaisesRegex(RuntimeError, "ETHUSDT"):
+        prices = fetch_binance_last_prices({"BTCUSDT", "ETHUSDT"})
+
+        self.assertEqual(prices, {"BTCUSDT": 67000.0})
+
+    @patch("oi_engine.service.requests.get")
+    def test_empty_usable_snapshot_fails_closed(self, get):
+        response = Mock()
+        response.json.return_value = [{"symbol": "OTHERUSDT", "price": "1.0"}]
+        get.return_value = response
+
+        with self.assertRaisesRegex(RuntimeError, "no usable active symbols"):
             fetch_binance_last_prices({"BTCUSDT", "ETHUSDT"})
 
     def test_empty_symbol_set_does_not_call_network(self):
