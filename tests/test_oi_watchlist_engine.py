@@ -74,13 +74,13 @@ class WatchlistTests(unittest.TestCase):
         short = Signal("ABCUSDT", "SHORT", 1.0, 1.02, 0.99, 0.96,
                        .8, .3, .40, 1.4, .0001, 82, 900000)
         snapshot = {"symbol": "ABCUSDT", "candles": []}
-        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value=snapshot), \\
-             patch("oi_engine.watchlist_engine.advance_pullback_setup",
-                   return_value=(short, None, "پولبک SHORT تأیید شد")) as advance:
-            found, updated = scan_watchlist(
-                {"ABCUSDT": {"status": "در حال رصد"}},
-                FakeClient(metrics(taker=.40)), now=1000
-            )
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value=snapshot):
+            with patch("oi_engine.watchlist_engine.advance_pullback_setup",
+                       return_value=(short, None, "پولبک SHORT تأیید شد")) as advance:
+                found, updated = scan_watchlist(
+                    {"ABCUSDT": {"status": "در حال رصد"}},
+                    FakeClient(metrics(taker=.40)), now=1000
+                )
         advance.assert_called_once_with(snapshot, None, None)
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0][0].side, "SHORT")
