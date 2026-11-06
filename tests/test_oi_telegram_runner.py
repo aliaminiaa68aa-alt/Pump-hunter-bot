@@ -131,6 +131,26 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         self.assertFalse(telegram_runner.blocked_by_active_symbol_trade(sample_signal(), journal))
 
+    def test_telegram_preflight_checks_bot_and_target_chat(self):
+        bot_response = unittest.mock.Mock()
+        bot_response.json.return_value = {"ok": True, "result": {"username": "test_bot"}}
+        chat_response = unittest.mock.Mock()
+        chat_response.json.return_value = {"ok": True, "result": {"type": "private"}}
+        with patch.object(telegram_runner.requests, "get", side_effect=[bot_response, chat_response]) as get:
+            telegram_runner.verify_telegram_connection("token", "chat")
+        self.assertEqual(get.call_count, 2)
+        self.assertIn("getMe", get.call_args_list[0].args[0])
+        self.assertIn("getChat", get.call_args_list[1].args[0])
+
+    def test_telegram_preflight_fails_when_chat_is_unavailable(self):
+        bot_response = unittest.mock.Mock()
+        bot_response.json.return_value = {"ok": True, "result": {}}
+        chat_response = unittest.mock.Mock()
+        chat_response.json.return_value = {"ok": False, "description": "chat not found"}
+        with patch.object(telegram_runner.requests, "get", side_effect=[bot_response, chat_response]):
+            with self.assertRaisesRegex(RuntimeError, "target chat is unavailable"):
+                telegram_runner.verify_telegram_connection("token", "chat")
+
     def test_outcome_update_treats_read_timeout_as_delivery_unknown_without_retry(self):
         with patch.object(
             telegram_runner, "send_telegram",
