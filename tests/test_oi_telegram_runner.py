@@ -878,5 +878,68 @@ class TelegramRunnerTests(unittest.TestCase):
         ))
 
 
+
+class TelegramSendReliabilityTests(unittest.TestCase):
+    def _response(self, payload, status_code=200):
+        response = unittest.mock.Mock()
+        response.status_code = status_code
+        response.json.return_value = payload
+        return response
+
+    def test_send_telegram_returns_confirmed_message_id(self):
+        response = self._response({"ok": True, "result": {"message_id": 456}})
+        with patch.object(telegram_runner.requests, "post", return_value=response) as post:
+            message_id = telegram_runner.send_telegram(
+                "token", "chat", "hello", parse_mode="HTML"
+            )
+        self.assertEqual(message_id, 456)
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(post.call_args.kwargs["timeout"], (10, 25))
+
+    def test_send_telegram_retries_only_safe_connect_timeout(self):
+        response = self._response({"ok": True, "result": {"message_id": 457}})
+        with patch.object(
+            telegram_runner.requests, "post",
+            side_effect=[telegram_runner.requests.exceptions.ConnectTimeout(), response],
+        ) as post, patch.object(telegram_runner.time, "sleep"):
+            self.assertEqual(telegram_runner.send_telegram("token", "chat", "hello"), 457)
+        self.assertEqual(post.call_count, 2)
+
+    def test_send_telegram_does_not_retry_ambiguous_read_timeout(self):
+        with patch.object(
+            telegram_runner.requests, "post",
+            side_effect=telegram_runner.requests.exceptions.ReadTimeout("read timed out"),
+        ) as post:
+            with self.assertRaises(telegram_runner.requests.exceptions.ReadTimeout):
+                telegram_runner.send_telegram("token", "chat", "hello")
+        post.assert_called_once()
+
+    def test_send_telegram_respects_telegram_rate_limit_retry_after(self):
+        limited = self._response(
+            {"ok": False, "parameters": {"retry_after": 2}}, status_code=429
+        )
+        accepted = self._response({"ok": True, "result": {"message_id": 458}})
+        with patch.object(
+            telegram_runner.requests, "post", side_effect=[limited, accepted]
+        ) as post, patch.object(telegram_runner.time, "sleep") as sleep:
+            self.assertEqual(telegram_runner.send_telegram("token", "chat", "hello"), 458)
+        self.assertEqual(post.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_send_telegram_rejects_success_without_message_id(self):
+        response = self._response({"ok": True, "result": {}})
+        with patch.object(telegram_runner.requests, "post", return_value=response):
+            with self.assertRaisesRegex(RuntimeError, "without message_id"):
+                telegram_runner.send_telegram("token", "chat", "hello")
+
+    def test_send_telegram_surfaces_telegram_rejection(self):
+        response = self._response(
+            {"ok": False, "description": "chat not found"}, status_code=400
+        )
+        with patch.object(telegram_runner.requests, "post", return_value=response):
+            with self.assertRaisesRegex(telegram_runner.requests.HTTPError, "400"):
+                telegram_runner.send_telegram("token", "chat", "hello")
+
+
 if __name__ == "__main__":
     unittest.main()
