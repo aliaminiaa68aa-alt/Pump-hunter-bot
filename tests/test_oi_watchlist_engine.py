@@ -3,7 +3,7 @@ import requests
 from unittest.mock import Mock
 from unittest.mock import patch
 from oi_engine.signal_engine import Signal
-from oi_engine.watchlist_engine import coinalyze_confirms, scan_watchlist, format_confirmed_signal, source_oi_priority
+from oi_engine.watchlist_engine import coinalyze_confirms, coinalyze_rejection_reasons, scan_watchlist, format_confirmed_signal, source_oi_priority
 
 def signal(side="LONG"):
     return Signal("ABCUSDT",side,1,.98,1.02,1.04,.8,.3,.56,1.4,.0001,82,900000)
@@ -42,6 +42,13 @@ class WatchlistTests(unittest.TestCase):
     def test_short_needs_sell_flow(self):
         self.assertTrue(coinalyze_confirms(signal("SHORT"),metrics(taker=.40)))
         self.assertFalse(coinalyze_confirms(signal("SHORT"),metrics(taker=.55)))
+
+    def test_derivatives_rejection_reports_exact_failed_gates(self):
+        rejected = metrics(taker=.47, oi=.12)
+        reasons = coinalyze_rejection_reasons(signal(), rejected)
+        self.assertTrue(any("رشد OI کافی نیست" in reason for reason in reasons))
+        self.assertTrue(any("جریان خرید کافی نیست" in reason for reason in reasons))
+        self.assertFalse(coinalyze_confirms(signal(), rejected))
     def test_missing_core_funding_still_fails_closed(self):
         partial = {"oi_change_15m_window_pct": 0.4, "taker_buy_ratio": 0.60,
                    "data_quality": {"complete": False}}
@@ -122,6 +129,7 @@ class WatchlistTests(unittest.TestCase):
             )
         self.assertEqual(found, [])
         self.assertEqual(updated["ABCUSDT"]["status"], "منتظر تأیید مشتقات")
+        self.assertIn("جریان خرید کافی نیست", updated["ABCUSDT"]["reason"])
         self.assertEqual(updated["ABCUSDT"]["pending_setup"], pending)
 
     def test_bos_is_blocked_while_pullback_setup_is_pending(self):
