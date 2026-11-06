@@ -15,6 +15,11 @@ import requests
 
 BASE_URL = "https://fapi.binance.com"
 INTERVAL = "15m"
+MIN_OI_CHANGE_PCT = 0.10
+MIN_DIRECTIONAL_PRICE_CHANGE_PCT = 0.03
+MIN_LONG_TAKER_RATIO = 0.505
+MAX_SHORT_TAKER_RATIO = 0.495
+MIN_ACTIVE_VOLUME_RATIO = 1.00
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "OI-Signal-Engine/1.0"})
 
@@ -279,26 +284,26 @@ def diagnose_snapshot(snapshot: Dict[str, Any]) -> List[str]:
         return ["ساختار داده بازار ناقص یا نامعتبر است"]
 
     reasons = []
-    if oi_change < 0.15:
-        reasons.append(f"رشد OI کم است ({oi_change:+.2f}%؛ حداقل 0.15%)")
+    if oi_change < MIN_OI_CHANGE_PCT:
+        reasons.append(f"رشد OI کم است ({oi_change:+.2f}%؛ حداقل {MIN_OI_CHANGE_PCT:.2f}%)")
 
     long_break = close > prior_high and close > open_price
     short_break = close < prior_low and close < open_price
-    active_volume = volume_ratio >= 1.00
+    active_volume = volume_ratio >= MIN_ACTIVE_VOLUME_RATIO
 
     long_fail = []
     short_fail = []
-    if price_change < 0.05:
-        long_fail.append(f"تغییر قیمت LONG کافی نیست ({price_change:+.2f}%؛ حداقل +0.05%)")
-    if taker_ratio < 0.51:
-        long_fail.append(f"خرید تهاجمی پایین است ({taker_ratio:.1%}؛ حداقل 51%)")
+    if price_change < MIN_DIRECTIONAL_PRICE_CHANGE_PCT:
+        long_fail.append(f"تغییر قیمت LONG کافی نیست ({price_change:+.2f}%؛ حداقل +{MIN_DIRECTIONAL_PRICE_CHANGE_PCT:.2f}%)")
+    if taker_ratio < MIN_LONG_TAKER_RATIO:
+        long_fail.append(f"خرید تهاجمی پایین است ({taker_ratio:.1%}؛ حداقل {MIN_LONG_TAKER_RATIO:.1%})")
     if not (active_volume or long_break):
         long_fail.append(f"حجم پایین است ({volume_ratio:.2f}x؛ حداقل 1.00x) و شکست سقف هم تأیید نشده")
 
-    if price_change > -0.05:
-        short_fail.append(f"تغییر قیمت SHORT کافی نیست ({price_change:+.2f}%؛ حداکثر -0.05%)")
-    if taker_ratio > 0.49:
-        short_fail.append(f"فروش تهاجمی کافی نیست ({taker_ratio:.1%}؛ حداکثر 49%)")
+    if price_change > -MIN_DIRECTIONAL_PRICE_CHANGE_PCT:
+        short_fail.append(f"تغییر قیمت SHORT کافی نیست ({price_change:+.2f}%؛ حداکثر -{MIN_DIRECTIONAL_PRICE_CHANGE_PCT:.2f}%)")
+    if taker_ratio > MAX_SHORT_TAKER_RATIO:
+        short_fail.append(f"فروش تهاجمی کافی نیست ({taker_ratio:.1%}؛ حداکثر {MAX_SHORT_TAKER_RATIO:.1%})")
     if not (active_volume or short_break):
         short_fail.append(f"حجم پایین است ({volume_ratio:.2f}x؛ حداقل 1.05x) و شکست کف هم تأیید نشده")
 
@@ -390,18 +395,18 @@ def evaluate_snapshot(snapshot: Dict[str, Any], required_side: Optional[str] = N
     # live scanner to watch valid alerts but almost never produce an entry.
     long_break = last["close"] > prior_high and last["close"] > last["open"]
     short_break = last["close"] < prior_low and last["close"] < last["open"]
-    active_volume = volume_ratio >= 1.05
+    active_volume = volume_ratio >= MIN_ACTIVE_VOLUME_RATIO
 
     long_valid = (
-        oi_change >= 0.15
-        and price_change >= 0.05
-        and taker_ratio >= 0.51
+        oi_change >= MIN_OI_CHANGE_PCT
+        and price_change >= MIN_DIRECTIONAL_PRICE_CHANGE_PCT
+        and taker_ratio >= MIN_LONG_TAKER_RATIO
         and (active_volume or long_break)
     )
     short_valid = (
-        oi_change >= 0.15
-        and price_change <= -0.05
-        and taker_ratio <= 0.49
+        oi_change >= MIN_OI_CHANGE_PCT
+        and price_change <= -MIN_DIRECTIONAL_PRICE_CHANGE_PCT
+        and taker_ratio <= MAX_SHORT_TAKER_RATIO
         and (active_volume or short_break)
     )
 
