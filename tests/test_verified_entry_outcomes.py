@@ -34,6 +34,31 @@ class VerifiedEntryOutcomeTests(unittest.TestCase):
         self.assertEqual(report["not_entered"], 1)
         self.assertEqual(report["tp2_reached"], 0)
 
+    def test_entry_candle_stop_and_target_are_not_counted(self):
+        journal, key = self._journal()
+        record = journal["trades"][key]
+        # The same 15m candle touches entry=100, SL=98 and TP1/TP2.
+        # OHLC cannot establish which level was reached first.
+        candles = [_candle(900000, 100, 105, 97, 101)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: candles)
+        self.assertEqual(record["status"], "OPEN")
+        self.assertEqual([event["event"] for event in record["events"]], ["ENTRY"])
+        self.assertTrue(record["entry_candle_excursion_ambiguous"])
+        self.assertEqual(record["last_checked_ms"], 1800000)
+
+    def test_exit_monitoring_starts_on_candle_after_entry(self):
+        journal, key = self._journal()
+        record = journal["trades"][key]
+        entry_candle = [_candle(900000, 100, 105, 97, 101)]
+        monitor_journal(journal, now_ms=1800000, fetcher=lambda *_: entry_candle)
+        next_candle = [_candle(1800000, 101, 103, 99, 102.5)]
+        monitor_journal(journal, now_ms=2700000, fetcher=lambda *_: next_candle)
+        self.assertEqual(record["status"], "TP1_HIT")
+        self.assertEqual(
+            [event["event"] for event in record["events"]],
+            ["ENTRY", "TP1"],
+        )
+
     def test_historical_tp2_without_entry_is_not_counted(self):
         journal, key = self._journal()
         record = journal["trades"][key]
