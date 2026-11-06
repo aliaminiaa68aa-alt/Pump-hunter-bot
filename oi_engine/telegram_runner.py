@@ -233,8 +233,11 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                     f"entry_time_ms={entry_time} sent_at_ms={sent_at} "
                     f"events={event_names}"
                 )
+            # A late entry ping is misleading: the user may already have
+            # missed the executable price. With the minute-level monitor, allow
+            # a short delivery window only; later ENTRY messages are suppressed.
             late_entry_notification = bool(
-                entry_time and now_ms - entry_time > 120000 and not entry_predates_signal
+                entry_time and now_ms - entry_time > 90000 and not entry_predates_signal
             )
             if entry_predates_signal and not record.get("entry_missed"):
                 record["entry_missed"] = True
@@ -297,8 +300,9 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
             delayed = bool(timestamp and now_ms - timestamp > 120000)
             clock = _format_event_time_iran(event)
             if name == "ENTRY":
-                intro = "🟡 ورود قبلاً فعال شده بود" if delayed else "🟡 ورود فعال شد"
-                label = f"{intro}؛ قیمت اجرا: {float(event.get('fill', record['signal']['entry'])):.8g}"
+                # Stale ENTRY events were filtered above. Never emit a message
+                # claiming the entry had already activated.
+                label = f"🟡 ورود فعال شد؛ قیمت اجرا: {float(event.get('fill', record['signal']['entry'])):.8g}"
             elif name == "TP1":
                 label = "🎯 تارگت اول خورد"
             elif name == "TP2":
