@@ -21,7 +21,8 @@ MIN_BREAKOUT_OI_CHANGE_PCT = 0.30
 MIN_BREAKOUT_PRICE_CHANGE_PCT = 0.15
 MIN_BREAKOUT_VOLUME_RATIO = 1.50
 MIN_DIRECTIONAL_TAKER_RATIO = 0.55
-MIN_TP2_DISTANCE_PCT = 1.00
+MIN_TP1_DISTANCE_PCT = 1.00
+MIN_TP2_DISTANCE_PCT = 2.00
 MAX_CROWDED_FUNDING_RATE = 0.0005
 MIN_REJECTION_BODY_RATIO = 0.08
 MIN_REJECTION_CLOSE_LOCATION = 0.35
@@ -136,7 +137,13 @@ def advance_pullback_setup(
             return None, None, "فاصله ساختاری ورود تا ابطال برای این شکست بیش از حد است"
         tp1 = entry + risk if breakout.side == "LONG" else entry - risk
         tp2 = entry + 2.0 * risk if breakout.side == "LONG" else entry - 2.0 * risk
+        tp1_distance_pct = abs(tp1 - entry) / entry * 100.0
         tp2_distance_pct = abs(tp2 - entry) / entry * 100.0
+        if tp1_distance_pct < MIN_TP1_DISTANCE_PCT:
+            return None, None, (
+                f"ظرفیت هدف اول کافی نیست؛ فاصله هدف اول فقط {tp1_distance_pct:.2f}٪ است "
+                f"(حداقل {MIN_TP1_DISTANCE_PCT:.2f}٪)"
+            )
         if tp2_distance_pct < MIN_TP2_DISTANCE_PCT:
             return None, None, (
                 f"ظرفیت حرکت کافی نیست؛ فاصله هدف دوم فقط {tp2_distance_pct:.2f}٪ است "
@@ -521,7 +528,12 @@ def advance_pullback_setup(
 
     tp1 = entry + risk if side == "LONG" else entry - risk
     tp2 = entry + 2.0 * risk if side == "LONG" else entry - 2.0 * risk
+    tp1_distance_pct = abs(tp1 - entry) / entry * 100.0
     tp2_distance_pct = abs(tp2 - entry) / entry * 100.0
+    if tp1_distance_pct < MIN_TP1_DISTANCE_PCT:
+        return None, pending, (
+            f"فاصله هدف اول کافی نیست ({tp1_distance_pct:.2f}٪؛ حداقل {MIN_TP1_DISTANCE_PCT:.2f}٪)"
+        )
     if tp2_distance_pct < MIN_TP2_DISTANCE_PCT:
         return None, pending, (
             f"فاصله هدف دوم کافی نیست ({tp2_distance_pct:.2f}٪؛ حداقل {MIN_TP2_DISTANCE_PCT:.2f}٪)"
