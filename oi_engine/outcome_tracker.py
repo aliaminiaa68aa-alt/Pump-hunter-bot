@@ -204,7 +204,7 @@ def monitor_journal(
             for event in record.get("events", [])
         )
         if (
-            status in {"OPEN", "TP1_HIT", "CLOSED_SL", "CLOSED_TP2", "AMBIGUOUS_ENTRY_CANDLE"}
+            status in {"OPEN", "TP1_HIT", "CLOSED_SL", "CLOSED_TP2", "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL"}
             or has_exit_event
         ) and not _has_confirmed_entry(record):
             record["status"] = "INVALID_NO_ENTRY"
@@ -256,7 +256,7 @@ def monitor_journal(
                 record["post_stop_error"] = f"{type(exc).__name__}: {exc}"
             continue
 
-        if status in {"CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE", "MISSED_ENTRY"}:
+        if status in {"CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL", "MISSED_ENTRY"}:
             continue
         side = signal["side"]
         entry = float(record.get("entry_fill_price") or signal["entry"])
@@ -327,7 +327,7 @@ def monitor_journal(
                     if stop_hit or tp1_hit or tp2_hit:
                         record["entry_candle_ambiguous"] = True
                         record.setdefault("events", []).append({
-                            "event": "AMBIGUOUS_ENTRY_CANDLE",
+                            "event": "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL",
                             "time_ms": close_ms,
                             "entry_fill": entry,
                             "stop_touched": stop_hit,
@@ -339,7 +339,7 @@ def monitor_journal(
                                 if touched
                             ],
                         })
-                        record["status"] = "AMBIGUOUS_ENTRY_CANDLE"
+                        record["status"] = "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL"
                         record["exit_time_ms"] = close_ms
                     continue
                 # After TP1, the remaining position is protected at breakeven.
@@ -357,11 +357,11 @@ def monitor_journal(
                 if entry_intrabar and (stop_hit or tp1_hit or tp2_hit):
                     record["entry_candle_ambiguous"] = True
                     record.setdefault("events", []).append({
-                        "event": "AMBIGUOUS_ENTRY_CANDLE", "time_ms": close_ms,
+                        "event": "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL", "time_ms": close_ms,
                         "entry_fill": entry, "stop_touched": stop_hit,
                         "tp1_touched": tp1_hit, "tp2_touched": tp2_hit,
                     })
-                    record["status"] = "AMBIGUOUS_ENTRY_CANDLE"
+                    record["status"] = "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL"
                     record["exit_time_ms"] = close_ms
                     break
 
@@ -481,7 +481,7 @@ def monitor_journal(
     # Bound history without deleting unresolved trades.
     closed = [
         (key, value) for key, value in trades.items()
-        if value.get("status") in {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE"}
+        if value.get("status") in {"CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY", "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL"}
     ]
     if len(closed) > 500:
         for key, _ in sorted(closed, key=lambda item: item[1].get("sent_at_ms", 0))[:-500]:
