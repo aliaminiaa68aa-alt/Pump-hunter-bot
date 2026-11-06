@@ -130,7 +130,7 @@ def advance_pullback_setup(
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
         directional_flow = (
-            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.515
+            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.505
             and aggregate_flow >= 0.50
             and directional_candle_share >= 0.34
             and float(last["close"]) > ema20
@@ -157,7 +157,7 @@ def advance_pullback_setup(
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
         directional_flow = (
-            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.485
+            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.495
             and aggregate_flow <= 0.50
             and directional_candle_share >= 0.34
             and float(last["close"]) < ema20
