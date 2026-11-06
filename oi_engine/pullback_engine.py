@@ -130,7 +130,7 @@ def advance_pullback_setup(
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
         directional_flow = (
-            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.50
+            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.505
             and aggregate_flow >= 0.48
             and directional_candle_share >= 0.20
             and float(last["close"]) > ema20
@@ -157,7 +157,7 @@ def advance_pullback_setup(
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
         directional_flow = (
-            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.50
+            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.495
             and aggregate_flow <= 0.52
             and directional_candle_share >= 0.20
             and float(last["close"]) < ema20
@@ -187,7 +187,7 @@ def advance_pullback_setup(
         )
 
     oi_change = (float(oi_values[-1]) / float(oi_values[-2]) - 1.0) * 100.0
-    if oi_change < 0.05:
+    if oi_change < 0.10:
         return None, pending, f"پولبک رخ داد اما رشد OI این کندل کافی نیست ({oi_change:+.2f}%)؛ setup تا پایان مهلت حفظ شد"
     quote_volume = float(last["quote_volume"])
     baseline = candles[-21:-1]
