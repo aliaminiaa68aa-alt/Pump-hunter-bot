@@ -11,7 +11,7 @@ def make_snapshot(side="LONG"):
             close = 103.0 - i * 0.05
         candles.append({
             "open_time": i * 900000, "open": close - 0.02,
-            "high": close + 0.35, "low": close - 0.35, "close": close,
+            "high": close + 0.80, "low": close - 0.80, "close": close,
             "volume": 1000, "quote_volume": 100000,
             "taker_buy_quote": 50000,
             "close_time": (i + 1) * 900000 - 1,
@@ -46,6 +46,8 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertGreater(signal.take_profit_1, signal.entry)
         self.assertGreater(signal.take_profit_2, signal.take_profit_1)
         self.assertTrue(pending["entry_signal_sent"])
+        self.assertGreaterEqual(abs(signal.take_profit_1 - signal.entry) / signal.entry * 100, 1.0)
+        self.assertGreaterEqual(abs(signal.take_profit_2 - signal.entry) / signal.entry * 100, 2.0)
         self.assertIn("پیش از پولبک", reason)
 
     def test_short_breakout_sends_limit_before_retest(self):
@@ -56,6 +58,7 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertEqual(signal.entry, pending["level"])
         self.assertGreater(signal.stop_loss, signal.entry)
         self.assertLess(signal.take_profit_1, signal.entry)
+        self.assertGreaterEqual(abs(signal.take_profit_1 - signal.entry) / signal.entry * 100, 1.0)
 
     def test_channel_direction_mismatch_blocks_breakout(self):
         signal, pending, reason = advance_pullback_setup(make_snapshot("LONG"), required_side="SHORT")
