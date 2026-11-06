@@ -284,6 +284,45 @@ class TelegramRunnerTests(unittest.TestCase):
             telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = original_limit
             telegram_runner.MARKET_DISCOVERY_PER_RUN = original_add
 
+    def test_market_universe_queue_trims_legacy_overflow_and_preserves_pending(self):
+        class UniverseClient:
+            def get_active_binance_usdt_perpetual_symbols(self):
+                return [f"COIN{i}USDT" for i in range(30)]
+
+        watchlist = {
+            **{
+                f"OLD{i}USDT": {
+                    "source_type": "market_universe",
+                    "last_checked": 100 + i,
+                    "first_seen": 10 + i,
+                }
+                for i in range(7)
+            },
+            "PENDINGUSDT": {
+                "source_type": "market_universe",
+                "last_checked": 999,
+                "first_seen": 1,
+                "pending_setup": {"expires_at_close_time": 5000},
+            },
+        }
+        original_limit = telegram_runner.MAX_MARKET_QUEUE_SYMBOLS
+        try:
+            telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = 5
+            _, added = telegram_runner.add_market_universe_candidates(
+                watchlist, UniverseClient(), "", now=300
+            )
+            market_symbols = {
+                symbol for symbol, record in watchlist.items()
+                if record.get("source_type") == "market_universe"
+            }
+            self.assertEqual(added, 0)
+            self.assertEqual(len(market_symbols), 5)
+            self.assertIn("PENDINGUSDT", market_symbols)
+            self.assertIn("OLD0USDT", market_symbols)
+            self.assertNotIn("OLD6USDT", market_symbols)
+        finally:
+            telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = original_limit
+
     def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None, send_side_effect=None):
         state_path = Path(directory) / "sent_signals.json"
         watch_path = Path(directory) / "watchlist.json"
