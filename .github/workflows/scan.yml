@@ -6,7 +6,8 @@ on:
   # The only live strategy ingests @oi_detector alerts and independently confirms them.
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    # Avoid GitHub's busiest top-of-hour scheduling window.
+    - cron: "2-59/5 * * * *"
 
 permissions:
   contents: read
