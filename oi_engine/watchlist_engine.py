@@ -107,7 +107,9 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         f"{title}  <b>{symbol}</b>\n"
         "━━━━━━━━━━━━━━\n"
         f"💵 ورود: <code>{signal.entry:.8g}</code>\n"
-        "⏳ ورود فقط بعد از لمس قیمت ورود فعال است؛ قبل از آن وارد نشوید.\n"
+        + ("⚡ <b>ورود مارکت</b>؛ قیمت ورود عبور کرده، با قیمت لحظه‌ای وارد شوید.\n"
+           if getattr(signal, "execution_mode", "LIMIT") == "MARKET"
+           else "⏳ ورود فقط بعد از لمس قیمت ورود فعال است؛ قبل از آن وارد نشوید.\n")
         f"🛡 حد ضرر: <code>{signal.stop_loss:.8g}</code>\n"
         f"🎯 هدف ۱: <code>{signal.take_profit_1:.8g}</code>\n"
         f"🚀 هدف ۲: <code>{signal.take_profit_2:.8g}</code>\n"
