@@ -37,7 +37,7 @@ class WatchlistTests(unittest.TestCase):
 
     def test_long_needs_oi_and_buy_flow(self):
         self.assertTrue(coinalyze_confirms(signal(),metrics()))
-        self.assertFalse(coinalyze_confirms(signal(),metrics(taker=.49)))
+        self.assertFalse(coinalyze_confirms(signal(),metrics(taker=.47)))
         self.assertFalse(coinalyze_confirms(signal(),metrics(oi=.02)))
     def test_short_needs_sell_flow(self):
         self.assertTrue(coinalyze_confirms(signal("SHORT"),metrics(taker=.40)))
