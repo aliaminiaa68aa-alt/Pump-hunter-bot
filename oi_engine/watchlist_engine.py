@@ -162,6 +162,8 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
     confirmed: List[Tuple[Signal, Dict[str, Any]]] = []
     updated = {symbol: dict(record) for symbol, record in watchlist.items()}
     for symbol, record in updated.items():
+        symbol_started = time.monotonic()
+        print(f"Scan symbol started: {symbol}")
         # Record attempts separately from successful scans. A transient provider
         # failure must not mark a fresh OI alert as fully checked.
         record["last_attempted_at"] = timestamp
@@ -255,6 +257,12 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
         except Exception as exc:
             record["status"] = "خطای غیرمنتظره"
             record["reason"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            elapsed = time.monotonic() - symbol_started
+            print(
+                f"Scan symbol finished: {symbol} status={record.get('status', 'unknown')} "
+                f"elapsed={elapsed:.1f}s"
+            )
     confirmed.sort(
         key=lambda item: float(item[1].get("oi_priority_score", 0.0)),
         reverse=True,
