@@ -106,14 +106,22 @@ def advance_pullback_setup(
     level = float(pending["level"])
     tolerance = atr * PULLBACK_TOLERANCE_ATR
     invalidation = atr * INVALIDATION_ATR
-    # Track the full post-breakout pullback structure, not just the final
-    # confirmation candle. This prevents a later shallow candle from moving
-    # the stop inside an earlier valid swing extreme.
+    # A symbol may not be selected on every 15m candle because the scanner
+    # processes a bounded batch. Recover every closed candle since breakout,
+    # rather than looking only at the newest candle and missing an intervening
+    # retest/swing extreme while the symbol was outside the batch.
+    post_breakout = [
+        candle for candle in candles
+        if int(candle["close_time"]) > int(pending.get("breakout_close_time", 0))
+    ]
+    if not post_breakout:
+        return None, pending, "منتظر بسته‌شدن کندل بعد از شکست هستیم"
     pending = dict(pending)
     if side == "LONG":
+        observed_low = min(float(candle["low"]) for candle in post_breakout)
         pullback_extreme = min(
-            float(pending.get("pullback_extreme", last["low"])),
-            float(last["low"]),
+            float(pending.get("pullback_extreme", observed_low)),
+            observed_low,
         )
         pending["pullback_extreme"] = pullback_extreme
         touched = pullback_extreme <= level + tolerance
@@ -138,9 +146,10 @@ def advance_pullback_setup(
         )
         stop = pullback_extreme - atr * STOP_BUFFER_ATR
     else:
+        observed_high = max(float(candle["high"]) for candle in post_breakout)
         pullback_extreme = max(
-            float(pending.get("pullback_extreme", last["high"])),
-            float(last["high"]),
+            float(pending.get("pullback_extreme", observed_high)),
+            observed_high,
         )
         pending["pullback_extreme"] = pullback_extreme
         touched = pullback_extreme >= level - tolerance
@@ -167,8 +176,21 @@ def advance_pullback_setup(
 
     if not valid_depth:
         return None, None, "پولبک بیش از حد عمیق شد؛ setup باطل شد"
-    if not touched or not confirmed:
-        return None, pending, "هنوز پولبک و کندل برگشتی معتبر شکل نگرفته"
+    if not touched:
+        distance = (
+            (pullback_extreme - level) / atr if side == "LONG"
+            else (level - pullback_extreme) / atr
+        )
+        return None, pending, (
+            f"قیمت هنوز محدوده پولبک را لمس نکرده؛ فاصله تا سطح شکست "
+            f"{distance:.2f} ATR است"
+        )
+    if not confirmed:
+        return None, pending, (
+            f"پولبک انجام شده اما کندل آخر تأیید برگشت نداده "
+            f"(بدنه {body_ratio:.0%}؛ حداقل {MIN_REJECTION_BODY_RATIO:.0%}، "
+            f"محل بسته‌شدن {close_location:.0%}؛ حداقل {MIN_REJECTION_CLOSE_LOCATION:.0%})"
+        )
     # Do not chase a confirmation candle that has already travelled too far
     # from the broken structure. Keep the setup alive for a fresh retest.
     entry_extension = (
