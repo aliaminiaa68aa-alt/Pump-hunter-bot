@@ -14,10 +14,10 @@ MAX_STOP_ATR = 2.00
 MIN_STOP_PCT = 0.25
 MAX_ENTRY_EXTENSION_ATR = 0.95
 ENTRY_LIMIT_OFFSET_ATR = 0.02
-MIN_ENTRY_QUALITY = 50
-MIN_REJECTION_BODY_RATIO = 0.18
-MIN_REJECTION_CLOSE_LOCATION = 0.55
-EMA_TOLERANCE_ATR = 0.10
+MIN_ENTRY_QUALITY = 45
+MIN_REJECTION_BODY_RATIO = 0.14
+MIN_REJECTION_CLOSE_LOCATION = 0.48
+EMA_TOLERANCE_ATR = 0.18
 FLOW_LOOKBACK_CANDLES = 3
 
 
@@ -177,8 +177,8 @@ def advance_pullback_setup(
                     and first_body >= 0.15
                     and float(follow_through["close"]) > float(first["high"])
                     and float(follow_through["close"]) > float(follow_through["open"])
-                    and follow_body >= 0.10
-                    and follow_close_location >= 0.60
+                    and follow_body >= 0.08
+                    and follow_close_location >= 0.52
                 ):
                     if confirmation_candle is None:
                         confirmation_candle = follow_through
@@ -208,7 +208,7 @@ def advance_pullback_setup(
         directional_flow = (
             float(flow_confirmation["taker_buy_quote"]) / max(float(flow_confirmation["quote_volume"]), 1e-12) >= 0.505
             and aggregate_flow >= 0.47
-            and directional_candle_share >= 0.20
+            and directional_candle_share >= 0.15
             and float(last["close"]) >= ema20 - atr * EMA_TOLERANCE_ATR
         )
         stop = pullback_extreme - atr * STOP_BUFFER_ATR
@@ -349,7 +349,7 @@ def advance_pullback_setup(
     quote_volume = float(last["quote_volume"])
     baseline = candles[-21:-1]
     average_volume = sum(float(c["quote_volume"]) for c in baseline) / len(baseline)
-    if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 0.90:
+    if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 0.80:
         return None, pending, "پولبک رخ داد اما حجم کندل برگشتی کافی نیست؛ setup تا پایان مهلت حفظ شد"
 
     # Place a resting limit near the broken structure, not at the confirmation
