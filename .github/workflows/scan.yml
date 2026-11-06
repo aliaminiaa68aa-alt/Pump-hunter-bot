@@ -3,7 +3,7 @@ name: OI Channel Signal Scanner
 on:
   push:
     branches: [main]
-  # The only live strategy ingests @oi_detector alerts and independently confirms them.
+  # Scan @oi_detector alerts first, then rotate through the wider crypto perpetual universe.
   workflow_dispatch:
   schedule:
     # Avoid GitHub's busiest top-of-hour scheduling window.
