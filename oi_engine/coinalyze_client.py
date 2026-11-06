@@ -221,6 +221,30 @@ class CoinalyzeClient:
                 continue
         return sorted(candles, key=lambda item: int(item[0]))
 
+    def fetch_live_price(self, binance_symbol: str, now: Optional[int] = None) -> Optional[Dict[str, int | float]]:
+        """Return a recent 1m Coinalyze quote for executable fallback entries.
+
+        The candle timestamp is used as the quote timestamp; stale minute bars
+        are rejected rather than being presented as a live market price.
+        """
+        market_symbol = self.resolve_market(binance_symbol)
+        end = int(now if now is not None else self.clock())
+        history = self._history(
+            "ohlcv-history", market_symbol, end - 120, end, interval="1min"
+        )
+        if not history:
+            return None
+        latest = max(history, key=lambda row: int(row.get("t", 0) or 0))
+        try:
+            candle_time = int(latest["t"])
+            price = float(latest["c"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+        if (not math.isfinite(price) or price <= 0
+                or candle_time > end or end - candle_time > 60):
+            return None
+        return {"current_price": price, "price_timestamp": candle_time * 1000}
+
     def fetch_metrics(self, binance_symbol: str, now: Optional[int] = None) -> Dict[str, Any]:
         """Fetch a bounded Coinalyze derivatives snapshot for one Binance USDT perp."""
         market_symbol = self.resolve_market(binance_symbol)
