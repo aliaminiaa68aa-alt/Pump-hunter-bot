@@ -35,6 +35,26 @@ def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
     return payload
 
 
+def _fetch_1m_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
+    """Fetch Binance USD-M 1m trade-price candles (Last/contract price)."""
+    response = requests.get(
+        BASE_URL + "/fapi/v1/klines",
+        params={
+            "symbol": symbol,
+            "interval": "1m",
+            "startTime": start_ms,
+            "endTime": end_ms,
+            "limit": 1500,
+        },
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise ValueError("Unexpected Binance 1m kline response")
+    return payload
+
+
 def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> Dict[str, Any]:
     data = signal.to_dict() if hasattr(signal, "to_dict") else dict(signal)
     data["engine"] = metrics.get("engine", data.get("engine", "UNSPECIFIED"))
