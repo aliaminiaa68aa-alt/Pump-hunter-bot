@@ -3,7 +3,7 @@ import requests
 from unittest.mock import Mock
 from unittest.mock import patch
 from oi_engine.signal_engine import Signal
-from oi_engine.watchlist_engine import coinalyze_confirms, coinalyze_rejection_reasons, scan_watchlist, format_confirmed_signal, source_oi_priority
+from oi_engine.watchlist_engine import coinalyze_confirms, coinalyze_rejection_reasons, scan_watchlist, format_confirmed_signal, source_oi_priority, signal_price_geometry_rejection
 
 def signal(side="LONG"):
     return Signal("ABCUSDT",side,1,.98,1.02,1.04,.8,.3,.56,1.4,.0001,82,900000)
@@ -97,6 +97,27 @@ class WatchlistTests(unittest.TestCase):
         self.assertEqual(updated["ABCUSDT"]["last_attempted_at"], 1000)
         self.assertEqual(updated["ABCUSDT"]["last_checked"], 800)
         self.assertEqual(updated["ABCUSDT"]["status"], "خطای دریافت داده")
+
+    def test_tp1_below_one_percent_is_rejected_for_long_and_short(self):
+        self.assertIn("حداقل مجاز 1.00٪", signal_price_geometry_rejection(signal()))
+        short = Signal("ABCUSDT", "SHORT", 1.0, 1.02, 0.995, 0.98, .8, .3, .40, 1.4, .0001, 82, 900000)
+        self.assertIn("حداقل مجاز 1.00٪", signal_price_geometry_rejection(short))
+
+    def test_tp1_at_or_above_one_percent_passes_for_both_sides(self):
+        long = Signal("ABCUSDT", "LONG", 1.0, .98, 1.01, 1.04, .8, .3, .56, 1.4, .0001, 82, 900000)
+        short = Signal("ABCUSDT", "SHORT", 1.0, 1.02, .99, .96, .8, .3, .40, 1.4, .0001, 82, 900000)
+        self.assertIsNone(signal_price_geometry_rejection(long))
+        self.assertIsNone(signal_price_geometry_rejection(short))
+
+    def test_scan_blocks_sub_one_percent_tp1_even_when_derivatives_confirm(self):
+        weak_target = Signal("ABCUSDT", "LONG", 1.0, .98, 1.005, 1.02, .8, .3, .56, 1.4, .0001, 82, 900000)
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value={}), \\
+             patch("oi_engine.watchlist_engine.evaluate_snapshot", return_value=None), \\
+             patch("oi_engine.watchlist_engine.advance_pullback_setup", return_value=(weak_target, None, "candidate")):
+            found, updated = scan_watchlist({"ABCUSDT": {}}, FakeClient(metrics()), now=1000)
+        self.assertEqual(found, [])
+        self.assertEqual(updated["ABCUSDT"]["status"], "رد سیگنال به‌دلیل کیفیت قیمت‌ها")
+        self.assertIn("فاصله هدف اول فقط 0.50٪", updated["ABCUSDT"]["reason"])
 
     def test_signal_message_is_compact_and_keeps_actionable_fields(self):
         message = format_confirmed_signal(signal(), metrics())
