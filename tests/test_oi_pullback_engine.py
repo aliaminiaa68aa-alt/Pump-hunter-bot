@@ -79,23 +79,13 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertIsNone(next_pending)
         self.assertLess(signal.stop_loss, signal.entry)
         self.assertGreater(signal.take_profit_2, signal.take_profit_1)
-        # A fresh signal may be LIMIT, MARKET (small overshoot), or MISSED
-        # (price has already travelled too far). Never assume every confirmed
-        # setup still has a resting limit entry.
-        self.assertIn(signal.execution_mode, {"LIMIT", "MARKET", "MISSED"})
-        if signal.execution_mode == "LIMIT":
-            self.assertLess(signal.entry, data["candles"][-1]["close"])
-            self.assertAlmostEqual(
-                signal.entry,
-                signal.setup_level + signal.atr_15m * 0.02,
-            )
-        elif signal.execution_mode == "MARKET":
-            self.assertAlmostEqual(signal.entry, data["candles"][-1]["close"])
-        else:
-            self.assertAlmostEqual(
-                signal.entry,
-                signal.setup_level + signal.atr_15m * 0.02,
-            )
+        # Entry is a resting limit near the broken structure, not the
+        # confirmation candle close (which would usually fill next-bar market).
+        self.assertLess(signal.entry, data["candles"][-1]["close"])
+        self.assertAlmostEqual(
+            signal.entry,
+            signal.setup_level + signal.atr_15m * 0.02,
+        )
         self.assertGreater(signal.atr_15m, 0)
         self.assertGreater(signal.pullback_extreme, 0)
         self.assertGreater(signal.setup_level, 0)
@@ -196,34 +186,6 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertIsNotNone(next_pending)
         self.assertIn("ورود محدود", reason)
 
-    def test_long_large_entry_overshoot_is_reported_as_missed_not_limit(self):
-        data = snapshot("LONG")
-        _, pending, _ = advance_pullback_setup(data)
-        add_retest(data, "LONG")
-        data["candles"][-1].update({
-            "open":100.5, "high":101.2, "low":100.4, "close":101.0,
-            "quote_volume":200000, "taker_buy_quote":120000,
-        })
-        signal, next_pending, reason = advance_pullback_setup(data, pending)
-        self.assertIsNotNone(signal, reason)
-        self.assertEqual(signal.execution_mode, "MISSED")
-        self.assertIsNone(next_pending)
-
-    def test_long_very_late_confirmation_is_reported_as_missed(self):
-        data = snapshot("LONG")
-        _, pending, _ = advance_pullback_setup(data)
-        add_retest(data, "LONG")
-        # The retest was valid, but the scan observes a much later close after
-        # price has already run far beyond the planned entry. Notify as MISSED.
-        data["candles"][-1].update({
-            "open":100.5, "high":103.8, "low":100.4, "close":103.5,
-            "quote_volume":200000, "taker_buy_quote":150000,
-        })
-        signal, next_pending, reason = advance_pullback_setup(data, pending)
-        self.assertIsNotNone(signal, reason)
-        self.assertEqual(signal.execution_mode, "MISSED")
-        self.assertIsNone(next_pending)
-
     def test_long_small_entry_overshoot_switches_to_market(self):
         data = snapshot("LONG")
         _, pending, _ = advance_pullback_setup(data)
@@ -234,7 +196,7 @@ class PullbackEngineTests(unittest.TestCase):
             "quote_volume":200000, "taker_buy_quote":120000,
         })
         # Set a close just a fraction above the actual planned limit.
-        # The market switch is deliberately capped at 0.35 ATR.
+        # The market switch is deliberately capped at 0.15 ATR.
         signal, next_pending, reason = advance_pullback_setup(data, pending)
         if signal is not None:
             self.assertEqual(signal.execution_mode, "MARKET")
