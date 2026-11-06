@@ -192,11 +192,12 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
             key = str(index)
             if key not in delivery:
                 timestamp = _safe_int(event.get("time_ms"), 0)
-                if (
-                    not timestamp or timestamp < legacy_cutoff
-                    or event.get("event") != "ENTRY"
-                    or record.get("status") not in {"OPEN", "TP1_HIT"}
-                ):
+                # Events generated in the current monitoring window must be
+                # delivered even when the trade has already closed in the same
+                # replay cycle. The old status gate silently discarded ENTRY,
+                # TP1, TP2 and SL for fast trades that completed before dispatch.
+                supported_event = event.get("event") in {"ENTRY", "TP1", "TP2", "SL"}
+                if not timestamp or timestamp < legacy_cutoff or not supported_event:
                     delivery[key] = {"status": "legacy"}
         for index, event in enumerate(events):
             key = str(index)
