@@ -705,7 +705,7 @@ def main() -> None:
             if recovered_side:
                 record["source_side"] = recovered_side
 
-    client = CoinalyzeClient(api_key=api_key, include_optional_metrics=False)
+    client = CoinalyzeClient(api_key=api_key, include_optional_metrics=True)
     # Prefer Binance USD-M /fapi/v1/klines for BOTH 15m and 1m monitoring.
     # These are traded contract (Last Price) candles, matching a normal
     # Binance Futures chart in TradingView. Some GitHub runner regions receive
