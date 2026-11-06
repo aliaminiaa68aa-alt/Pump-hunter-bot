@@ -62,7 +62,10 @@ def monitor_live_outcomes_once() -> dict:
         active = {
             str(record.get("signal", {}).get("symbol", "")).upper()
             for record in journal.get("trades", {}).values()
-            if record.get("status") in {"WAITING_ENTRY", "OPEN", "TP1_HIT"}
+            if (
+                record.get("status") in {"WAITING_ENTRY", "OPEN", "TP1_HIT"}
+                and record.get("telegram_delivery_status", "sent") != "pending"
+            )
         }
         active.discard("")
         before = sum(len(record.get("events", [])) for record in journal.get("trades", {}).values())
