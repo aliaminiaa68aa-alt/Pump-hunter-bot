@@ -1,7 +1,8 @@
-"""Single-process VPS service: periodic signal scan + continuous live outcome checks."""
+"""Continuous live outcome monitor with an independent periodic signal scanner."""
 from __future__ import annotations
 
 import os
+import threading
 import time
 from typing import Dict
 
@@ -9,6 +10,7 @@ import requests
 
 from oi_engine.live_price_monitor import apply_live_prices
 from oi_engine.telegram_runner import (
+    OUTCOME_JOURNAL_LOCK,
     load_outcome_journal,
     save_outcome_journal,
     dispatch_outcome_notifications,
@@ -50,57 +52,76 @@ def monitor_live_outcomes_once() -> dict:
     if not token or not chat_id:
         raise RuntimeError("BOT_TOKEN and CHAT_ID are required")
 
-    journal = load_outcome_journal()
-    active = {
-        str(record.get("signal", {}).get("symbol", "")).upper()
-        for record in journal.get("trades", {}).values()
-        if record.get("status") in {"WAITING_ENTRY", "OPEN", "TP1_HIT"}
-    }
-    active.discard("")
-    if not active:
-        return {"active_symbols": 0, "events": 0}
+    # Hold the shared journal lock for the complete read/modify/dispatch cycle.
+    # The scanner only registers new trades under this same lock and never runs
+    # the historical outcome replay in external-monitor mode.
+    with OUTCOME_JOURNAL_LOCK:
+        journal = load_outcome_journal()
+        active = {
+            str(record.get("signal", {}).get("symbol", "")).upper()
+            for record in journal.get("trades", {}).values()
+            if record.get("status") in {"WAITING_ENTRY", "OPEN", "TP1_HIT"}
+        }
+        active.discard("")
+        before = sum(len(record.get("events", [])) for record in journal.get("trades", {}).values())
+        prices = fetch_binance_last_prices(active) if active else {}
+        if prices:
+            apply_live_prices(journal, prices)
+        save_outcome_journal(journal)
+        journal = dispatch_outcome_notifications(journal, token, chat_id)
+        save_outcome_journal(journal)
+        after = sum(len(record.get("events", [])) for record in journal.get("trades", {}).values())
+        return {
+            "active_symbols": len(active),
+            "events": max(0, after - before),
+            "prices_received": len(prices),
+        }
 
-    prices = fetch_binance_last_prices(active)
-    before = sum(len(record.get("events", [])) for record in journal["trades"].values())
-    apply_live_prices(journal, prices)
-    save_outcome_journal(journal)
-    journal = dispatch_outcome_notifications(journal, token, chat_id)
-    save_outcome_journal(journal)
-    after = sum(len(record.get("events", [])) for record in journal["trades"].values())
-    return {
-        "active_symbols": len(active),
-        "events": max(0, after - before),
-        "prices_received": len(prices),
-    }
+
+def _scanner_loop(scan_interval: int) -> None:
+    # The scanner's journal replay/dispatch is disabled; the live monitor owns
+    # outcome transitions and notifications while this thread scans the market.
+    os.environ["PUMP_HUNTER_EXTERNAL_LIVE_MONITOR"] = "1"
+    while True:
+        started = time.monotonic()
+        try:
+            print("Starting background signal scan", flush=True)
+            run_signal_scan()
+            print("Background signal scan completed", flush=True)
+        except Exception as exc:
+            print(f"ERROR signal scan: {type(exc).__name__}: {exc}", flush=True)
+        elapsed = time.monotonic() - started
+        time.sleep(max(1, scan_interval - elapsed))
 
 
 def main() -> None:
     scan_interval = max(60, int(os.getenv("SIGNAL_SCAN_INTERVAL_SECONDS", "300")))
     monitor_interval = max(2, int(os.getenv("LIVE_MONITOR_INTERVAL_SECONDS", "10")))
-    next_scan = 0.0
+    os.environ["PUMP_HUNTER_EXTERNAL_LIVE_MONITOR"] = "1"
+    scanner = threading.Thread(
+        target=_scanner_loop,
+        args=(scan_interval,),
+        name="signal-scanner",
+        daemon=True,
+    )
+    scanner.start()
     print(
         "Pump Hunter service started: "
         f"scan_interval={scan_interval}s live_price_poll={monitor_interval}s",
         flush=True,
     )
+    # This foreground loop is independent of the scanner thread: a slow scan
+    # cannot pause the 10-second outcome polling cadence.
     while True:
-        now = time.monotonic()
-        if now >= next_scan:
-            try:
-                print("Starting scheduled signal scan", flush=True)
-                run_signal_scan()
-                print("Scheduled signal scan completed", flush=True)
-            except Exception as exc:
-                print(f"ERROR signal scan: {type(exc).__name__}: {exc}", flush=True)
-            next_scan = time.monotonic() + scan_interval
-
+        started = time.monotonic()
         try:
             result = monitor_live_outcomes_once()
             if result.get("events"):
                 print(f"Live outcome events: {result}", flush=True)
         except Exception as exc:
             print(f"ERROR live outcome monitor: {type(exc).__name__}: {exc}", flush=True)
-        time.sleep(monitor_interval)
+        elapsed = time.monotonic() - started
+        time.sleep(max(0.1, monitor_interval - elapsed))
 
 
 if __name__ == "__main__":
