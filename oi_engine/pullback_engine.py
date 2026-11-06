@@ -152,6 +152,7 @@ def advance_pullback_setup(
                 )
             ):
                 confirmation_candle = candidate
+                break
         # Also accept a two-candle rejection: the first candle reacts above
         # the retest level, and the next candle confirms by closing above its
         # high. This avoids discarding valid retests whose first candle has a
@@ -176,6 +177,7 @@ def advance_pullback_setup(
                     and follow_close_location >= 0.60
                 ):
                     confirmation_candle = follow_through
+                    break
         confirmed = confirmation_candle is not None
         if confirmation_candle is not None:
             confirmation_range = max(
@@ -256,6 +258,7 @@ def advance_pullback_setup(
                     and follow_close_location >= 0.60
                 ):
                     confirmation_candle = follow_through
+                    break
         confirmed = confirmation_candle is not None
         if confirmation_candle is not None:
             confirmation_range = max(
