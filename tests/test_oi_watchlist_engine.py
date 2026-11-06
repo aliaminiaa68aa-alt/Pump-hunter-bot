@@ -70,6 +70,22 @@ class WatchlistTests(unittest.TestCase):
         self.assertFalse(coinalyze_confirms(signal(), {"oi_change_15m_window_pct": 0.4, "taker_buy_ratio": float("nan")}))
         self.assertFalse(coinalyze_confirms(signal(), {"oi_change_15m_window_pct": 0.4, "taker_buy_ratio": 1.2}))
 
+    def test_confirmed_short_setup_is_published_and_both_directions_are_enabled(self):
+        short = Signal("ABCUSDT", "SHORT", 1.0, 1.02, 0.99, 0.96,
+                       .8, .3, .40, 1.4, .0001, 82, 900000)
+        snapshot = {"symbol": "ABCUSDT", "candles": []}
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value=snapshot), \\
+             patch("oi_engine.watchlist_engine.advance_pullback_setup",
+                   return_value=(short, None, "پولبک SHORT تأیید شد")) as advance:
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {"status": "در حال رصد"}},
+                FakeClient(metrics(taker=.40)), now=1000
+            )
+        advance.assert_called_once_with(snapshot, None, None)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0].side, "SHORT")
+        self.assertEqual(updated["ABCUSDT"]["status"], "سیگنال SHORT آماده ارسال")
+
     def test_binance_451_uses_coinalyze_market_snapshot(self):
         snapshot = {"symbol": "ABCUSDT", "candles": [], "oi_values": [1, 2, 3]}
         fallback_metrics = {**metrics(), "market_snapshot": snapshot}
