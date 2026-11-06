@@ -46,4 +46,24 @@ jobs:
           if not message_id:
               raise RuntimeError("Telegram accepted sendMessage without message_id")
           print(f"TELEGRAM_DELIVERY_CONFIRMED bot=@{me.get('username')} chat_id={chat.get('id')} message_id={message_id}")
+          # Exercise the reply-thread path used by ENTRY/TP/SL outcome alerts.
+          outcome_tests = [
+              ("ENTRY", "🧪 تست اعلان ورود فعال شد؛ این پیام آزمایشی است."),
+              ("TP1", "🧪 تست اعلان تارگت اول؛ این پیام آزمایشی است."),
+              ("TP2", "🧪 تست اعلان تارگت دوم؛ این پیام آزمایشی است."),
+              ("SL", "🧪 تست اعلان حد ضرر؛ این پیام آزمایشی است."),
+          ]
+          outcome_ids = {}
+          for event_name, event_text in outcome_tests:
+              result = call("sendMessage", {
+                  "chat_id": chat_id,
+                  "text": event_text,
+                  "reply_to_message_id": message_id,
+                  "allow_sending_without_reply": True,
+              })
+              event_message_id = result.get("message_id")
+              if not event_message_id:
+                  raise RuntimeError(f"{event_name} test accepted without message_id")
+              outcome_ids[event_name] = event_message_id
+          print("OUTCOME_REPLY_DELIVERY_CONFIRMED " + json.dumps(outcome_ids, sort_keys=True))
           PY
