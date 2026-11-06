@@ -318,12 +318,29 @@ def monitor_journal(
                     })
                     entry = fill
                     event_names.add("ENTRY")
-                    # OHLC does not reveal whether the entry level was touched
-                    # before or after a stop/target in this same candle. Never
-                    # count an exit from the entry candle; begin exit monitoring
-                    # with the next fully closed candle to avoid phantom fills.
+                    # OHLC does not reveal whether entry came before a stop
+                    # or target touched in this same candle. Mark that trade
+                    # ambiguous instead of inventing an exit or counting a win.
+                    stop_hit, tp1_hit, tp2_hit, *_ = _touches(side, candle, signal)
                     record["entry_candle_excursion_ambiguous"] = True
                     record["last_checked_ms"] = close_ms + 1
+                    if stop_hit or tp1_hit or tp2_hit:
+                        record["entry_candle_ambiguous"] = True
+                        record.setdefault("events", []).append({
+                            "event": "AMBIGUOUS_ENTRY_CANDLE",
+                            "time_ms": close_ms,
+                            "entry_fill": entry,
+                            "stop_touched": stop_hit,
+                            "tp1_touched": tp1_hit,
+                            "tp2_touched": tp2_hit,
+                            "ambiguous_same_candle": bool(stop_hit and (tp1_hit or tp2_hit)),
+                            "same_candle_targets": [
+                                name for name, touched in (("TP1", tp1_hit), ("TP2", tp2_hit))
+                                if touched
+                            ],
+                        })
+                        record["status"] = "AMBIGUOUS_ENTRY_CANDLE"
+                        record["exit_time_ms"] = close_ms
                     continue
                 # After TP1, the remaining position is protected at breakeven.
                 # The TP1 candle itself is still evaluated against the original
