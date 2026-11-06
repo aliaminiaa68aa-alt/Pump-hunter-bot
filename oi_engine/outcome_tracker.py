@@ -51,7 +51,7 @@ def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> 
             "predicted_funding_rate_raw": metrics.get("predicted_funding_rate"),
         },
         "sent_at_ms": int(sent_at_ms),
-        "last_checked_ms": int(data["candle_close_time"]) + 1,
+        "last_checked_ms": int(sent_at_ms),  # Never count price action before the alert reached Telegram.
         "status": "WAITING_ENTRY",
         "events": [],
         "entry_fill_price": None,
