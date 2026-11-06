@@ -679,5 +679,40 @@ class TelegramRunnerTests(unittest.TestCase):
         )
 
 
+    def test_dispatches_entry_and_stop_for_trade_closed_in_same_replay_cycle(self):
+        now_ms = 1_000_000
+        journal = {
+            "trades": {
+                "fast-stop": {
+                    "status": "CLOSED_SL",
+                    "sent_at_ms": 980_000,
+                    "telegram_message_id": 77,
+                    "signal": {
+                        "symbol": "FASTUSDT", "side": "LONG",
+                        "entry": 100.0, "stop_loss": 99.0,
+                        "take_profit_1": 101.0, "take_profit_2": 102.0,
+                    },
+                    "events": [
+                        {"event": "ENTRY", "time_ms": 990_000, "fill": 100.0},
+                        {"event": "SL", "time_ms": 995_000, "fill": 99.0},
+                    ],
+                }
+            }
+        }
+        with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
+            with patch.object(telegram_runner, "save_outcome_journal"):
+                with patch.object(telegram_runner, "send_telegram", side_effect=[101, 102]) as send:
+                    result = telegram_runner.dispatch_outcome_notifications(
+                        journal, "token", "chat"
+                    )
+        self.assertEqual(send.call_count, 2)
+        self.assertIn("ورود فعال شد", send.call_args_list[0].args[2])
+        self.assertIn("حد ضرر خورد", send.call_args_list[1].args[2])
+        self.assertEqual(send.call_args_list[0].kwargs["reply_to_message_id"], 77)
+        self.assertEqual(send.call_args_list[1].kwargs["reply_to_message_id"], 77)
+        self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["0"]["status"], "sent")
+        self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["1"]["status"], "sent")
+
+
 if __name__ == "__main__":
     unittest.main()
