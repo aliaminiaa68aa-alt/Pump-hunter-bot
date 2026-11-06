@@ -147,7 +147,7 @@ def monitor_journal(
     def fetch_replay_candles(symbol: str, start_ms: int, end_ms: int) -> List[list]:
         """Use 15m history for older ranges and 1m for the recent retained window."""
         if micro_fetcher is None:
-            return [list(row) + [INTERVAL_MS] for row in fetcher(symbol, start_ms, end_ms)]
+            return [list(row)[:6] + [INTERVAL_MS] for row in fetcher(symbol, start_ms, end_ms)]
         # Coinalyze retains roughly 1,500-2,000 intraday points. Keep a margin
         # and reserve the recent 1,400 minutes for precise one-minute replay.
         cutoff = max(start_ms, ((end_ms - 1400 * 60 * 1000) // INTERVAL_MS) * INTERVAL_MS)
@@ -155,7 +155,7 @@ def monitor_journal(
         if cutoff > start_ms:
             older = fetcher(symbol, start_ms, cutoff)
             combined.extend(
-                list(row) + [INTERVAL_MS] for row in older
+                list(row)[:6] + [INTERVAL_MS] for row in older
                 if int(row[0]) < cutoff
             )
         try:
@@ -181,14 +181,14 @@ def monitor_journal(
             minute_rows and int(minute_rows[0][0]) > expected_first_minute
         )
         if minute_rows and not has_minute_gap and not missing_leading_minutes:
-            combined.extend(row + [60 * 1000] for row in minute_rows)
+            combined.extend(row[:6] + [60 * 1000] for row in minute_rows)
         else:
             # Fall back for the whole recent window if minute history is empty,
             # internally discontinuous, or truncated at the beginning. Mixing
             # partial 1m with 15m could skip/double-count price action.
             fallback = fetcher(symbol, cutoff, end_ms)
             combined.extend(
-                list(row) + [INTERVAL_MS] for row in fallback
+                list(row)[:6] + [INTERVAL_MS] for row in fallback
                 if int(row[0]) >= cutoff
             )
         return sorted(combined, key=lambda row: int(row[0]))
