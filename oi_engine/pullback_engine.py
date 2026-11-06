@@ -152,6 +152,30 @@ def advance_pullback_setup(
                 )
             ):
                 confirmation_candle = candidate
+        # Also accept a two-candle rejection: the first candle reacts above
+        # the retest level, and the next candle confirms by closing above its
+        # high. This avoids discarding valid retests whose first candle has a
+        # modest close location, without weakening the single-candle threshold.
+        if confirmation_candle is None:
+            post_touch = post_breakout[pullback_index:]
+            for first, follow_through in zip(post_touch, post_touch[1:]):
+                first_range = max(float(first["high"]) - float(first["low"]), 1e-12)
+                first_body = abs(float(first["close"]) - float(first["open"])) / first_range
+                follow_range = max(float(follow_through["high"]) - float(follow_through["low"]), 1e-12)
+                follow_body = abs(float(follow_through["close"]) - float(follow_through["open"])) / follow_range
+                follow_close_location = (
+                    float(follow_through["close"]) - float(follow_through["low"])
+                ) / follow_range
+                if (
+                    float(first["close"]) > level
+                    and float(first["close"]) > float(first["open"])
+                    and first_body >= 0.15
+                    and float(follow_through["close"]) > float(first["high"])
+                    and float(follow_through["close"]) > float(follow_through["open"])
+                    and follow_body >= 0.10
+                    and follow_close_location >= 0.60
+                ):
+                    confirmation_candle = follow_through
         confirmed = confirmation_candle is not None
         if confirmation_candle is not None:
             confirmation_range = max(
@@ -210,6 +234,27 @@ def advance_pullback_setup(
                 )
             ):
                 confirmation_candle = candidate
+        # Symmetric two-candle bearish follow-through after the retest.
+        if confirmation_candle is None:
+            post_touch = post_breakout[pullback_index:]
+            for first, follow_through in zip(post_touch, post_touch[1:]):
+                first_range = max(float(first["high"]) - float(first["low"]), 1e-12)
+                first_body = abs(float(first["close"]) - float(first["open"])) / first_range
+                follow_range = max(float(follow_through["high"]) - float(follow_through["low"]), 1e-12)
+                follow_body = abs(float(follow_through["close"]) - float(follow_through["open"])) / follow_range
+                follow_close_location = (
+                    float(follow_through["high"]) - float(follow_through["close"])
+                ) / follow_range
+                if (
+                    float(first["close"]) < level
+                    and float(first["close"]) < float(first["open"])
+                    and first_body >= 0.15
+                    and float(follow_through["close"]) < float(first["low"])
+                    and float(follow_through["close"]) < float(follow_through["open"])
+                    and follow_body >= 0.10
+                    and follow_close_location >= 0.60
+                ):
+                    confirmation_candle = follow_through
         confirmed = confirmation_candle is not None
         if confirmation_candle is not None:
             confirmation_range = max(
