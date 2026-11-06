@@ -47,7 +47,7 @@ class SignalEngineTests(unittest.TestCase):
     def test_diagnostics_name_failed_filters_without_changing_signal(self):
         snapshot = make_snapshot("LONG")
         snapshot["oi_values"] = [100.0, 100.0, 100.1]
-        snapshot["candles"][-1]["quote_volume"] = 104000.0
+        snapshot["candles"][-1]["quote_volume"] = 99000.0
         snapshot["candles"][-1]["taker_buy_quote"] = 54080.0
         snapshot["candles"][-6]["high"] = 104.0  # No structure break to replace the low volume.
         reasons = diagnose_snapshot(snapshot)
