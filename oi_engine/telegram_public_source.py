@@ -210,6 +210,7 @@ def poll_public_channel_alerts(channel, last_message_id, watchlist, now=None, sy
             # may be newer; comparing those clocks would silently skip a fresh alert.
             "last_alert_received_at": timestamp,
             "source": "telegram_public_preview",
+            "source_type": "oi_channel",
             "source_channel": post["channel"],
             "source_message_id": post["message_id"],
             "source_text": post["text"][:3000],
