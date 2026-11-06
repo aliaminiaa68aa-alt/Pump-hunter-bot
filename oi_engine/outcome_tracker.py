@@ -172,7 +172,14 @@ def monitor_journal(
 
         # Legacy/corrupt records may say OPEN or CLOSED without ever recording
         # an actual fill. Never infer an entry from status alone.
-        if status in {"OPEN", "TP1_HIT", "CLOSED_SL", "CLOSED_TP2"} and not _has_confirmed_entry(record):
+        has_exit_event = any(
+            event.get("event") in {"SL", "TP1", "TP2"}
+            for event in record.get("events", [])
+        )
+        if (
+            status in {"OPEN", "TP1_HIT", "CLOSED_SL", "CLOSED_TP2", "AMBIGUOUS_ENTRY_CANDLE"}
+            or has_exit_event
+        ) and not _has_confirmed_entry(record):
             record["status"] = "INVALID_NO_ENTRY"
             record["invalid_reason"] = "Missing valid ENTRY event and entry_fill_price"
             record.pop("post_stop_tracking", None)
