@@ -321,7 +321,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
         for index, event in enumerate(events):
             key = str(index)
             previous = delivery.get(key, {})
-            if previous.get("status") in {"sent", "legacy", "ignored"}:
+            if previous.get("status") in {"sent", "legacy", "ignored", "unknown"}:
                 continue
             name = event.get("event")
             symbol = str(record.get("signal", {}).get("symbol", "UNKNOWN"))
@@ -363,6 +363,33 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                     reply_to_message_id=int(anchor_id) if anchor_id else None,
                 )
             except Exception as exc:
+                # Telegram sendMessage has no idempotency key. A read timeout or
+                # broken connection can happen AFTER Telegram accepted the post.
+                # Mark delivery unknown and never auto-retry it: retrying could
+                # duplicate a real ENTRY/TP/SL notification.
+                ambiguous_delivery = isinstance(
+                    exc,
+                    (
+                        requests.exceptions.ReadTimeout,
+                        requests.exceptions.ConnectionError,
+                        requests.exceptions.ChunkedEncodingError,
+                    ),
+                )
+                if ambiguous_delivery:
+                    delivery[key] = {
+                        "status": "unknown",
+                        "attempts": delivery[key]["attempts"],
+                        "last_attempt_ms": now_ms,
+                        "reason": "Telegram response lost; delivery may already have succeeded; automatic retry suppressed",
+                        "last_error": f"{type(exc).__name__}: {exc}",
+                    }
+                    print(
+                        f"Outcome notification delivery UNKNOWN; automatic retry suppressed: "
+                        f"trade={trade_id} event={name} index={index} "
+                        f"error={type(exc).__name__}: {exc}"
+                    )
+                    save_outcome_journal(journal)
+                    continue
                 error_text = str(exc).lower()
                 # If Telegram rejects only the reply reference (for example,
                 # because the original signal was deleted), retry as a normal
