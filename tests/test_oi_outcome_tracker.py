@@ -438,5 +438,28 @@ class OutcomeTrackerTests(unittest.TestCase):
         self.assertEqual(report["entry_touched_win_rate_pct"], 100.0)
 
 
+    def test_price_touch_before_telegram_alert_is_not_counted_as_entry(self):
+        sent_at_ms = 950000
+        record = make_trade_record(signal(), {}, sent_at_ms)
+        self.assertEqual(record["last_checked_ms"], sent_at_ms)
+        journal = {"trades": {record["trade_id"]: record}}
+
+        # The 15:00 minute touched the entry before the alert was sent.
+        # The first complete minute after delivery did not touch the entry.
+        minute_rows = [
+            candle(900000, 100, 103, 97, 101),
+            candle(960000, 101, 101.5, 100.2, 101.1),
+        ]
+        monitor_journal(
+            journal,
+            now_ms=1020000,
+            fetcher=lambda *_: [],
+            micro_fetcher=lambda *_: minute_rows,
+        )
+        result = journal["trades"][record["trade_id"]]
+        self.assertEqual(result["status"], "WAITING_ENTRY")
+        self.assertEqual(result["events"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
