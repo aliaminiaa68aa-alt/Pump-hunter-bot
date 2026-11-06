@@ -65,6 +65,27 @@ def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> 
     }
 
 
+
+def _has_confirmed_entry(record: Dict[str, Any]) -> bool:
+    """Require both a recorded ENTRY event and a valid persisted fill price."""
+    try:
+        fill = float(record.get("entry_fill_price"))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not (fill > 0 and fill < float("inf")):
+        return False
+    for event in record.get("events", []):
+        if event.get("event") != "ENTRY":
+            continue
+        try:
+            event_fill = float(event.get("fill"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if event_fill > 0 and event_fill < float("inf") and abs(event_fill - fill) <= max(1e-12, abs(fill) * 1e-9):
+            return True
+    return False
+
+
 def _price_extremes(side: str, entry: float, high: float, low: float):
     if side == "LONG":
         return max(0.0, (high / entry - 1.0) * 100.0), max(0.0, (entry / low - 1.0) * 100.0)
@@ -148,6 +169,14 @@ def monitor_journal(
     for trade_id, record in list(trades.items()):
         status = record.get("status")
         signal = record["signal"]
+
+        # Legacy/corrupt records may say OPEN or CLOSED without ever recording
+        # an actual fill. Never infer an entry from status alone.
+        if status in {"OPEN", "TP1_HIT", "CLOSED_SL", "CLOSED_TP2"} and not _has_confirmed_entry(record):
+            record["status"] = "INVALID_NO_ENTRY"
+            record["invalid_reason"] = "Missing valid ENTRY event and entry_fill_price"
+            record.pop("post_stop_tracking", None)
+            continue
 
         # Keep observing stopped trades for 24h to measure post-stop follow-through.
         # Historical status remains CLOSED_SL; this is diagnostic, not a reopened trade.
@@ -404,12 +433,7 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
         # Older journal records predate explicit ENTRY events. A recorded
         # TP/SL event or an active/closed trade status proves the entry was
         # reached, so keep historical outcome statistics backward-compatible.
-        entered = (
-            "ENTRY" in names
-            or record.get("entry_fill_price") is not None
-            or any(name in {"SL", "TP1", "TP2"} for name in names)
-            or status in {"OPEN", "TP1_HIT", "CLOSED_SL", "CLOSED_TP2"}
-        )
+        entered = _has_confirmed_entry(record)
         if entered:
             report["entry_touched"] += 1
         else:
@@ -439,9 +463,9 @@ def summarize_outcomes(journal: Dict[str, Any]) -> Dict[str, Any]:
             outcome = status.lower()
         if record.get("post_stop_tp1_reached"):
             report["sl_then_later_tp1"] += 1
-        if record.get("post_stop_tp2_reached"):
+        if entered and record.get("post_stop_tp2_reached"):
             report["sl_then_later_tp2"] += 1
-        if "TP2" in names or record.get("post_stop_tp2_reached"):
+        if entered and ("TP2" in names or record.get("post_stop_tp2_reached")):
             report["tp2_reached"] += 1
         if any(event.get("ambiguous_same_candle") for event in events):
             report["ambiguous_stop_target"] += 1
