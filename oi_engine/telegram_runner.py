@@ -24,7 +24,7 @@ from oi_engine.outcome_tracker import (
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
 OUTCOME_PATH = Path(".oi_state/trade_outcomes.json")
-MAX_WATCHLIST_SYMBOLS = 20  # Scan more of the queued channel-first universe each 5-minute cycle.
+MAX_WATCHLIST_SYMBOLS = 10  # Keep per-cycle Coinalyze calls below its 40-requests/minute limit (about 3 calls/symbol).
 MAX_MARKET_QUEUE_SYMBOLS = 120
 MARKET_DISCOVERY_PER_RUN = 12
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
