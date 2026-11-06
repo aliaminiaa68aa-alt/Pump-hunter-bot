@@ -622,7 +622,8 @@ def main() -> None:
     before_active_filter = len(confirmed)
     confirmed = [
         (signal, metrics) for signal, metrics in confirmed
-        if not blocked_by_active_symbol_trade(signal, outcome_journal)
+        if getattr(signal, "execution_mode", "LIMIT") == "MISSED"
+        or not blocked_by_active_symbol_trade(signal, outcome_journal)
     ]
     active_blocked = before_active_filter - len(confirmed)
     if active_blocked:
@@ -632,7 +633,8 @@ def main() -> None:
     # Require a strictly newer closed 15m candle before allowing the reversal.
     confirmed = [
         (signal, metrics) for signal, metrics in confirmed
-        if not blocked_by_same_candle_opposite_stop(signal, outcome_journal)
+        if getattr(signal, "execution_mode", "LIMIT") == "MISSED"
+        or not blocked_by_same_candle_opposite_stop(signal, outcome_journal)
     ]
 
     sent = 0
@@ -642,11 +644,12 @@ def main() -> None:
         if state.get(key) == candle_id:
             continue
         message_id = send_telegram(token, chat_id, format_confirmed_signal(signal, metrics), parse_mode="HTML")
-        trade_record = make_trade_record(signal, metrics, int(time.time() * 1000))
-        trade_record["telegram_chat_id"] = str(chat_id)
-        trade_record["telegram_message_id"] = message_id if isinstance(message_id, int) else None
-        outcome_journal.setdefault("trades", {}).setdefault(trade_record["trade_id"], trade_record)
-        save_outcome_journal(outcome_journal)
+        if getattr(signal, "execution_mode", "LIMIT") != "MISSED":
+            trade_record = make_trade_record(signal, metrics, int(time.time() * 1000))
+            trade_record["telegram_chat_id"] = str(chat_id)
+            trade_record["telegram_message_id"] = message_id if isinstance(message_id, int) else None
+            outcome_journal.setdefault("trades", {}).setdefault(trade_record["trade_id"], trade_record)
+            save_outcome_journal(outcome_journal)
         state[key] = candle_id
         sent += 1
         save_state(state)
