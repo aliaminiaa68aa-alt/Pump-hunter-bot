@@ -36,6 +36,9 @@ class FakeClient:
 
 
 class TelegramRunnerTests(unittest.TestCase):
+    def test_scan_batch_stays_within_coinalyze_rate_budget(self):
+        self.assertLessEqual(telegram_runner.MAX_WATCHLIST_SYMBOLS * 3, 40)
+
     def test_opposite_signal_blocked_on_same_stop_candle_but_allowed_on_newer_close(self):
         journal = {
             "trades": {
