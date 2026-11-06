@@ -13,10 +13,11 @@ STOP_BUFFER_ATR = 0.35
 MAX_STOP_ATR = 2.00
 MIN_STOP_PCT = 0.25
 MAX_ENTRY_EXTENSION_ATR = 0.95
-ENTRY_LIMIT_OFFSET_ATR = 0.02
+ENTRY_LIMIT_OFFSET_ATR = 0.00
 MIN_ENTRY_QUALITY = 50
 MIN_REJECTION_BODY_RATIO = 0.18
 MIN_REJECTION_CLOSE_LOCATION = 0.55
+EMA_TOLERANCE_ATR = 0.10
 FLOW_LOOKBACK_CANDLES = 3
 
 
@@ -130,10 +131,10 @@ def advance_pullback_setup(
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
         directional_flow = (
-            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.505
-            and aggregate_flow >= 0.48
+            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) >= 0.50
+            and aggregate_flow >= 0.47
             and directional_candle_share >= 0.20
-            and float(last["close"]) > ema20
+            and float(last["close"]) >= ema20 - atr * EMA_TOLERANCE_ATR
         )
         stop = pullback_extreme - atr * STOP_BUFFER_ATR
     else:
@@ -157,10 +158,10 @@ def advance_pullback_setup(
         closes = [float(c["close"]) for c in candles]
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
         directional_flow = (
-            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.495
-            and aggregate_flow <= 0.52
+            float(last["taker_buy_quote"]) / max(float(last["quote_volume"]), 1e-12) <= 0.50
+            and aggregate_flow <= 0.53
             and directional_candle_share >= 0.20
-            and float(last["close"]) < ema20
+            and float(last["close"]) <= ema20 + atr * EMA_TOLERANCE_ATR
         )
         stop = pullback_extreme + atr * STOP_BUFFER_ATR
 
@@ -182,12 +183,14 @@ def advance_pullback_setup(
     if not directional_flow:
         return None, pending, (
             f"پولبک رخ داد اما تأیید چندکندلی/EMA کامل نیست "
-            f"(جریان تجمیعی {aggregate_flow:.1%}، سهم کندل‌های هم‌جهت {directional_candle_share:.1%})؛ "
+            f"(جریان آخرین کندل {float(last['taker_buy_quote']) / max(float(last['quote_volume']), 1e-12):.1%}، "
+            f"جریان تجمیعی {aggregate_flow:.1%}، سهم کندل‌های هم‌جهت {directional_candle_share:.1%}، "
+            f"فاصله EMA20 {(float(last['close']) - ema20) / atr:+.2f} ATR)؛ "
             "setup تا پایان مهلت حفظ می‌شود"
         )
 
     oi_change = (float(oi_values[-1]) / float(oi_values[-2]) - 1.0) * 100.0
-    if oi_change < 0.10:
+    if oi_change < 0.05:
         return None, pending, f"پولبک رخ داد اما رشد OI این کندل کافی نیست ({oi_change:+.2f}%)؛ setup تا پایان مهلت حفظ شد"
     quote_volume = float(last["quote_volume"])
     baseline = candles[-21:-1]
