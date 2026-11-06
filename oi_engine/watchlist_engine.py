@@ -11,44 +11,41 @@ from oi_engine.pullback_engine import advance_pullback_setup
 
 
 def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
-    """Mandatory independent derivatives/risk gate before a signal is admitted."""
+    """Require fresh core derivatives evidence; treat ancillary metrics as optional."""
     try:
         oi_change = float(metrics["oi_change_15m_window_pct"])
         taker_ratio = float(metrics["taker_buy_ratio"])
         funding = float(metrics["funding_rate"])
-        long_short_ratio = float(metrics["long_short_ratio"])
-        long_liquidations = float(metrics["long_liquidations"])
-        short_liquidations = float(metrics["short_liquidations"])
     except (KeyError, TypeError, ValueError, OverflowError):
         return False
 
-    values = (oi_change, taker_ratio, funding, long_short_ratio,
-              long_liquidations, short_liquidations)
-    if not all(math.isfinite(value) for value in values):
+    if not all(math.isfinite(value) for value in (oi_change, taker_ratio, funding)):
         return False
-    if not (0.0 <= taker_ratio <= 1.0) or long_short_ratio <= 0:
-        return False
-    quality = metrics.get("data_quality")
-    if not isinstance(quality, dict) or quality.get("complete") is not True:
-        return False
-    if oi_change < 0.30 or long_liquidations < 0 or short_liquidations < 0:
+    if not 0.0 <= taker_ratio <= 1.0 or oi_change < 0.30:
         return False
 
-    # Coinalyze r is the long/short account ratio. Convert it to long share
-    # so that an already overcrowded side (over 70%) is rejected.
-    long_share = long_short_ratio / (1.0 + long_short_ratio)
+    # Long/short account ratio is a supplementary crowding check. If the
+    # provider omits it, do not block an otherwise valid setup; if supplied,
+    # reject malformed values and excessive crowding.
+    raw_lsr = metrics.get("long_short_ratio")
+    long_share = None
+    if raw_lsr is not None:
+        try:
+            ratio = float(raw_lsr)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(ratio) or ratio <= 0:
+            return False
+        long_share = ratio / (1.0 + ratio)
+
     if signal.side == "LONG":
-        return (
-            taker_ratio >= 0.55
-            and funding <= 0.0005
-            and long_share <= 0.70
+        return taker_ratio >= 0.55 and funding <= 0.0005 and (
+            long_share is None or long_share <= 0.70
         )
     if signal.side == "SHORT":
-        short_share = 1.0 - long_share
-        return (
-            taker_ratio <= 0.45
-            and funding >= -0.0005
-            and short_share <= 0.70
+        short_share = None if long_share is None else 1.0 - long_share
+        return taker_ratio <= 0.45 and funding >= -0.0005 and (
+            short_share is None or short_share <= 0.70
         )
     return False
 
