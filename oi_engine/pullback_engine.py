@@ -12,6 +12,7 @@ SETUP_LIFETIME_CANDLES = 8
 STOP_BUFFER_ATR = 0.35
 MAX_STOP_ATR = 2.00
 MIN_STOP_PCT = 0.25
+MAX_ENTRY_EXTENSION_ATR = 1.25
 ENTRY_LIMIT_OFFSET_ATR = 0.02
 MIN_ENTRY_QUALITY = 45
 MIN_REJECTION_BODY_RATIO = 0.14
@@ -319,13 +320,20 @@ def advance_pullback_setup(
             f"(بدنه {body_ratio:.0%}؛ حداقل {MIN_REJECTION_BODY_RATIO:.0%}، "
             f"محل بسته‌شدن {close_location:.0%}؛ حداقل {MIN_REJECTION_CLOSE_LOCATION:.0%})"
         )
-    # If price has lost the broken level, keep waiting. If it has already
-    # travelled far in the signal direction, do NOT silently discard the setup:
-    # the execution classifier below will emit MISSED (no-entry) instead of
-    # leaving the user unaware that the move has already run.
+    # Do not chase a confirmation candle that has already travelled too far
+    # from the broken structure. Keep the setup alive for a fresh retest.
+    entry_extension = (
+        (float(last["close"]) - level) / atr if side == "LONG"
+        else (level - float(last["close"])) / atr
+    )
     if ((side == "LONG" and float(last["close"]) <= level)
             or (side == "SHORT" and float(last["close"]) >= level)):
         return None, pending, "قیمت دوباره سطح شکست را از دست داده؛ منتظر تثبیت مجدد می‌مانیم"
+    if entry_extension > MAX_ENTRY_EXTENSION_ATR:
+        return None, pending, (
+            f"کندل تأیید از نقطه ورود دور شده ({entry_extension:.2f} ATR)؛ "
+            "ورود تعقیبی ممنوع، منتظر پولبک تازه می‌مانیم"
+        )
     if not directional_flow:
         return None, pending, (
             f"پولبک رخ داد اما تأیید چندکندلی/EMA کامل نیست "
@@ -352,9 +360,8 @@ def advance_pullback_setup(
         level + atr * ENTRY_LIMIT_OFFSET_ATR if side == "LONG"
         else level - atr * ENTRY_LIMIT_OFFSET_ATR
     )
-    # Small overshoots become market entries. Larger moves, or moves that
-    # already reached the original TP1, are reported as missed rather than
-    # leaving a stale limit order behind.
+    # If the confirmation candle has only just crossed the planned limit,
+    # switch to market execution at its close. Never chase beyond 0.15 ATR.
     confirmation_close = float(last["close"])
     execution_mode = "LIMIT"
     crossed_entry = (
@@ -366,17 +373,10 @@ def advance_pullback_setup(
             (confirmation_close - entry) / atr if side == "LONG"
             else (entry - confirmation_close) / atr
         )
-        planned_risk = entry - stop if side == "LONG" else stop - entry
-        planned_tp1 = entry + planned_risk if side == "LONG" else entry - planned_risk
-        target_already_reached = (
-            confirmation_close >= planned_tp1 if side == "LONG"
-            else confirmation_close <= planned_tp1
-        )
-        if target_already_reached or market_extension > 0.35:
-            execution_mode = "MISSED"
-        else:
+        if market_extension <= 0.15:
             entry = confirmation_close
             execution_mode = "MARKET"
+        # Larger extensions remain passive limit setups; no market chasing.
     elif ((side == "LONG" and entry >= confirmation_close)
           or (side == "SHORT" and entry <= confirmation_close)):
         return None, pending, "ورود محدود هنوز فعال نشده؛ قیمت به ناحیه سفارش نرسیده، منتظر پولبک معتبر می‌مانیم"
@@ -389,7 +389,7 @@ def advance_pullback_setup(
         risk = min_risk
     # Re-check the final stop after applying the minimum-distance floor.
     # A widened stop must never bypass the maximum ATR risk guard.
-    if risk > atr * MAX_STOP_ATR and execution_mode != "MISSED":
+    if risk > atr * MAX_STOP_ATR:
         return None, pending, "ریسک این کندل برای ورود بیش از حد دور است؛ setup حفظ شد تا فرصت پولبک معتبر بعدی بررسی شود"
 
     tp1 = entry + risk if side == "LONG" else entry - risk
