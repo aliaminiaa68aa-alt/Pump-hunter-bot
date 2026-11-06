@@ -7,7 +7,7 @@ import time
 from oi_engine.signal_engine import Signal, _atr, evaluate_snapshot, score_signal_components
 
 
-PULLBACK_TOLERANCE_ATR = 0.35
+PULLBACK_TOLERANCE_ATR = 0.45
 INVALIDATION_ATR = 0.85
 SETUP_LIFETIME_CANDLES = 8
 STOP_BUFFER_ATR = 0.35
@@ -155,7 +155,7 @@ def advance_pullback_setup(
                 if confirmation_candle is None:
                     confirmation_candle = candidate
                 candidate_flow = float(candidate["taker_buy_quote"]) / max(float(candidate["quote_volume"]), 1e-12)
-                if candidate_flow >= 0.505:
+                if candidate_flow >= 0.48:
                     confirmation_candle = candidate
                     break
         # Also accept a two-candle rejection: the first candle reacts above
@@ -184,7 +184,7 @@ def advance_pullback_setup(
                     if confirmation_candle is None:
                         confirmation_candle = follow_through
                     follow_flow = float(follow_through["taker_buy_quote"]) / max(float(follow_through["quote_volume"]), 1e-12)
-                    if follow_flow >= 0.505:
+                    if follow_flow >= 0.48:
                         confirmation_candle = follow_through
                         break
         confirmed = confirmation_candle is not None
@@ -207,8 +207,8 @@ def advance_pullback_setup(
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
         flow_confirmation = confirmation_candle or last
         directional_flow = (
-            float(flow_confirmation["taker_buy_quote"]) / max(float(flow_confirmation["quote_volume"]), 1e-12) >= 0.505
-            and aggregate_flow >= 0.47
+            float(flow_confirmation["taker_buy_quote"]) / max(float(flow_confirmation["quote_volume"]), 1e-12) >= 0.48
+            and aggregate_flow >= 0.44
             and directional_candle_share >= 0.15
             and float(last["close"]) >= ema20 - atr * EMA_TOLERANCE_ATR
         )
@@ -248,7 +248,7 @@ def advance_pullback_setup(
                 if confirmation_candle is None:
                     confirmation_candle = candidate
                 candidate_flow = float(candidate["taker_buy_quote"]) / max(float(candidate["quote_volume"]), 1e-12)
-                if candidate_flow <= 0.495:
+                if candidate_flow <= 0.52:
                     confirmation_candle = candidate
                     break
         # Symmetric two-candle bearish follow-through after the retest.
@@ -274,7 +274,7 @@ def advance_pullback_setup(
                     if confirmation_candle is None:
                         confirmation_candle = follow_through
                     follow_flow = float(follow_through["taker_buy_quote"]) / max(float(follow_through["quote_volume"]), 1e-12)
-                    if follow_flow <= 0.495:
+                    if follow_flow <= 0.52:
                         confirmation_candle = follow_through
                         break
         confirmed = confirmation_candle is not None
@@ -297,8 +297,8 @@ def advance_pullback_setup(
         ema20, ema50 = _ema(closes, 20), _ema(closes, 50)
         flow_confirmation = confirmation_candle or last
         directional_flow = (
-            float(flow_confirmation["taker_buy_quote"]) / max(float(flow_confirmation["quote_volume"]), 1e-12) <= 0.495
-            and aggregate_flow <= 0.53
+            float(flow_confirmation["taker_buy_quote"]) / max(float(flow_confirmation["quote_volume"]), 1e-12) <= 0.52
+            and aggregate_flow <= 0.56
             and directional_candle_share >= 0.20
             and float(last["close"]) <= ema20 + atr * EMA_TOLERANCE_ATR
         )
@@ -353,26 +353,32 @@ def advance_pullback_setup(
     if quote_volume <= 0 or average_volume <= 0 or quote_volume / average_volume < 0.85:
         return None, pending, (f"پولبک رخ داد اما حجم کندل برگشتی کافی نیست ({quote_volume / average_volume:.2f}x؛ حداقل 0.85x)؛ setup تا پایان مهلت حفظ شد")
 
-    # Use the live ticker when the data provider supplies it; otherwise use
-    # the latest closed confirmation close (never label an old LIMIT as executable).
+    # A MARKET entry is allowed only from a timestamped, fresh executable quote.
+    # A closed 15m candle close is analysis data, not a live fill price.
     planned_entry = (
         level + atr * ENTRY_LIMIT_OFFSET_ATR if side == "LONG"
         else level - atr * ENTRY_LIMIT_OFFSET_ATR
     )
     confirmation_close = float(last["close"])
-    current_price = float(snapshot.get("current_price") or confirmation_close)
+    quote_value = snapshot.get("current_price")
     price_timestamp = snapshot.get("price_timestamp")
-    # A live quote older than 60 seconds is not safe for MARKET execution.
-    live_quote_fresh = (
-        price_timestamp is None
-        or (int(time.time() * 1000) - int(price_timestamp) <= 60_000)
-    )
+    now_ms = int(time.time() * 1000)
+    live_quote_fresh = False
+    if quote_value is not None and price_timestamp is not None:
+        quote_age_ms = now_ms - int(price_timestamp)
+        live_quote_fresh = 0 <= quote_age_ms <= 60_000
+    current_price = float(quote_value) if live_quote_fresh else confirmation_close
     execution_mode = "LIMIT"
     crossed_entry = (
         current_price > planned_entry if side == "LONG"
         else current_price < planned_entry
     )
     if crossed_entry:
+        if not live_quote_fresh:
+            return None, pending, (
+                "قیمت ورود از سطح سفارش عبور کرده اما قیمت لحظه‌ای تازه در دسترس نیست؛ "
+                "برای جلوگیری از ورود با قیمت قدیمی، منتظر کوتیشن معتبر می‌مانیم"
+            )
         market_extension = (
             (current_price - level) / atr if side == "LONG"
             else (level - current_price) / atr
@@ -382,8 +388,6 @@ def advance_pullback_setup(
                 f"قیمت لحظه‌ای از سطح شکست بیش از حد دور شده ({market_extension:.2f} ATR)؛ "
                 "ورود مارکت تعقیبی صادر نشد"
             )
-        if not live_quote_fresh and snapshot.get("current_price") is not None:
-            return None, pending, "قیمت لحظه‌ای قدیمی است؛ برای جلوگیری از ورود اشتباه منتظر داده تازه می‌مانیم"
         entry = current_price
         execution_mode = "MARKET"
     else:
