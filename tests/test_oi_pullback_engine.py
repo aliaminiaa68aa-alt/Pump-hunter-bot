@@ -128,8 +128,8 @@ class PullbackEngineTests(unittest.TestCase):
              "close_time":first_time + 1800000},
         ])
         data["oi_values"] = [100.2, 101.0, 101.8]
-        signal, next_pending, _ = advance_pullback_setup(data, pending)
-        self.assertIsNotNone(signal)
+        signal, next_pending, reason = advance_pullback_setup(data, pending)
+        self.assertIsNotNone(signal, reason)
         self.assertIsNone(next_pending)
         self.assertAlmostEqual(signal.pullback_extreme, 100.35)
 
