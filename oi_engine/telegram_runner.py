@@ -741,47 +741,6 @@ def main() -> None:
                 )
         return client.fetch_ohlcv_1m_candles(symbol, start_ms, end_ms)
 
-    previous_events = {
-        trade_id: {
-            "events": len(record.get("events", [])),
-            "post_stop_tp1": bool(record.get("post_stop_tp1_reached")),
-            "post_stop_tp2": bool(record.get("post_stop_tp2_reached")),
-        }
-        for trade_id, record in outcome_journal.get("trades", {}).items()
-    }
-    outcome_journal = monitor_journal(
-        outcome_journal,
-        fetcher=fetch_trade_15m,
-        micro_fetcher=fetch_trade_1m,
-    )
-    print(
-        "Outcome price feed: "
-        f"15m={'Binance USD-M Last Price' if binance_feed['15m'] else 'Coinalyze Binance fallback'}; "
-        f"1m={'Binance USD-M Last Price' if binance_feed['1m'] else 'Coinalyze Binance fallback'}"
-    )
-    # Save tracker changes first; notifications have a durable retry queue.
-    save_outcome_journal(outcome_journal)
-    outcome_journal = dispatch_outcome_notifications(outcome_journal, token, chat_id)
-    outcome_statuses = {}
-    for trade in outcome_journal.get("trades", {}).values():
-        status = trade.get("status", "UNKNOWN")
-        outcome_statuses[status] = outcome_statuses.get(status, 0) + 1
-    provider_errors = sum(bool(trade.get("last_error")) for trade in outcome_journal.get("trades", {}).values())
-    print(f"Outcome monitor: statuses={outcome_statuses}, provider_errors={provider_errors}")
-    print(f"Outcome report: {json.dumps(summarize_outcomes(outcome_journal), ensure_ascii=False, sort_keys=True)}")
-    # Per-trade diagnostics distinguish missing market events from queued or failed Telegram delivery.
-    for trade_id, trade in outcome_journal.get("trades", {}).items():
-        events = [f"{event.get('event')}@{_safe_int(event.get('time_ms'), 0)}" for event in trade.get("events", [])]
-        delivery = trade.get("notification_state", {})
-        delivery_summary = {str(index): state.get("status", "unknown") for index, state in delivery.items() if isinstance(state, dict)}
-        print(
-            "Outcome trade diagnostic: "
-            f"trade={trade_id} status={trade.get('status')} "
-            f"events={events} notifications={delivery_summary} "
-            f"replay_count={trade.get('last_replay_candle_count', 'n/a')} "
-            f"replay_last_ms={trade.get('last_replay_last_candle_ms', 'n/a')} "
-            f"last_error={trade.get('last_error') or 'none'}"
-        )
     added = 0
     public_channel = os.getenv("OI_PUBLIC_CHANNEL", "oi_detector").strip()
     public_last_id = int(watch_state.get("public_channel_last_id", 0))
@@ -880,6 +839,47 @@ def main() -> None:
         sent += 1
         save_state(state)
 
+    previous_events = {
+        trade_id: {
+            "events": len(record.get("events", [])),
+            "post_stop_tp1": bool(record.get("post_stop_tp1_reached")),
+            "post_stop_tp2": bool(record.get("post_stop_tp2_reached")),
+        }
+        for trade_id, record in outcome_journal.get("trades", {}).items()
+    }
+    outcome_journal = monitor_journal(
+        outcome_journal,
+        fetcher=fetch_trade_15m,
+        micro_fetcher=fetch_trade_1m,
+    )
+    print(
+        "Outcome price feed: "
+        f"15m={'Binance USD-M Last Price' if binance_feed['15m'] else 'Coinalyze Binance fallback'}; "
+        f"1m={'Binance USD-M Last Price' if binance_feed['1m'] else 'Coinalyze Binance fallback'}"
+    )
+    # Save tracker changes first; notifications have a durable retry queue.
+    save_outcome_journal(outcome_journal)
+    outcome_journal = dispatch_outcome_notifications(outcome_journal, token, chat_id)
+    outcome_statuses = {}
+    for trade in outcome_journal.get("trades", {}).values():
+        status = trade.get("status", "UNKNOWN")
+        outcome_statuses[status] = outcome_statuses.get(status, 0) + 1
+    provider_errors = sum(bool(trade.get("last_error")) for trade in outcome_journal.get("trades", {}).values())
+    print(f"Outcome monitor: statuses={outcome_statuses}, provider_errors={provider_errors}")
+    print(f"Outcome report: {json.dumps(summarize_outcomes(outcome_journal), ensure_ascii=False, sort_keys=True)}")
+    # Per-trade diagnostics distinguish missing market events from queued or failed Telegram delivery.
+    for trade_id, trade in outcome_journal.get("trades", {}).items():
+        events = [f"{event.get('event')}@{_safe_int(event.get('time_ms'), 0)}" for event in trade.get("events", [])]
+        delivery = trade.get("notification_state", {})
+        delivery_summary = {str(index): state.get("status", "unknown") for index, state in delivery.items() if isinstance(state, dict)}
+        print(
+            "Outcome trade diagnostic: "
+            f"trade={trade_id} status={trade.get('status')} "
+            f"events={events} notifications={delivery_summary} "
+            f"replay_count={trade.get('last_replay_candle_count', 'n/a')} "
+            f"replay_last_ms={trade.get('last_replay_last_candle_ms', 'n/a')} "
+            f"last_error={trade.get('last_error') or 'none'}"
+        )
     if len(state) > 500:
         state = dict(sorted(state.items(), key=lambda item: item[1])[-500:])
         save_state(state)
