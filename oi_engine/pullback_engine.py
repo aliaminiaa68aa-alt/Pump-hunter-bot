@@ -140,8 +140,16 @@ def advance_pullback_setup(
             if (
                 float(candidate["close"]) > level
                 and float(candidate["close"]) > float(candidate["open"])
-                and candidate_body >= MIN_REJECTION_BODY_RATIO
-                and candidate_close_location >= MIN_REJECTION_CLOSE_LOCATION
+                and (
+                    (
+                        candidate_body >= MIN_REJECTION_BODY_RATIO
+                        and candidate_close_location >= MIN_REJECTION_CLOSE_LOCATION
+                    )
+                    # A small-bodied candle can still reject the level when it
+                    # closes decisively at the top of its range. Keep the
+                    # directional-flow/OI/volume gates below as confirmation.
+                    or (candidate_body >= 0.05 and candidate_close_location >= 0.85)
+                )
             ):
                 confirmation_candle = candidate
         confirmed = confirmation_candle is not None
@@ -192,8 +200,14 @@ def advance_pullback_setup(
             if (
                 float(candidate["close"]) < level
                 and float(candidate["close"]) < float(candidate["open"])
-                and candidate_body >= MIN_REJECTION_BODY_RATIO
-                and candidate_close_location >= MIN_REJECTION_CLOSE_LOCATION
+                and (
+                    (
+                        candidate_body >= MIN_REJECTION_BODY_RATIO
+                        and candidate_close_location >= MIN_REJECTION_CLOSE_LOCATION
+                    )
+                    # Symmetric strong-close rejection for SHORT setups.
+                    or (candidate_body >= 0.05 and candidate_close_location >= 0.85)
+                )
             ):
                 confirmation_candle = candidate
         confirmed = confirmation_candle is not None
