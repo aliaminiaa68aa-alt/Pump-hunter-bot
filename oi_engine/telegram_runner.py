@@ -233,12 +233,9 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                     f"entry_time_ms={entry_time} sent_at_ms={sent_at} "
                     f"events={event_names}"
                 )
-            # A late entry ping is misleading: the user may already have
-            # missed the executable price. With the minute-level monitor, allow
-            # a short delivery window only; later ENTRY messages are suppressed.
-            late_entry_notification = bool(
-                entry_time and now_ms - entry_time > 90000 and not entry_predates_signal
-            )
+            # Always report a confirmed post-signal entry, even when polling
+            # noticed it late. The message is explicitly marked historical below;
+            # suppressing it made users see TP/SL without ever seeing ENTRY.
             if entry_predates_signal and not record.get("entry_missed"):
                 record["entry_missed"] = True
                 record["status"] = "MISSED_ENTRY"
@@ -252,17 +249,6 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 for index in range(len(events)):
                     delivery[str(index)] = {"status": "ignored", "reason": "missed_entry"}
                 continue
-            if late_entry_notification:
-                delivery = record.setdefault("notification_state", {})
-                entry_index = events.index(entry_event)
-                delivery[str(entry_index)] = {
-                    "status": "ignored",
-                    "reason": "late_entry_notification",
-                }
-                print(
-                    f"Late ENTRY ping suppressed; downstream outcomes retained: trade={trade_id} "
-                    f"entry_time_ms={entry_time} sent_at_ms={sent_at} now_ms={now_ms}"
-                )
         anchor_id = record.get("telegram_message_id")
         # A missing original-message ID must not suppress outcome alerts.
         # Send them as standalone chat messages when reply threading is unavailable.
