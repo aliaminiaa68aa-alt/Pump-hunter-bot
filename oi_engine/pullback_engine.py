@@ -1,4 +1,4 @@
-"""Stateful 15m breakout -> retest -> confirmation entry engine."""
+"""Stateful 15m breakout -> pre-positioned retest-limit entry engine."""
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
@@ -84,16 +84,49 @@ def advance_pullback_setup(
         prior = candles[-6:-1]
         level = (max(float(c["high"]) for c in prior) if breakout.side == "LONG"
                  else min(float(c["low"]) for c in prior))
+        # Publish the retest LIMIT before price comes back to the broken
+        # structure. The previous implementation waited for the retest and
+        # rejection candle first, which routinely made the entry arrive late.
+        entry = level
+        risk = atr * INVALIDATION_ATR
+        stop = entry - risk if breakout.side == "LONG" else entry + risk
+        min_risk = entry * MIN_STOP_PCT / 100.0
+        if risk < min_risk:
+            risk = min_risk
+            stop = entry - risk if breakout.side == "LONG" else entry + risk
+        if risk > atr * MAX_STOP_ATR:
+            return None, None, "فاصله ساختاری ورود تا ابطال برای این شکست بیش از حد است"
+        tp1 = entry + risk if breakout.side == "LONG" else entry - risk
+        tp2 = entry + 2.0 * risk if breakout.side == "LONG" else entry - 2.0 * risk
+        limit_signal = Signal(
+            symbol=breakout.symbol, side=breakout.side, entry=entry,
+            stop_loss=stop, take_profit_1=tp1, take_profit_2=tp2,
+            oi_change_pct=breakout.oi_change_pct,
+            price_change_pct=breakout.price_change_pct,
+            taker_buy_ratio=breakout.taker_buy_ratio,
+            volume_ratio=breakout.volume_ratio,
+            funding_rate=breakout.funding_rate,
+            confidence=breakout.confidence,
+            candle_close_time=breakout.candle_close_time,
+            movement_strength=breakout.movement_strength,
+            entry_quality=breakout.entry_quality,
+            setup_level=level, atr_15m=atr, pullback_extreme=None,
+            ema20=breakout.ema20, ema50=breakout.ema50,
+            stop_distance_atr=(risk / atr if atr > 0 else 0.0),
+            execution_mode="LIMIT",
+        )
         setup = {
             "side": breakout.side,
             "level": level,
             "breakout_close_time": close_time,
             "expires_at_close_time": close_time + SETUP_LIFETIME_CANDLES * 15 * 60 * 1000,
             "breakout_atr": atr,
+            "entry_signal_sent": True,
+            "signal": limit_signal.to_dict(),
         }
-        return None, setup, (
-            f"شکست {breakout.side} ثبت شد؛ منتظر برگشت قیمت به سطح {level:.8g} "
-            "و بسته‌شدن کندل تأییدی هستیم"
+        return limit_signal, setup, (
+            f"شکست {breakout.side} تأیید شد؛ سیگنال LIMIT پیش از پولبک صادر شد. "
+            f"ورود روی سقف/کف شکسته‌شده: {level:.8g}"
         )
 
     side = str(pending.get("side", ""))
@@ -102,9 +135,39 @@ def advance_pullback_setup(
     if close_time <= int(pending.get("breakout_close_time", 0)):
         return None, pending, "منتظر کندل بعد از شکست هستیم"
     if close_time > int(pending.get("expires_at_close_time", 0)):
-        return None, None, "مهلت پولبک تمام شد؛ setup منقضی شد"
+        return None, None, "مهلت سفارش LIMIT تمام شد؛ setup منقضی شد"
 
     level = float(pending["level"])
+    if pending.get("entry_signal_sent") and isinstance(pending.get("signal"), dict):
+        # Do not issue a delayed replacement after price has already tagged
+        # the planned retest level. If the external OI/flow confirmation was
+        # unavailable at breakout time, this opportunity is skipped rather
+        # than sending a stale entry after the pullback.
+        post_breakout_for_entry = [
+            candle for candle in candles
+            if int(candle["close_time"]) > int(pending.get("breakout_close_time", 0))
+        ]
+        invalidation_distance = atr * INVALIDATION_ATR
+        if side == "LONG":
+            invalidated = any(float(c["low"]) < level - invalidation_distance
+                              for c in post_breakout_for_entry)
+            retest_already_tagged = any(float(c["low"]) <= level
+                                        for c in post_breakout_for_entry)
+        else:
+            invalidated = any(float(c["high"]) > level + invalidation_distance
+                              for c in post_breakout_for_entry)
+            retest_already_tagged = any(float(c["high"]) >= level
+                                        for c in post_breakout_for_entry)
+        if invalidated:
+            return None, None, "سطح شکست تا محدوده ابطال از دست رفت؛ سفارش LIMIT لغو شد"
+        if retest_already_tagged:
+            return None, None, "قیمت پیش از تأیید مستقل به سطح ورود رسیده؛ سیگنال دیرهنگام صادر نمی‌شود"
+        try:
+            return Signal(**pending["signal"]), pending, "در انتظار رسیدن قیمت به سفارش LIMIT از پیش اعلام‌شده"
+        except (TypeError, ValueError):
+            return None, None, "اطلاعات سیگنال ذخیره‌شده معتبر نیست؛ setup پاک شد"
+
+
     tolerance = atr * PULLBACK_TOLERANCE_ATR
     invalidation = atr * INVALIDATION_ATR
     # A symbol may not be selected on every 15m candle because the scanner
