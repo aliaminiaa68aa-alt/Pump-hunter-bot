@@ -696,7 +696,8 @@ def summarize_scan_diagnostics(watchlist, scanned_batch):
         # Count both the legacy wording and the current live-engine wording.
         # The latter used to be invisible in diagnostics, falsely reporting 0.
         if ("Coinalyze رد کرد" in reason
-                or "تأیید مستقل Coinalyze کافی نیست" in reason):
+                or "تأیید مستقل Coinalyze کافی نیست" in reason
+                or "رد تأیید مشتقات:" in reason):
             reasons["coinalyze_rejected"] += 1
         if (isinstance(record.get("pending_setup"), dict)
                 or status == "منتظر پولبک و تأیید"):
