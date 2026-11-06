@@ -934,31 +934,49 @@ def main() -> None:
                 token, chat_id, format_confirmed_signal(signal, metrics), parse_mode="HTML"
             )
         except Exception as exc:
-            if _is_ambiguous_telegram_delivery(exc):
-                tracked = outcome_journal.get("trades", {}).get(trade_id, trade_record)
-                tracked["telegram_delivery_status"] = "unknown"
-                tracked["telegram_delivery_error"] = f"{type(exc).__name__}: {exc}"
-                save_outcome_journal(outcome_journal)
-                print(
-                    "Signal Telegram delivery UNKNOWN; duplicate retry suppressed: "
-                    f"trade={trade_id} symbol={signal.symbol} "
-                    f"error={type(exc).__name__}: {exc}"
-                )
-                continue
+            # Always merge delivery state into the latest journal under the
+            # shared lock. The live monitor may be running in another thread.
+            with OUTCOME_JOURNAL_LOCK:
+                latest = load_outcome_journal()
+                tracked = latest.get("trades", {}).get(trade_id)
+                if tracked is None and created_trade:
+                    tracked = trade_record
+                    latest.setdefault("trades", {})[trade_id] = tracked
+                if _is_ambiguous_telegram_delivery(exc):
+                    if tracked is not None:
+                        tracked["telegram_delivery_status"] = "unknown"
+                        tracked["telegram_delivery_error"] = f"{type(exc).__name__}: {exc}"
+                    save_outcome_journal(latest)
+                    outcome_journal = latest
+                    print(
+                        "Signal Telegram delivery UNKNOWN; duplicate retry suppressed: "
+                        f"trade={trade_id} symbol={signal.symbol} "
+                        f"error={type(exc).__name__}: {exc}"
+                    )
+                    continue
 
-            # A definite Telegram rejection is safe to retry on a later scan.
-            state.pop(key, None)
-            if created_trade:
-                outcome_journal.get("trades", {}).pop(trade_id, None)
+                # A definite Telegram rejection is safe to retry on a later scan.
+                state.pop(key, None)
+                if created_trade:
+                    latest.get("trades", {}).pop(trade_id, None)
+                save_outcome_journal(latest)
+                outcome_journal = latest
             save_state(state)
-            save_outcome_journal(outcome_journal)
             raise
 
-        tracked = outcome_journal.get("trades", {}).get(trade_id, trade_record)
-        tracked["telegram_message_id"] = message_id if isinstance(message_id, int) else None
-        tracked["telegram_delivery_status"] = "sent"
-        tracked.pop("telegram_delivery_error", None)
-        save_outcome_journal(outcome_journal)
+        # Re-read under the same lock used by the live monitor so its journal
+        # updates cannot be overwritten by this scanner's stale in-memory copy.
+        with OUTCOME_JOURNAL_LOCK:
+            latest = load_outcome_journal()
+            tracked = latest.get("trades", {}).get(trade_id)
+            if tracked is None:
+                tracked = trade_record
+                latest.setdefault("trades", {})[trade_id] = tracked
+            tracked["telegram_message_id"] = message_id if isinstance(message_id, int) else None
+            tracked["telegram_delivery_status"] = "sent"
+            tracked.pop("telegram_delivery_error", None)
+            save_outcome_journal(latest)
+            outcome_journal = latest
         sent += 1
 
     if os.getenv("PUMP_HUNTER_EXTERNAL_LIVE_MONITOR") != "1":
