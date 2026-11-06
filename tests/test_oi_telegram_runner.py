@@ -745,7 +745,7 @@ class TelegramRunnerTests(unittest.TestCase):
         entry_message = send.call_args_list[0].args[2]
         target_message = send.call_args_list[1].args[2]
         self.assertIn("ورود فعال شد", entry_message)
-        self.assertIn("مبنای ورود تازه نیست", entry_message)
+        self.assertIn("این اعلان با تأخیر ارسال شده؛ مبنای ورود تازه نیست.", entry_message)
         self.assertIn("تارگت اول خورد", target_message)
         record = result["trades"]["slightly-delayed-entry"]
         self.assertEqual(record["notification_state"]["0"]["status"], "sent")
@@ -782,7 +782,7 @@ class TelegramRunnerTests(unittest.TestCase):
         entry_message = send.call_args_list[0].args[2]
         stop_message = send.call_args_list[1].args[2]
         self.assertIn("ورود فعال شد", entry_message)
-        self.assertIn("مبنای ورود تازه نیست", entry_message)
+        self.assertIn("این اعلان با تأخیر ارسال شده؛ مبنای ورود تازه نیست.", entry_message)
         self.assertIn("حد ضرر خورد", stop_message)
         self.assertIn("برای ورود جدید اقدام نکنید", stop_message)
         record = result["trades"]["delayed-trade"]
