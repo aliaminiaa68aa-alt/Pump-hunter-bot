@@ -103,11 +103,8 @@ class PullbackEngineTests(unittest.TestCase):
         self.assertIsNone(next_pending)
         self.assertGreater(signal.stop_loss, signal.entry)
         self.assertLess(signal.take_profit_2, signal.take_profit_1)
-        self.assertGreater(signal.entry, data["candles"][-1]["close"])
-        self.assertAlmostEqual(
-            signal.entry,
-            signal.setup_level - signal.atr_15m * 0.02,
-        )
+        self.assertEqual(signal.execution_mode, "MARKET")
+        self.assertAlmostEqual(signal.entry, data["candles"][-1]["close"])
 
     def test_long_retest_extreme_is_recovered_when_intermediate_candle_was_not_scanned(self):
         data = snapshot("LONG")
