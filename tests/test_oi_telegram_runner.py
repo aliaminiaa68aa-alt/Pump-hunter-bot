@@ -714,7 +714,7 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["1"]["status"], "sent")
 
 
-    def test_delayed_outcome_events_over_30_minutes_are_not_discarded(self):
+    def test_delayed_entry_and_followup_events_are_suppressed_as_missed_trade(self):
         now_ms = 1_000_000 + 3 * 60 * 60 * 1000
         journal = {
             "trades": {
@@ -736,16 +736,16 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
             with patch.object(telegram_runner, "save_outcome_journal"):
-                with patch.object(telegram_runner, "send_telegram", side_effect=[201, 202]) as send:
+                with patch.object(telegram_runner, "send_telegram") as send:
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assertEqual(send.call_count, 2)
-        self.assertIn("ورود قبلاً فعال شده بود", send.call_args_list[0].args[2])
-        self.assertIn("حد ضرر خورد", send.call_args_list[1].args[2])
-        state = result["trades"]["delayed-trade"]["notification_state"]
-        self.assertEqual(state["0"]["status"], "sent")
-        self.assertEqual(state["1"]["status"], "sent")
+        self.assert_not_called = send.assert_not_called
+        record = result["trades"]["delayed-trade"]
+        self.assertEqual(record["status"], "MISSED_ENTRY")
+        self.assertTrue(record["entry_missed"])
+        self.assertEqual(record["notification_state"]["0"]["status"], "ignored")
+        self.assertEqual(record["notification_state"]["1"]["status"], "ignored")
 
 
 if __name__ == "__main__":
