@@ -236,7 +236,7 @@ def add_market_universe_candidates(
 
 
 def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIST_SYMBOLS):
-    """Prioritize channel alerts/setups, while guaranteeing market-universe progress."""
+    """Prioritize fresh alerts while reserving capacity for expiring pullback setups."""
     symbols = list(watchlist)
     if not symbols:
         return {}, ""
@@ -244,116 +244,127 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
     count = min(max(1, _safe_int(limit, MAX_WATCHLIST_SYMBOLS)), len(symbols))
     score = lambda symbol: _safe_float(watchlist[symbol].get("oi_priority_score", 0.0))
 
-    def is_channel(symbol):
-        return watchlist[symbol].get("source_type") == "oi_channel"
-
-    def is_market(symbol):
-        return watchlist[symbol].get("source_type") == "market_universe"
-
-    def is_fresh(symbol):
-        record = watchlist[symbol]
-        return _safe_int(
-            record.get("last_alert_received_at", record.get("last_alert", 0))
-        ) > _safe_int(record.get("last_checked", 0))
-
-    channel_fresh = [s for s in symbols if is_channel(s) and is_fresh(s)]
-    channel_fresh.sort(key=lambda s: (
-        _safe_int(watchlist[s].get("last_attempted_at", 0)),
-        -_safe_int(watchlist[s].get("last_alert_received_at", watchlist[s].get("last_alert", 0))),
-        -score(s),
-    ))
+    fresh_alerts = [
+        symbol for symbol in symbols
+        if _safe_int(
+            watchlist[symbol].get(
+                "last_alert_received_at", watchlist[symbol].get("last_alert", 0)
+            )
+        ) > _safe_int(watchlist[symbol].get("last_checked", 0))
+    ]
+    # First attempts stay ahead of failed retries.
+    fresh_alerts.sort(
+        key=lambda symbol: (
+            _safe_int(watchlist[symbol].get("last_attempted_at", 0)),
+            -_safe_int(watchlist[symbol].get("last_alert_received_at", watchlist[symbol].get("last_alert", 0))),
+            -score(symbol),
+        )
+    )
 
     pending_all = [
-        s for s in symbols
-        if isinstance(watchlist[s].get("pending_setup"), dict)
+        symbol for symbol in symbols
+        if isinstance(watchlist[symbol].get("pending_setup"), dict)
     ]
-    channel_pending = [s for s in pending_all if is_channel(s)]
-    market_pending = [s for s in pending_all if is_market(s)]
-    pending_key = lambda s: (
-        _safe_int(watchlist[s].get("last_checked", 0)),
-        _safe_int(watchlist[s]["pending_setup"].get("expires_at_close_time", 0)),
-    )
-    channel_pending.sort(key=pending_key)
-    market_pending.sort(key=pending_key)
+    # The nearest expiry is the most urgent; age breaks ties.
+    pending_all.sort(key=lambda symbol: (
+        0 if watchlist[symbol].get("source_type") == "oi_channel" else 1,
+        _safe_int(watchlist[symbol].get("last_checked", 0)),
+        _safe_int(watchlist[symbol]["pending_setup"].get("expires_at_close_time", 0)),
+    ))
 
-    # Keep at least one slot (normally two) moving through the independent
-    # market universe, even when the channel backlog is continuously large.
+    # Pending setups need frequent rechecks: reserve up to four of twelve
+    # slots, while keeping at least two thirds of capacity for fresh/hot
+    # candidates. Smaller batches retain the previous two-slot ceiling.
+    pending_target = (
+        min(len(pending_all), max(2, min(4, count // 3)))
+        if count >= 2 and pending_all else 0
+    )
     market_candidates = [
-        s for s in symbols
-        if is_market(s) and s not in pending_all
+        symbol for symbol in symbols
+        if watchlist[symbol].get("source_type") == "market_universe"
+        and not isinstance(watchlist[symbol].get("pending_setup"), dict)
     ]
-    reserve_market = (
+    # Guarantee a small independent-market slice without displacing fresh
+    # channel alerts or urgent pending setups.
+    market_reserve = (
         min(len(market_candidates), max(1, count // 6))
         if market_candidates and count >= 3 else 0
     )
+    fresh_limit = max(0, count - pending_target - market_reserve)
+    selected = fresh_alerts[:fresh_limit]
 
-    selected = []
-    # Reserve room for urgent channel pullbacks as well as a small market
-    # slice; this prevents a large fresh-alert backlog from starving setups.
-    pending_target = min(len(channel_pending), max(1, min(4, count // 3))) if channel_pending else 0
-    channel_fresh_limit = max(0, count - reserve_market - pending_target)
-    selected.extend(channel_fresh[:channel_fresh_limit])
+    # A pending setup may itself be a fresh alert; count it toward the reserve
+    # rather than selecting it twice or wasting a reserved slot.
+    selected_pending = sum(1 for symbol in selected if symbol in pending_all)
+    pending_slots = max(0, pending_target - selected_pending)
+    pending_remaining = [symbol for symbol in pending_all if symbol not in selected]
+    pending = pending_remaining[:pending_slots]
+    selected.extend(pending)
 
-    # Urgent channel pullbacks outrank all market candidates.
-    for symbol in channel_pending:
-        if len(selected) >= count - reserve_market or len([
-            s for s in selected if s in channel_pending
-        ]) >= pending_target:
-            break
-        if symbol not in selected:
-            selected.append(symbol)
+    # If a pending setup was already included among fresh alerts, use the
+    # freed capacity for the next fresh alerts instead of leaving a slot idle.
+    channel_capacity = count - market_reserve
+    if len(selected) < channel_capacity:
+        fresh_remaining = [symbol for symbol in fresh_alerts if symbol not in selected]
+        selected.extend(fresh_remaining[:channel_capacity - len(selected)])
 
-    # Use remaining channel capacity before independent market capacity.
-    if len(selected) < count - reserve_market:
-        for symbol in channel_fresh:
-            if symbol not in selected:
-                selected.append(symbol)
-                if len(selected) >= count - reserve_market:
-                    break
-
-    # Market candidates are deliberately guaranteed progress after channel
-    # alerts and channel pending setups have received first priority.
-    market_selected = 0
+    # Channel alerts and channel pending setups are selected first; then
+    # guarantee forward progress through the independent market universe.
+    market_added = 0
     for symbol in market_candidates:
         if symbol not in selected:
             selected.append(symbol)
-            market_selected += 1
-            if market_selected >= reserve_market or len(selected) >= count:
+            market_added += 1
+            if market_added >= market_reserve or len(selected) >= count:
                 break
 
-    # Revisit market pending setups, then any remaining pending setups.
-    for group in (market_pending, pending_all):
-        for symbol in group:
-            if symbol not in selected and len(selected) < count:
+    remaining_slots = count - len(selected)
+    if remaining_slots <= 0:
+        return {symbol: watchlist[symbol] for symbol in selected}, last_scanned_symbol
+
+    remaining = [symbol for symbol in symbols if symbol not in selected]
+    ranked = sorted(remaining, key=score, reverse=True)
+    pending_remaining = [symbol for symbol in pending_all if symbol not in selected]
+
+    # If every watchlist symbol is pending, use otherwise-idle capacity
+    # to revisit more setups. Otherwise preserve slots for hot and rotating
+    # candidates instead of letting a large pending queue monopolize a batch.
+    if len(selected) < count and len(pending_all) == len(symbols):
+        for symbol in pending_remaining:
+            if symbol not in selected:
                 selected.append(symbol)
+                if len(selected) >= count:
+                    break
+    remaining_slots = count - len(selected)
 
-    remaining = [s for s in symbols if s not in selected]
-    ranked = sorted(remaining, key=score, reverse=True)
-    hot = [s for s in ranked if not isinstance(watchlist[s].get("pending_setup"), dict) and score(s) > 0.0]
-    for symbol in hot[:min(2, count - len(selected))]:
-        selected.append(symbol)
+    hot = [
+        symbol for symbol in ranked
+        if symbol not in pending_all and score(symbol) > 0.0
+    ][:min(2, remaining_slots)]
+    selected.extend(hot)
 
-    remaining = [s for s in symbols if s not in selected]
-    ranked = sorted(remaining, key=score, reverse=True)
-    rotating = [s for s in ranked if s not in pending_all]
-    if rotating and len(selected) < count:
-        rank_position = {s: index for index, s in enumerate(ranked)}
+    rotating = [
+        symbol for symbol in ranked
+        if symbol not in selected and symbol not in pending_all
+    ]
+    rotating_slots = count - len(selected)
+    rotating_selected = []
+    if rotating_slots > 0 and rotating:
+        rank_position = {symbol: index for index, symbol in enumerate(ranked)}
         cursor_position = rank_position.get(last_scanned_symbol, -1)
         start = next(
-            (index for index, s in enumerate(rotating)
-             if rank_position[s] > cursor_position),
+            (index for index, symbol in enumerate(rotating)
+             if rank_position[symbol] > cursor_position),
             0,
         )
         rotating_selected = [
             rotating[(start + offset) % len(rotating)]
-            for offset in range(min(count - len(selected), len(rotating)))
+            for offset in range(min(rotating_slots, len(rotating)))
         ]
         selected.extend(rotating_selected)
-        next_cursor = rotating_selected[-1]
-    else:
-        next_cursor = last_scanned_symbol
 
-    return {s: watchlist[s] for s in selected[:count]}, next_cursor
+    next_cursor = rotating_selected[-1] if rotating_selected else last_scanned_symbol
+    return {symbol: watchlist[symbol] for symbol in selected}, next_cursor
 
 def summarize_scan_diagnostics(watchlist, scanned_batch):
     """Build compact counters explaining where the current scan batch stands."""
