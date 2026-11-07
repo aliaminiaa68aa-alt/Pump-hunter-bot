@@ -1,6 +1,6 @@
 """Persistent outcome journal for confirmed OI signals.
 
-Uses closed 15m Binance futures candles. Ambiguous stop/target touches within
+Uses closed 15m Binance/Bybit perpetual candles. Ambiguous stop/target touches within
 one candle are resolved conservatively as stop-first.
 """
 from __future__ import annotations
@@ -16,43 +16,56 @@ MAX_ACTIVE_HOURS = 96
 MAX_PENDING_ENTRY_HOURS = 1
 
 
+def _fetch_with_fallback(symbol: str, interval: str, start_ms: int, end_ms: int,
+                          limit: int) -> List[list]:
+    """Use Binance USD-M candles first, then Bybit linear candles for price only."""
+    path = "/fapi/v1/klines"
+    try:
+        response = requests.get(
+            BASE_URL + path,
+            params={
+                "symbol": symbol, "interval": interval,
+                "startTime": start_ms, "endTime": end_ms, "limit": limit,
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise ValueError("Unexpected Binance kline response")
+        _fetch_with_fallback.last_source = "Binance USD-M"
+        return payload
+    except (requests.RequestException, ValueError) as binance_error:
+        from oi_engine.market_data import fetch_bybit_rows
+        bybit_interval = "15" if interval == "15m" else "1"
+        try:
+            rows = fetch_bybit_rows(
+                symbol, bybit_interval, start_ms, end_ms,
+                limit=min(limit, 1000),
+            )
+            if not rows:
+                raise ValueError("Bybit returned no closed candles")
+            _fetch_with_fallback.last_source = "Bybit linear fallback"
+            print(
+                f"Price candle provider fallback: {symbol} {interval} "
+                f"Binance unavailable ({type(binance_error).__name__}); Bybit OK"
+            )
+            return rows
+        except Exception as bybit_error:
+            _fetch_with_fallback.last_source = "unavailable"
+            raise RuntimeError(
+                f"Price candles unavailable from Binance ({binance_error}) "
+                f"and Bybit ({bybit_error})"
+            ) from bybit_error
+
+
 def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
-    response = requests.get(
-        BASE_URL + "/fapi/v1/klines",
-        params={
-            "symbol": symbol,
-            "interval": "15m",
-            "startTime": start_ms,
-            "endTime": end_ms,
-            "limit": 1000,
-        },
-        timeout=15,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        raise ValueError("Unexpected Binance kline response")
-    return payload
+    return _fetch_with_fallback(symbol, "15m", start_ms, end_ms, 1000)
 
 
 def _fetch_1m_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
-    """Fetch Binance USD-M 1m trade-price candles (Last/contract price)."""
-    response = requests.get(
-        BASE_URL + "/fapi/v1/klines",
-        params={
-            "symbol": symbol,
-            "interval": "1m",
-            "startTime": start_ms,
-            "endTime": end_ms,
-            "limit": 1500,
-        },
-        timeout=15,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        raise ValueError("Unexpected Binance 1m kline response")
-    return payload
+    """Fetch 1m trade-price candles with the same Binance -> Bybit fallback."""
+    return _fetch_with_fallback(symbol, "1m", start_ms, end_ms, 1500)
 
 
 def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> Dict[str, Any]:
