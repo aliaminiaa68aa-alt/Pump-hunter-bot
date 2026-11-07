@@ -437,6 +437,7 @@ class TelegramRunnerTests(unittest.TestCase):
              patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
              patch.dict(os.environ, env), \
              patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
+             patch.object(telegram_runner, "fetch_live_price", return_value=100.0), \
              patch.object(telegram_runner, "verify_telegram_connection"), \
              patch.object(telegram_runner, "poll_public_channel_alerts", return_value=public_result) as poll, \
              patch.object(telegram_runner, "scan_watchlist", return_value=scan_result), \
@@ -457,6 +458,8 @@ class TelegramRunnerTests(unittest.TestCase):
             self.assertEqual(tracked["signal"]["symbol"], "TESTUSDT")
             self.assertEqual(tracked["status"], "WAITING_ENTRY")
             send.assert_called_once()
+            self.assertIn("قیمت فعلی هنگام صدور سیگنال", send.call_args.args[2])
+            self.assertIn("100", send.call_args.args[2])
             self.assertIn("UNSPECIFIED:TESTUSDT:LONG", state.read_text(encoding="utf-8"))
             saved = json.loads(watch.read_text(encoding="utf-8"))
             self.assertEqual(saved["public_channel_last_id"], 123)
