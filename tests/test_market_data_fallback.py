@@ -49,17 +49,26 @@ class BybitPriceFallbackTests(unittest.TestCase):
 
     @patch("oi_engine.signal_engine._get")
     @patch("oi_engine.market_data.fetch_bybit_rows")
-    def test_signal_snapshot_uses_bybit_only_for_price_after_binance_451(self, bybit, get):
+    def test_signal_snapshot_fails_closed_when_binance_unavailable(self, bybit, get):
         import requests
         get.side_effect = requests.HTTPError("451 Client Error")
-        bybit.return_value = [
-            [i * 900000, "100", "102", "99", "101", "12", i * 900000 + 899999, "1212", "0", "0", "0", "0"]
-            for i in range(60)
-        ]
+        with self.assertRaises(signal_engine.MarketDataError):
+            signal_engine.fetch_snapshot("ABCUSDT")
+        bybit.assert_not_called()
+
+    @patch("oi_engine.signal_engine._get")
+    def test_signal_snapshot_uses_binance_candles_and_live_price(self, get):
+        now = int(time.time() * 1000)
+        rows = []
+        for index in range(80):
+            start = now - (80 - index) * 900000
+            rows.append([start, "100", "102", "99", "101", "10",
+                         start + 899999, "1000", 0, 0, "600", "0"])
+        get.side_effect = [rows, {"symbol": "ABCUSDT", "price": "101.2"}]
         snapshot = signal_engine.fetch_snapshot("ABCUSDT")
-        self.assertEqual(len(snapshot["candles"]), 60)
-        self.assertIn("Bybit", snapshot["price_source"])
-        get.assert_called_once()
+        self.assertEqual(snapshot["price_source"], "Binance USD-M Futures (USDT perpetual)")
+        self.assertEqual(snapshot["live_price"], 101.2)
+        self.assertEqual(len(snapshot["candles"]), 79)
 
     @patch("oi_engine.outcome_tracker.requests.get")
     @patch("oi_engine.market_data.fetch_bybit_rows")
