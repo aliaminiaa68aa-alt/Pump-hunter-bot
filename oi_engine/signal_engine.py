@@ -124,6 +124,15 @@ def validate_oi_cadence(rows: List[dict]) -> None:
         raise MarketDataError("OI samples do not follow exact 15m cadence")
 
 
+def fetch_live_price(symbol: str) -> float:
+    """Fetch the latest executable Binance USD-M perpetual price for a signal card."""
+    ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
+    price = _float(ticker.get("price"), "Binance USD-M live price")
+    if price <= 0:
+        raise MarketDataError("Invalid Binance USD-M live price")
+    return price
+
+
 def fetch_snapshot(symbol: str) -> Dict[str, Any]:
     """Fetch Binance USD-M perpetual candles and live price; never mix exchanges."""
     try:
