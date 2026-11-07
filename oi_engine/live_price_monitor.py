@@ -12,6 +12,9 @@ from typing import Any, Dict, Mapping
 
 ACTIVE_STATUSES = {"WAITING_ENTRY", "OPEN", "TP1_HIT"}
 MAX_PENDING_ENTRY_MS = 60 * 60 * 1000
+# Reject a polling fill if the observed price has moved too far beyond the
+# planned entry in the adverse direction. This prevents chasing stale alerts.
+MAX_ENTRY_SLIPPAGE_PCT = 0.15
 TERMINAL_STATUSES = {
     "CLOSED_SL", "CLOSED_TP2", "TIMED_OUT", "EXPIRED_NO_ENTRY",
     "AMBIGUOUS_ENTRY_CANDLE", "AMBIGUOUS_ENTRY_POLL", "MISSED_ENTRY", "INVALID_NO_ENTRY",
@@ -118,6 +121,38 @@ def apply_live_prices(
                 record["live_last_price"] = price
                 record["live_last_price_ms"] = now
                 continue
+            # A poll can observe the market after it has already gapped
+            # through the planned entry. Do not chase an adverse move: the
+            # signal is marked missed, not opened at a materially worse price.
+            adverse_slippage_pct = (
+                (entry - price) / entry * 100.0
+                if side == "LONG"
+                else (price - entry) / entry * 100.0
+            )
+            if adverse_slippage_pct > MAX_ENTRY_SLIPPAGE_PCT:
+                record["status"] = "MISSED_ENTRY"
+                record["entry_missed"] = True
+                record["entry_missed_reason"] = (
+                    f"Adverse entry slippage {adverse_slippage_pct:.4f}% "
+                    f"exceeded {MAX_ENTRY_SLIPPAGE_PCT:.2f}%"
+                )
+                record["entry_observed_price"] = price
+                record["entry_slippage_pct"] = adverse_slippage_pct
+                record.setdefault("events", []).append({
+                    "event": "MISSED_ENTRY",
+                    "time_ms": now,
+                    "planned_entry": entry,
+                    "observed_price": price,
+                    "slippage_pct": adverse_slippage_pct,
+                    "max_slippage_pct": MAX_ENTRY_SLIPPAGE_PCT,
+                    "source": "live_price_poll",
+                })
+                record["exit_time_ms"] = now
+                record["live_last_price"] = price
+                record["live_last_price_ms"] = now
+                record["last_checked_ms"] = now
+                continue
+
             fill = entry
             record["entry_fill_price"] = fill
             record["entry_time_ms"] = now
