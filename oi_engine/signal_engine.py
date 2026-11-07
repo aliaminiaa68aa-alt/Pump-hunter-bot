@@ -2,7 +2,7 @@
 
 This module is intentionally independent of the legacy Pump Hunter strategies.
 It emits only confirmed LONG/SHORT candidates; it does not send Telegram messages.
-Binance USD-M Futures is primary for price candles; Bybit linear is the price-only fallback. Coinalyze supplies derivatives metrics.
+Binance USD-M Futures is the sole price source. Coinalyze supplies derivatives metrics.
 """
 from __future__ import annotations
 
@@ -125,50 +125,32 @@ def validate_oi_cadence(rows: List[dict]) -> None:
 
 
 def fetch_snapshot(symbol: str) -> Dict[str, Any]:
-    """Fetch closed 15m price candles; Coinalyze supplies derivatives metrics separately."""
-    from oi_engine.market_data import bybit_rows_to_snapshot, fetch_bybit_rows, fetch_gateio_rows
-
-    price_source = "Binance USD-M Futures"
-    try:
-        candles = _get("/fapi/v1/klines", {
-            "symbol": symbol, "interval": INTERVAL, "limit": 80
-        })
-        candles = candles[:-1]  # Exclude the currently-forming Binance candle.
-        parsed = [{
-            "open_time": int(row[0]),
-            "open": _float(row[1], "open"),
-            "high": _float(row[2], "high"),
-            "low": _float(row[3], "low"),
-            "close": _float(row[4], "close"),
-            "volume": _float(row[5], "volume"),
-            "quote_volume": _float(row[7], "quote volume"),
-            "taker_buy_quote": _float(row[10], "taker buy quote"),
-            "close_time": int(row[6]),
-        } for row in candles]
-    except (requests.RequestException, MarketDataError, ValueError, TypeError) as binance_error:
-        try:
-            fallback_rows = fetch_bybit_rows(symbol, "15", limit=80)
-            fallback = bybit_rows_to_snapshot(fallback_rows, symbol)
-            parsed = fallback["candles"]
-            price_source = "Bybit linear perpetual (Binance fallback)"
-        except Exception as bybit_error:
-            try:
-                from oi_engine.market_data import bybit_rows_to_snapshot
-                gate_rows = fetch_gateio_rows(symbol, "15m", limit=80)
-                fallback = bybit_rows_to_snapshot(gate_rows, symbol)
-                parsed = fallback["candles"]
-                price_source = "Gate.io USDT perpetual (Binance/Bybit fallback)"
-            except Exception as gate_error:
-                raise MarketDataError(
-                    f"Price candles unavailable from Binance ({binance_error}), "
-                    f"Bybit ({bybit_error}), and Gate.io ({gate_error})"
-                ) from gate_error
-
+    """Fetch Binance USD-M perpetual candles and live price; never mix exchanges."""
+    candles = _get("/fapi/v1/klines", {
+        "symbol": symbol, "interval": INTERVAL, "limit": 80
+    })
+    candles = candles[:-1]  # Exclude the currently-forming Binance candle.
+    parsed = [{
+        "open_time": int(row[0]),
+        "open": _float(row[1], "open"),
+        "high": _float(row[2], "high"),
+        "low": _float(row[3], "low"),
+        "close": _float(row[4], "close"),
+        "volume": _float(row[5], "volume"),
+        "quote_volume": _float(row[7], "quote volume"),
+        "taker_buy_quote": _float(row[10], "taker buy quote"),
+        "close_time": int(row[6]),
+    } for row in candles]
     if len(parsed) < 55:
-        raise MarketDataError("Not enough closed 15m candles for reliable price structure")
+        raise MarketDataError("Not enough closed Binance USD-M 15m candles")
+    ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
+    live_price = _float(ticker.get("price"), "Binance USD-M live price")
+    if live_price <= 0:
+        raise MarketDataError("Invalid Binance USD-M live price")
     return {
         "symbol": symbol, "candles": parsed,
-        "price_source": price_source,
+        "live_price": live_price,
+        "price_source": "Binance USD-M Futures (USDT perpetual)",
     }
 
 
