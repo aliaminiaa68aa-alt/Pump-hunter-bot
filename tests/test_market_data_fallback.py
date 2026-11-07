@@ -1,4 +1,5 @@
 import unittest
+import time
 from unittest.mock import patch, Mock
 
 from oi_engine import signal_engine
@@ -7,7 +8,7 @@ from oi_engine.outcome_tracker import _fetch_klines, _fetch_1m_klines
 
 
 def bybit_payload(interval_ms=900000, count=60):
-    now = 2_000_000_000_000
+    now = int(time.time() * 1000)
     rows = []
     for index in range(count):
         start = now - (count - index) * interval_ms
