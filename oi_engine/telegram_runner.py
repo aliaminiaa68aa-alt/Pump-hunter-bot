@@ -545,7 +545,26 @@ def add_market_universe_candidates(
         )
     free_slots = max(0, MAX_MARKET_QUEUE_SYMBOLS - len(queued))
     if free_slots == 0:
-        return last_universe_symbol, 0
+        # A fixed-size queue must not freeze forever at its first 60 coins.
+        # Retire only candidates already attempted and without a pending setup;
+        # newly discovered symbols then replace them while the universe cursor
+        # keeps moving through the complete Coinalyze-supported market.
+        evictable = [
+            symbol for symbol in queued
+            if _safe_int(watchlist[symbol].get("last_attempted_at", 0)) > 0
+            and not isinstance(watchlist[symbol].get("pending_setup"), dict)
+        ]
+        evictable.sort(key=lambda symbol: (
+            _safe_int(watchlist[symbol].get("last_attempted_at", 0)),
+            _safe_int(watchlist[symbol].get("last_checked", 0)),
+            _safe_int(watchlist[symbol].get("first_seen", 0)),
+        ))
+        for symbol in evictable[:max(1, min(MARKET_DISCOVERY_PER_RUN, len(evictable)))]:
+            watchlist.pop(symbol, None)
+            queued.discard(symbol)
+        free_slots = max(0, MAX_MARKET_QUEUE_SYMBOLS - len(queued))
+        if free_slots == 0:
+            return last_universe_symbol, 0
 
     try:
         start = symbols.index(last_universe_symbol) + 1
