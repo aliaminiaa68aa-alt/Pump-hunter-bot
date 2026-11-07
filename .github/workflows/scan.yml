@@ -15,6 +15,10 @@ name: Pump Hunter Cloud Scanner
       - "tests/**"
       - "requirements.txt"
 
+concurrency:
+  group: pump-hunter-scheduled-scanner
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
