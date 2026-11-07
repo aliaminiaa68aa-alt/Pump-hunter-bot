@@ -29,7 +29,7 @@ def make_candles(side="LONG"):
 
 
 def make_snapshot(side="LONG"):
-    return {"symbol": "ABCUSDT", "candles": make_candles(side)}
+    return {"symbol": "ABCUSDT", "candles": make_candles(side), "live_price": make_candles(side)[-1]["close"]}
 
 
 def make_metrics(side="LONG"):
@@ -82,7 +82,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
             "quote_volume": 160.0, "taker_buy_quote": 110.0,
         })
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
-                   return_value={"symbol": "ABCUSDT", "candles": candles}):
+                   return_value={"symbol": "ABCUSDT", "candles": candles, "live_price": candles[-1]["close"]}):
             found, updated = scan_watchlist(
                 {"ABCUSDT": {}}, FakeClient(make_metrics("LONG")), now=1000
             )
