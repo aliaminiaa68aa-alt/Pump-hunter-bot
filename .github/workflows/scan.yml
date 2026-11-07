@@ -9,6 +9,8 @@ name: Pump Hunter Cloud Scanner
     paths:
       - ".github/workflows/scan.yml"
       - "oi_engine/**"
+      - "Bot.py"
+      - "tests/**"
       - "requirements.txt"
 
 permissions:
@@ -45,8 +47,12 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
-      - name: Compile-check signal engine
-        run: python -m compileall -q oi_engine
+      - name: Compile-check all strategy code
+        run: python -m compileall -q Bot.py oi_engine
+
+      - name: Run strategy regression tests
+        timeout-minutes: 2
+        run: python -m unittest discover -s tests -v
 
       - name: Run one cloud scan and verify Telegram configuration
         timeout-minutes: 4
