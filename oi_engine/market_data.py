@@ -11,6 +11,7 @@ from typing import Any
 import requests
 
 BYBIT_BASE_URL = "https://api.bybit.com"
+GATE_BASE_URLS = ("https://api.gateio.ws", "https://fx-api.gateio.ws")
 INTERVAL_MS = {"15": 15 * 60 * 1000, "1": 60 * 1000}
 
 
@@ -69,3 +70,64 @@ def bybit_rows_to_snapshot(rows: list[list], symbol: str) -> dict:
         "taker_buy_quote": 0.0, "close_time": int(row[6]),
     } for row in rows]
     return {"symbol": symbol, "candles": candles, "price_source": "Bybit linear perpetual"}
+
+
+
+def fetch_gateio_rows(symbol: str, interval: str, start_ms: int | None = None,
+                      end_ms: int | None = None, limit: int = 1000) -> list[list]:
+    """Fetch public Gate.io USDT perpetual candles and normalize to Binance row layout."""
+    if interval not in {"15m", "1m"}:
+        raise ValueError(f"Unsupported Gate.io interval: {interval}")
+    contract = symbol[:-4] + "_USDT" if symbol.endswith("USDT") else symbol
+    params: dict[str, Any] = {"contract": contract, "interval": interval}
+    if start_ms is not None and end_ms is not None:
+        params["from"] = int(start_ms) // 1000
+        params["to"] = int(end_ms) // 1000
+    else:
+        params["limit"] = min(max(int(limit), 1), 2000)
+    last_error: Exception | None = None
+    payload = None
+    for base in GATE_BASE_URLS:
+        try:
+            response = requests.get(
+                base + "/api/v4/futures/usdt/candlesticks",
+                params=params, timeout=15,
+                headers={"Accept": "application/json", "User-Agent": "Pump-Hunter/1.0"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            break
+        except Exception as exc:
+            last_error = exc
+    if payload is None:
+        raise RuntimeError(f"Gate.io candle API unavailable: {last_error}")
+    if not isinstance(payload, list):
+        raise RuntimeError(f"Unexpected Gate.io candle response: {payload}")
+    duration = 15 * 60 * 1000 if interval == "15m" else 60 * 1000
+    now_ms = int(time.time() * 1000)
+    normalized = []
+    for row in payload:
+        if isinstance(row, dict):
+            start = int(row.get("t", 0)) * 1000
+            open_price, high, low, close = row.get("o"), row.get("h"), row.get("l"), row.get("c")
+            volume = row.get("v", 0)
+            quote_volume = row.get("sum", row.get("v", 0))
+        elif isinstance(row, (list, tuple)) and len(row) >= 6:
+            start = int(row[0]) * 1000
+            quote_volume, close, high, low, open_price = row[1:6]
+            volume = row[6] if len(row) > 6 else quote_volume
+        else:
+            continue
+        close_time = start + duration - 1
+        if start_ms is not None and start < int(start_ms):
+            continue
+        if end_ms is not None and start > int(end_ms):
+            continue
+        if close_time >= now_ms:
+            continue
+        normalized.append([
+            start, str(open_price), str(high), str(low), str(close), str(volume),
+            close_time, str(quote_volume), "0", "0", "0", "0",
+        ])
+    normalized.sort(key=lambda row: int(row[0]))
+    return normalized
