@@ -6,7 +6,7 @@ import requests
 from typing import Any, Dict, List, Tuple
 
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
-from oi_engine.signal_engine import MarketDataError, Signal, _atr
+from oi_engine.signal_engine import MarketDataError, Signal, _atr, fetch_snapshot
 from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep
 
 
@@ -201,15 +201,13 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
         print(f"Scan symbol started: {symbol}")
         record["last_attempted_at"] = timestamp
         try:
-            # Coinalyze is the primary analysis source. No Binance/BOS fallback:
-            # missing aligned Coinalyze OHLCV + OI means no signal.
+            # Binance supplies executable market prices and OHLCV candles.
+            # Coinalyze is used ONLY for derivatives/positioning metrics, never prices.
+            snapshot = fetch_snapshot(symbol)
+            record["data_source"] = "Binance Futures prices + Coinalyze derivatives metrics"
             metrics = client.fetch_metrics(symbol, now=timestamp)
-            snapshot = metrics.pop("market_snapshot", None)
-            if not snapshot:
-                raise MarketDataError(
-                    "Coinalyze did not provide aligned closed 15m OHLCV/OI candles"
-                )
-            record["data_source"] = "Coinalyze (primary)"
+            # Discard any provider-side OHLCV snapshot: it must not affect entries.
+            metrics.pop("market_snapshot", None)
             metrics.update(source_oi_priority(record.get("source_text", "")))
             record["oi_priority_score"] = metrics["oi_priority_score"]
             record["oi_priority_tier"] = metrics["oi_priority_tier"]
