@@ -885,8 +885,8 @@ def main() -> None:
         # Keep the previous cursor and continue scanning existing watchlist symbols.
         print(f"WARNING: public Telegram source fetch failed: {exc}")
 
-    # Persist both discovery cursors before market-data calls. If a scan times
-    # out, newly received channel alerts and market candidates survive.
+    # Persist the public-channel cursor before market-data calls so newly
+    # received OI alerts survive even if a later scan times out.
     save_watchlist_state({
         "public_channel_last_id": public_last_id,
         "symbols": watchlist,
