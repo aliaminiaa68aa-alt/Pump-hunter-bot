@@ -167,6 +167,20 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     funding_text = f"{float(funding_rate):+.4%}" if funding_rate is not None else "—"
 
     entry = float(signal.entry)
+    try:
+        current_price = float(metrics.get("current_price"))
+        if not math.isfinite(current_price) or current_price <= 0:
+            current_price = None
+    except (TypeError, ValueError, OverflowError):
+        current_price = None
+    if current_price is None:
+        current_price_line = "💹 قیمت فعلی هنگام صدور سیگنال: <b>ناموجود</b>\\n"
+    else:
+        current_price_gap = (current_price - entry) / entry * 100.0
+        current_price_line = (
+            f"💹 قیمت فعلی هنگام صدور سیگنال: <code>{current_price:.8g}</code>"
+            f" | فاصله تا ورود: <b>{current_price_gap:+.2f}%</b>\\n"
+        )
     risk_pct = abs(entry - float(signal.stop_loss)) / entry * 100.0
     tp1_pct = abs(float(signal.take_profit_1) - entry) / entry * 100.0
     tp2_pct = abs(float(signal.take_profit_2) - entry) / entry * 100.0
@@ -180,6 +194,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         f"{title}  <b>{symbol}</b>\n"
         "━━━━━━━━━━━━━━\n"
         f"💵 ورود: <code>{signal.entry:.8g}</code>\n"
+        f"{current_price_line}"
         f"{entry_instruction}"
         f"🛡 حد ضرر: <code>{signal.stop_loss:.8g}</code>  |  ریسک: <b>{risk_pct:.2f}%</b>\n"
         f"🎯 هدف ۱: <code>{signal.take_profit_1:.8g}</code>  |  فاصله: <b>{tp1_pct:.2f}%</b>\n"
@@ -264,6 +279,11 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     signal_metrics["liquidity_sweep_confirmed"] = True
                     signal_metrics["sweep_timeframe"] = "15m"
                     signal_metrics["sweep_reason"] = reason
+                    signal_metrics["current_price"] = float(live_price) if live_price is not None else None
+                    signal_metrics["current_price_time_ms"] = int(
+                        snapshot.get("live_price_time_ms") or time.time() * 1000
+                    )
+                    signal_metrics["price_source"] = snapshot.get("price_source", "unknown")
                     candles = snapshot.get("candles") or []
                     atr_value = _atr(candles) if candles else 0.0
                     stop_distance = abs(signal.entry - signal.stop_loss)
