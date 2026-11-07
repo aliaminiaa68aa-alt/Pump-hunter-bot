@@ -60,12 +60,16 @@ def _fetch_with_fallback(symbol: str, interval: str, start_ms: int, end_ms: int,
 
 
 def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
-    return _fetch_with_fallback(symbol, "15m", start_ms, end_ms, 1000)
+    rows = _fetch_with_fallback(symbol, "15m", start_ms, end_ms, 1000)
+    _fetch_klines.last_source = getattr(_fetch_with_fallback, "last_source", "unknown")
+    return rows
 
 
 def _fetch_1m_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
     """Fetch 1m trade-price candles with the same Binance -> Bybit fallback."""
-    return _fetch_with_fallback(symbol, "1m", start_ms, end_ms, 1500)
+    rows = _fetch_with_fallback(symbol, "1m", start_ms, end_ms, 1500)
+    _fetch_1m_klines.last_source = getattr(_fetch_with_fallback, "last_source", "unknown")
+    return rows
 
 
 def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> Dict[str, Any]:
