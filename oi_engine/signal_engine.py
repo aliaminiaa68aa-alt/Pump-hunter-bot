@@ -2,7 +2,7 @@
 
 This module is intentionally independent of the legacy Pump Hunter strategies.
 It emits only confirmed LONG/SHORT candidates; it does not send Telegram messages.
-Public Binance USD-M Futures endpoints are used for market data.
+Binance USD-M Futures is primary for price candles; Bybit linear is the price-only fallback. Coinalyze supplies derivatives metrics.
 """
 from __future__ import annotations
 
@@ -125,41 +125,16 @@ def validate_oi_cadence(rows: List[dict]) -> None:
 
 
 def fetch_snapshot(symbol: str) -> Dict[str, Any]:
-    """Fetch closed 15m candles, OI history and current funding."""
-    candles = _get("/fapi/v1/klines", {
-        "symbol": symbol, "interval": INTERVAL, "limit": 80
-    })
-    # Binance returns the currently-forming candle last; exclude it.
-    candles = candles[:-1]
-    if len(candles) < 55:
-        raise MarketDataError("Not enough closed candles for EMA50 confirmation")
+    """Fetch closed 15m price candles; Coinalyze supplies derivatives metrics separately."""
+    from oi_engine.market_data import bybit_rows_to_snapshot, fetch_bybit_rows
 
-    oi_rows = _get("/futures/data/openInterestHist", {
-        "symbol": symbol, "period": INTERVAL, "limit": 6
-    })
-    if not isinstance(oi_rows, list) or len(oi_rows) < 3:
-        raise MarketDataError("Not enough OI history")
-
-    premium = _get("/fapi/v1/premiumIndex", {"symbol": symbol})
-    if isinstance(premium, list):
-        premium = next((x for x in premium if x.get("symbol") == symbol), None)
-    if not premium:
-        raise MarketDataError("Funding data unavailable")
-
-    # Independent live quote for executable MARKET entries. A ticker outage
-    # must not invalidate otherwise usable closed-candle analysis.
-    current_price = None
-    price_timestamp = None
+    price_source = "Binance USD-M Futures"
     try:
-        ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
-        current_price = _float(ticker.get("price"), "live ticker price")
-        price_timestamp = int(time.time() * 1000)
-    except (requests.RequestException, MarketDataError, AttributeError, TypeError):
-        pass
-
-    parsed = []
-    for row in candles:
-        parsed.append({
+        candles = _get("/fapi/v1/klines", {
+            "symbol": symbol, "interval": INTERVAL, "limit": 80
+        })
+        candles = candles[:-1]  # Exclude the currently-forming Binance candle.
+        parsed = [{
             "open_time": int(row[0]),
             "open": _float(row[1], "open"),
             "high": _float(row[2], "high"),
@@ -169,42 +144,24 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
             "quote_volume": _float(row[7], "quote volume"),
             "taker_buy_quote": _float(row[10], "taker buy quote"),
             "close_time": int(row[6]),
-        })
+        } for row in candles]
+    except (requests.RequestException, MarketDataError, ValueError, TypeError) as binance_error:
+        try:
+            fallback_rows = fetch_bybit_rows(symbol, "15", limit=80)
+            fallback = bybit_rows_to_snapshot(fallback_rows, symbol)
+            parsed = fallback["candles"]
+            price_source = "Bybit linear perpetual (Binance fallback)"
+        except Exception as bybit_error:
+            raise MarketDataError(
+                f"Price candles unavailable from Binance ({binance_error}) "
+                f"and Bybit ({bybit_error})"
+            ) from bybit_error
 
-    # Align OI samples to the last CLOSED candle; never mix a newer, still-forming
-    # OI interval with a price candle that has already closed.
-    oi_rows.sort(key=lambda x: int(x.get("timestamp", 0)))
-    last_close_time = parsed[-1]["close_time"]
-    # Binance OI-statistics timestamps mark the END of the 15m period.
-    # Kline close_time is inclusive (boundary - 1 ms), so include the exact
-    # next boundary when aligning the just-closed candle.
-    oi_cutoff_time = last_close_time + 1
-    aligned_rows = [
-        row for row in oi_rows
-        if int(row.get("timestamp", 0)) <= oi_cutoff_time
-    ]
-    if len(aligned_rows) < 3:
-        raise MarketDataError("Not enough OI samples aligned to closed candle")
-    latest_oi_timestamp = int(aligned_rows[-1].get("timestamp", 0))
-    if oi_cutoff_time - latest_oi_timestamp > 15 * 60 * 1000:
-        raise MarketDataError("OI sample is stale relative to closed candle")
-    aligned_rows = aligned_rows[-3:]
-    validate_oi_cadence(aligned_rows)
-    oi_values = [
-        _float(x.get("sumOpenInterest"), "OI value")
-        for x in aligned_rows
-    ]
-    if any(x <= 0 for x in oi_values):
-        raise MarketDataError("Invalid OI values")
-
+    if len(parsed) < 55:
+        raise MarketDataError("Not enough closed 15m candles for reliable price structure")
     return {
-        "symbol": symbol,
-        "candles": parsed,
-        "oi_values": oi_values,
-        "oi_timestamp": latest_oi_timestamp,
-        "funding_rate": _float(premium.get("lastFundingRate"), "funding"),
-        "current_price": current_price,
-        "price_timestamp": price_timestamp,
+        "symbol": symbol, "candles": parsed,
+        "price_source": price_source,
     }
 
 
