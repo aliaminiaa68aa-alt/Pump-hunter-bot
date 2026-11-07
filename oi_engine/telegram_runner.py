@@ -473,11 +473,15 @@ def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[s
             continue
         if not _is_crypto_candidate(symbol):
             continue
+        is_market_candidate = record.get("source_type") == "market_universe"
         last_seen = _safe_int(
-            record.get("last_alert", record.get("first_seen", timestamp)),
+            record.get("last_alert", record.get("last_checked", record.get("first_seen", timestamp))),
             timestamp,
         )
-        if timestamp - last_seen <= WATCHLIST_TTL_SECONDS:
+        # Keep rotating market-universe candidates long enough to reach them;
+        # channel alerts retain the shorter freshness window.
+        ttl = 7 * WATCHLIST_TTL_SECONDS if is_market_candidate else WATCHLIST_TTL_SECONDS
+        if timestamp - last_seen <= ttl or isinstance(record.get("pending_setup"), dict):
             kept[symbol] = record
     return kept
 
@@ -805,24 +809,12 @@ def main() -> None:
     state = load_state()
     watch_state = load_watchlist_state()
     outcome_journal = load_outcome_journal()
-    # Start from the public-channel source only. Do not ingest Telegram forwards,
-    # direct channel updates delivered to the bot, or any legacy alert inbox.
+    # @oi_detector alerts are the first-priority source; the independent
+    # Coinalyze-supported crypto perpetual universe is scanned after them.
+    # Never delete queued market candidates between scheduled runs.
     watchlist = watch_state.get("symbols", {})
     if not isinstance(watchlist, dict):
         watchlist = {}
-    # Enforce the agreed single-source design: only alerts from @oi_detector
-    # may enter the scanner. Purge legacy independent-market candidates.
-    legacy_market_symbols = [
-        symbol for symbol, record in watchlist.items()
-        if isinstance(record, dict) and record.get("source_type") == "market_universe"
-    ]
-    for symbol in legacy_market_symbols:
-        watchlist.pop(symbol, None)
-    if legacy_market_symbols:
-        print(
-            "Removed legacy non-channel market candidates: "
-            f"{len(legacy_market_symbols)}; source restricted to @{os.getenv('OI_PUBLIC_CHANNEL', 'oi_detector')}"
-        )
     # Migrate older cached alerts: recover direction from their original source text.
     # Never infer a side when the source marker is absent or ambiguous.
     for record in watchlist.values():
@@ -864,10 +856,23 @@ def main() -> None:
         # Keep the previous cursor and continue scanning existing watchlist symbols.
         print(f"WARNING: public Telegram source fetch failed: {exc}")
 
-    # Persist the public-channel cursor before market-data calls so newly
-    # received OI alerts survive even if a later scan times out.
+    # Add a bounded rotating slice of the broader supported crypto market.
+    # Channel alerts remain ahead of these candidates in batch selection.
+    market_cursor = str(watch_state.get("market_universe_cursor", ""))
+    try:
+        market_cursor, market_added = add_market_universe_candidates(
+            watchlist, client, market_cursor, now=int(time.time())
+        )
+        print(f"Market universe queue update: added={market_added}, total={sum(1 for r in watchlist.values() if isinstance(r, dict) and r.get('source_type') == 'market_universe')}")
+    except Exception as exc:
+        # A discovery/API failure must not discard fresh channel alerts.
+        print(f"WARNING: market-universe discovery failed: {type(exc).__name__}: {exc}")
+
+    # Persist both source cursors before market-data calls so newly ingested
+    # channel alerts and the rotating market queue survive a later timeout.
     save_watchlist_state({
         "public_channel_last_id": public_last_id,
+        "market_universe_cursor": market_cursor,
         "symbols": watchlist,
         "scan_cursor": str(watch_state.get("scan_cursor", "")),
         "updated_at": int(time.time()),
@@ -879,7 +884,8 @@ def main() -> None:
             priority = source_oi_priority(record.get("source_text", ""))
             record.update(priority)
 
-    # Scan only symbols discovered from the public OI alert channel.
+    # Fresh OI-channel alerts and their pending setups are prioritized;
+    # reserved slots keep the broader crypto market rotating in the background.
     batch, next_scan_cursor = select_watchlist_batch(
         watchlist, str(watch_state.get("scan_cursor", ""))
     )
@@ -1029,6 +1035,7 @@ def main() -> None:
 
     save_watchlist_state({
         "public_channel_last_id": public_last_id,
+        "market_universe_cursor": market_cursor,
         "symbols": watchlist,
         "scan_cursor": next_scan_cursor or str(watch_state.get("scan_cursor", "")),
         "updated_at": int(time.time()),
