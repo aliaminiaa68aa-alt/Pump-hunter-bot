@@ -126,7 +126,7 @@ def validate_oi_cadence(rows: List[dict]) -> None:
 
 def fetch_snapshot(symbol: str) -> Dict[str, Any]:
     """Fetch closed 15m price candles; Coinalyze supplies derivatives metrics separately."""
-    from oi_engine.market_data import bybit_rows_to_snapshot, fetch_bybit_rows
+    from oi_engine.market_data import bybit_rows_to_snapshot, fetch_bybit_rows, fetch_gateio_rows
 
     price_source = "Binance USD-M Futures"
     try:
@@ -152,10 +152,17 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
             parsed = fallback["candles"]
             price_source = "Bybit linear perpetual (Binance fallback)"
         except Exception as bybit_error:
-            raise MarketDataError(
-                f"Price candles unavailable from Binance ({binance_error}) "
-                f"and Bybit ({bybit_error})"
-            ) from bybit_error
+            try:
+                from oi_engine.market_data import bybit_rows_to_snapshot
+                gate_rows = fetch_gateio_rows(symbol, "15m", limit=80)
+                fallback = bybit_rows_to_snapshot(gate_rows, symbol)
+                parsed = fallback["candles"]
+                price_source = "Gate.io USDT perpetual (Binance/Bybit fallback)"
+            except Exception as gate_error:
+                raise MarketDataError(
+                    f"Price candles unavailable from Binance ({binance_error}), "
+                    f"Bybit ({bybit_error}), and Gate.io ({gate_error})"
+                ) from gate_error
 
     if len(parsed) < 55:
         raise MarketDataError("Not enough closed 15m candles for reliable price structure")
