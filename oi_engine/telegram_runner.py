@@ -24,7 +24,7 @@ from oi_engine.outcome_tracker import (
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
 OUTCOME_PATH = Path(".oi_state/trade_outcomes.json")
-MAX_WATCHLIST_SYMBOLS = 8  # Reserve capacity for derivatives metrics, discovery, and outcome monitoring.
+MAX_WATCHLIST_SYMBOLS = 12  # Expand per-cycle coverage without changing entry conditions.
 MAX_MARKET_QUEUE_SYMBOLS = 60
 MARKET_DISCOVERY_PER_RUN = 12
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
@@ -666,7 +666,7 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         _safe_int(watchlist[symbol].get("last_attempted_at", 0)),
         _safe_int(watchlist[symbol].get("first_seen", 0)),
     ))
-    # Guarantee up to two independent-market slots in the 8-symbol batch.
+    # Guarantee up to two independent-market slots in the 12-symbol batch.
     # This keeps the 60-coin universe moving while preserving channel priority.
     market_reserve = (
         min(len(market_candidates), min(2, max(1, count // 4)))
