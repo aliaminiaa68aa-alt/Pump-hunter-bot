@@ -810,6 +810,19 @@ def main() -> None:
     watchlist = watch_state.get("symbols", {})
     if not isinstance(watchlist, dict):
         watchlist = {}
+    # Enforce the agreed single-source design: only alerts from @oi_detector
+    # may enter the scanner. Purge legacy independent-market candidates.
+    legacy_market_symbols = [
+        symbol for symbol, record in watchlist.items()
+        if isinstance(record, dict) and record.get("source_type") == "market_universe"
+    ]
+    for symbol in legacy_market_symbols:
+        watchlist.pop(symbol, None)
+    if legacy_market_symbols:
+        print(
+            "Removed legacy non-channel market candidates: "
+            f"{len(legacy_market_symbols)}; source restricted to @{os.getenv('OI_PUBLIC_CHANNEL', 'oi_detector')}"
+        )
     # Migrate older cached alerts: recover direction from their original source text.
     # Never infer a side when the source marker is absent or ambiguous.
     for record in watchlist.values():
@@ -872,25 +885,12 @@ def main() -> None:
         # Keep the previous cursor and continue scanning existing watchlist symbols.
         print(f"WARNING: public Telegram source fetch failed: {exc}")
 
-    # SECOND source: discover supported crypto USDT perpetuals independently
-    # of the OI Telegram channel. New candidates are queued behind channel
-    # alerts and pending setups; they use the identical signal/entry engine.
-    market_universe_cursor = str(watch_state.get("market_universe_cursor", ""))
-    market_universe_added = 0
-    try:
-        market_universe_cursor, market_universe_added = add_market_universe_candidates(
-            watchlist, client, market_universe_cursor
-        )
-    except Exception as exc:
-        print(f"WARNING: independent market-universe discovery failed: {type(exc).__name__}: {exc}")
-
     # Persist both discovery cursors before market-data calls. If a scan times
     # out, newly received channel alerts and market candidates survive.
     save_watchlist_state({
         "public_channel_last_id": public_last_id,
         "symbols": watchlist,
         "scan_cursor": str(watch_state.get("scan_cursor", "")),
-        "market_universe_cursor": market_universe_cursor,
         "updated_at": int(time.time()),
     })
     # Parse source OI expansion for every alert before selecting the scan batch.
@@ -900,24 +900,12 @@ def main() -> None:
             priority = source_oi_priority(record.get("source_text", ""))
             record.update(priority)
 
-    # Channel alerts and their pending setups are selected first. Any
-    # remaining capacity is filled from the rotating independent market queue.
+    # Scan only symbols discovered from the public OI alert channel.
     batch, next_scan_cursor = select_watchlist_batch(
         watchlist, str(watch_state.get("scan_cursor", ""))
     )
     confirmed, scanned_batch = scan_watchlist(batch, client=client)
     watchlist.update(scanned_batch)
-
-    # A market-universe candidate that was successfully evaluated without
-    # creating a pending pullback can leave the short queue. Its universe
-    # cursor has already advanced, so later runs continue with other symbols.
-    for symbol, record in scanned_batch.items():
-        if (
-            record.get("source_type") == "market_universe"
-            and not isinstance(record.get("pending_setup"), dict)
-            and record.get("status") not in {"خطای دریافت داده", "خطای غیرمنتظره"}
-        ):
-            watchlist.pop(symbol, None)
 
     # One unresolved position per coin: suppress repeated same-side signals and
     # opposite-side flips until the existing trade reaches SL, TP2, or timeout.
@@ -1064,14 +1052,13 @@ def main() -> None:
         "public_channel_last_id": public_last_id,
         "symbols": watchlist,
         "scan_cursor": next_scan_cursor or str(watch_state.get("scan_cursor", "")),
-        "market_universe_cursor": market_universe_cursor,
         "updated_at": int(time.time()),
     })
     diagnostics = summarize_scan_diagnostics(watchlist, scanned_batch)
     print(f"OI scan diagnostics: {diagnostics}")
     print(
         f"Alert-driven OI scan complete: watchlist={len(watchlist)}, "
-        f"new_public_channel_alerts={added}, market_universe_added={market_universe_added}, "
+        f"new_public_channel_alerts={added}, "
         f"confirmed={len(confirmed)}, telegram_sent={sent}, "
         f"tracked_trades={len(outcome_journal.get('trades', {}))}"
     )
