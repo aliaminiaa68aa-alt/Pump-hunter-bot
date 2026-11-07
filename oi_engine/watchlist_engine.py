@@ -205,6 +205,9 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
         symbol_started = time.monotonic()
         print(f"Scan symbol started: {symbol}")
         record["last_attempted_at"] = timestamp
+        # Never leave a stale provider label from a previous scanner version or
+        # an earlier successful attempt when the current price fetch fails.
+        record.pop("data_source", None)
         try:
             # Binance supplies executable market prices and OHLCV candles.
             # Coinalyze is used ONLY for derivatives/positioning metrics, never prices.
