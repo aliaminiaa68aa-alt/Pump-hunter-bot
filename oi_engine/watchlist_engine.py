@@ -236,11 +236,25 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
 
             signal, reason = evaluate_liquidity_sweep(snapshot, metrics)
             if signal is not None:
-                geometry_rejection = signal_price_geometry_rejection(
-                    signal, min_tp1_distance_pct=0.0
-                )
+                # The signal entry is the last closed Binance 15m candle close.
+                # Do not publish it if Binance's live perpetual price has moved
+                # materially away before the alert is generated.
+                live_price = snapshot.get("live_price")
+                atr_for_entry = _atr(snapshot.get("candles") or [])
+                if live_price is None or not math.isfinite(float(live_price)) or float(live_price) <= 0:
+                    geometry_rejection = "قیمت لحظه‌ای Binance Futures موجود نیست؛ سیگنال برای جلوگیری از ورود با قیمت قدیمی رد شد"
+                elif abs(float(live_price) - float(signal.entry)) > max(atr_for_entry * 0.50, float(signal.entry) * 0.001):
+                    deviation_pct = abs(float(live_price) - float(signal.entry)) / float(signal.entry) * 100.0
+                    geometry_rejection = (
+                        f"فاصله قیمت زنده Binance تا ورود کندل {deviation_pct:.2f}٪ است؛ "
+                        "ورود قدیمی/دور رد شد"
+                    )
+                else:
+                    geometry_rejection = signal_price_geometry_rejection(
+                        signal, min_tp1_distance_pct=0.0
+                    )
                 if geometry_rejection:
-                    record["status"] = "رد سیگنال؛ ساختار قیمت نامعتبر"
+                    record["status"] = "رد سیگنال؛ قیمت ورود نامعتبر"
                     record["reason"] = geometry_rejection
                 else:
                     signal_metrics = dict(metrics)
