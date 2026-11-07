@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import math
 import requests
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Tuple
 
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
@@ -173,13 +174,23 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
             current_price = None
     except (TypeError, ValueError, OverflowError):
         current_price = None
+    price_time_label = "نامشخص"
+    try:
+        price_time_ms = int(metrics.get("current_price_time_ms") or 0)
+        if price_time_ms > 0:
+            price_time_label = datetime.fromtimestamp(
+                price_time_ms / 1000, tz=timezone.utc
+            ).astimezone(timezone(timedelta(hours=3, minutes=30))).strftime("%H:%M:%S")
+    except (TypeError, ValueError, OverflowError, OSError):
+        pass
     if current_price is None:
-        current_price_line = "💹 قیمت فعلی هنگام صدور سیگنال: <b>ناموجود</b>\n"
+        current_price_line = "💹 قیمت فعلی Binance Futures: <b>ناموجود</b>\n"
     else:
         current_price_gap = (current_price - entry) / entry * 100.0
         current_price_line = (
-            f"💹 قیمت فعلی هنگام صدور سیگنال: <code>{current_price:.8g}</code>"
-            f" | فاصله تا ورود: <b>{current_price_gap:+.2f}%</b>\n"
+            f"💹 قیمت فعلی Binance Futures: <code>{current_price:.8g}</code>"
+            f" | فاصله تا ورود: <b>{current_price_gap:+.2f}%</b>"
+            f" | ساعت ایران: <b>{price_time_label}</b>\n"
         )
     risk_pct = abs(entry - float(signal.stop_loss)) / entry * 100.0
     tp1_pct = abs(float(signal.take_profit_1) - entry) / entry * 100.0
