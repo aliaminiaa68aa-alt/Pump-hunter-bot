@@ -4,6 +4,8 @@ name: Pump Hunter Cloud Scanner
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+  repository_dispatch:
+    types: [scheduled-scan]
   push:
     branches: [main]
     paths:
@@ -15,10 +17,6 @@ name: Pump Hunter Cloud Scanner
 
 permissions:
   contents: read
-
-concurrency:
-  group: pump-hunter-scan
-  cancel-in-progress: true
 
 jobs:
   scan:
