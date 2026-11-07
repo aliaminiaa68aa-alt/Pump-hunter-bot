@@ -183,7 +183,7 @@ class TelegramRunnerTests(unittest.TestCase):
         )
         self.assertEqual(
             telegram_runner._event_price_result(long_signal, {"event": "SL", "fill": 98.0}),
-            "\nضرر قیمتی: -2.00%",
+            "\nضرر قیمتی شبیه‌سازی‌شده: -2.00%",
         )
         self.assertEqual(
             telegram_runner._event_price_result(short_signal, {"event": "TP1", "fill": 98.0}),
