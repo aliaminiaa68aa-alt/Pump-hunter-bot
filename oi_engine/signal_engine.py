@@ -126,9 +126,10 @@ def validate_oi_cadence(rows: List[dict]) -> None:
 
 def fetch_snapshot(symbol: str) -> Dict[str, Any]:
     """Fetch Binance USD-M perpetual candles and live price; never mix exchanges."""
-    candles = _get("/fapi/v1/klines", {
-        "symbol": symbol, "interval": INTERVAL, "limit": 80
-    })
+    try:
+        candles = _get("/fapi/v1/klines", {
+            "symbol": symbol, "interval": INTERVAL, "limit": 80
+        })
     candles = candles[:-1]  # Exclude the currently-forming Binance candle.
     parsed = [{
         "open_time": int(row[0]),
@@ -143,8 +144,10 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
     } for row in candles]
     if len(parsed) < 55:
         raise MarketDataError("Not enough closed Binance USD-M 15m candles")
-    ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
-    live_price = _float(ticker.get("price"), "Binance USD-M live price")
+        ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
+        live_price = _float(ticker.get("price"), "Binance USD-M live price")
+    except (requests.RequestException, MarketDataError, ValueError, TypeError, KeyError) as exc:
+        raise MarketDataError(f"Binance USD-M price feed unavailable: {exc}") from exc
     if live_price <= 0:
         raise MarketDataError("Invalid Binance USD-M live price")
     return {
