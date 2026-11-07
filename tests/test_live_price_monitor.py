@@ -44,7 +44,15 @@ class LivePriceMonitorTests(unittest.TestCase):
         journal, record = make_journal("LONG")
         apply_live_prices(journal, {"TESTUSDT": 99.0}, now_ms=2_000)
         self.assertEqual(record["status"], "MISSED_ENTRY")
-        self.assertEqual(record["events"], [])
+        self.assertEqual([e["event"] for e in record["events"]], ["MISSED_ENTRY"])
+        self.assertEqual(record["events"][0]["observed_price"], 99.0)
+
+    def test_first_snapshot_beyond_entry_is_missed_for_short_and_notified(self):
+        journal, record = make_journal("SHORT")
+        apply_live_prices(journal, {"TESTUSDT": 101.0}, now_ms=2_000)
+        self.assertEqual(record["status"], "MISSED_ENTRY")
+        self.assertEqual([e["event"] for e in record["events"]], ["MISSED_ENTRY"])
+        self.assertEqual(record["events"][0]["observed_price"], 101.0)
 
     def test_adverse_gap_beyond_slippage_limit_is_rejected_for_short(self):
         journal, record = make_journal("SHORT")
