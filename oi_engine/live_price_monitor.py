@@ -100,12 +100,29 @@ def apply_live_prices(
         if previous_price is None:
             already_crossed = price <= entry if side == "LONG" else price >= entry
             if status == "WAITING_ENTRY" and already_crossed:
+                slippage_pct = (
+                    (entry - price) / entry * 100.0
+                    if side == "LONG"
+                    else (price - entry) / entry * 100.0
+                )
                 record["status"] = "MISSED_ENTRY"
                 record["entry_missed"] = True
                 record["entry_missed_reason"] = (
                     "First live price observation was already beyond the entry; "
                     "a post-signal touch cannot be verified"
                 )
+                record["entry_observed_price"] = price
+                record["entry_slippage_pct"] = slippage_pct
+                record.setdefault("events", []).append({
+                    "event": "MISSED_ENTRY",
+                    "time_ms": now,
+                    "planned_entry": entry,
+                    "observed_price": price,
+                    "slippage_pct": slippage_pct,
+                    "max_slippage_pct": MAX_ENTRY_SLIPPAGE_PCT,
+                    "source": "first_live_price_observation",
+                })
+                record["exit_time_ms"] = now
             record["live_last_price"] = price
             record["live_last_price_ms"] = now
             record["live_monitor_started_ms"] = now
