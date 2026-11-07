@@ -399,6 +399,11 @@ class CoinalyzeClient:
                 float(current_oi["value"]) if current_oi and current_oi.get("value") is not None else None
             ),
             "oi_change_15m_window_pct": oi_change_pct,
+            # Timestamp of the exact closed 15m candle used for both OI change
+            # and taker flow. The signal engine must match it to price OHLCV.
+            "derivatives_candle_open_time_ms": (
+                int(latest_aligned_ohlcv["t"]) * 1000 if latest_aligned_ohlcv else None
+            ),
             "funding_rate": (
                 float(current_funding["value"]) if current_funding and current_funding.get("value") is not None else None
             ),
