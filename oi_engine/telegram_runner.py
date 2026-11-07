@@ -20,6 +20,7 @@ from oi_engine.outcome_tracker import (
     make_trade_record, monitor_journal, summarize_outcomes,
     _fetch_klines, _fetch_1m_klines,
 )
+from oi_engine.signal_engine import fetch_live_price
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
@@ -961,10 +962,39 @@ def main() -> None:
         if state.get(key) == candle_id:
             continue
 
+        # Refresh Binance's executable price immediately before publishing.
+        # If the market has moved away from the planned entry, invalidate this
+        # candle's setup rather than sending a stale alert with an old price.
+        try:
+            current_price = fetch_live_price(signal.symbol)
+        except Exception as exc:
+            print(
+                f"Signal held; fresh Binance price unavailable: "
+                f"symbol={signal.symbol} error={type(exc).__name__}: {exc}"
+            )
+            continue
+        entry_price = float(signal.entry)
+        atr_value = _safe_float(metrics.get("atr_15m"), 0.0)
+        allowed_gap = max(atr_value * 0.50, entry_price * 0.001)
+        price_gap = abs(current_price - entry_price)
+        if price_gap > allowed_gap:
+            state[key] = candle_id
+            save_state(state)
+            print(
+                f"Signal invalidated before Telegram: symbol={signal.symbol} "
+                f"entry={entry_price:.8g} live_price={current_price:.8g} "
+                f"gap_pct={price_gap / entry_price * 100.0:.3f}"
+            )
+            continue
+        send_metrics = dict(metrics)
+        send_metrics["current_price"] = current_price
+        send_metrics["current_price_time_ms"] = int(time.time() * 1000)
+        send_metrics["price_source"] = "Binance USD-M Futures (USDT perpetual)"
+
         # Persist the trade and reserve this signal BEFORE the network request.
         # Telegram sendMessage has no idempotency key: if the request succeeds
         # but its response is lost, a restart must not send the same alert twice.
-        trade_record = make_trade_record(signal, metrics, int(time.time() * 1000))
+        trade_record = make_trade_record(signal, send_metrics, int(time.time() * 1000))
         trade_record["telegram_chat_id"] = str(chat_id)
         trade_record["telegram_message_id"] = None
         trade_record["telegram_delivery_status"] = "pending"
@@ -981,7 +1011,7 @@ def main() -> None:
 
         try:
             message_id = send_telegram(
-                token, chat_id, format_confirmed_signal(signal, metrics), parse_mode="HTML"
+                token, chat_id, format_confirmed_signal(signal, send_metrics), parse_mode="HTML"
             )
         except Exception as exc:
             # Always merge delivery state into the latest journal under the
