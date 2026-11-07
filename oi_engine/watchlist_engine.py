@@ -6,8 +6,8 @@ import requests
 from typing import Any, Dict, List, Tuple
 
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
-from oi_engine.signal_engine import MarketDataError, Signal, _atr, diagnose_snapshot, evaluate_snapshot, fetch_snapshot, format_signal
-from oi_engine.pullback_engine import advance_pullback_setup
+from oi_engine.signal_engine import MarketDataError, Signal, _atr
+from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep
 
 
 def coinalyze_rejection_reasons(signal: Signal, metrics: Dict[str, Any]) -> List[str]:
@@ -157,7 +157,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         title = "🔴 <b>SHORT</b>"
         side_label = "فروش"
 
-    engine_names = {"OI_BOS": "BOS", "PULLBACK": "Pullback"}
+    engine_names = {"LIQUIDITY_SWEEP": "Coinalyze + Price Action + Liquidity Sweep"}
     engine = engine_names.get(str(metrics.get("engine", "")), "OI Signal")
     oi_change = metrics.get("oi_change_15m_window_pct")
     taker_ratio = metrics.get("taker_buy_ratio")
@@ -191,7 +191,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
 
 def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient | None = None,
                    now: int | None = None) -> Tuple[List[Tuple[Signal, Dict[str, Any]]], Dict[str, Dict[str, Any]]]:
-    """Scan only symbols admitted by the public-channel watchlist and persist per-symbol status."""
+    """Use Coinalyze as the primary source and emit only confirmed liquidity-sweep entries."""
     client = client or CoinalyzeClient()
     timestamp = int(now if now is not None else time.time())
     confirmed: List[Tuple[Signal, Dict[str, Any]]] = []
@@ -199,102 +199,54 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
     for symbol, record in updated.items():
         symbol_started = time.monotonic()
         print(f"Scan symbol started: {symbol}")
-        # Record attempts separately from successful scans. A transient provider
-        # failure must not mark a fresh OI alert as fully checked.
         record["last_attempted_at"] = timestamp
         try:
-            metrics = None
-            try:
-                snapshot = fetch_snapshot(symbol)
-                record["data_source"] = "Binance Futures API"
-            except requests.HTTPError as exc:
-                if exc.response is None or exc.response.status_code != 451:
-                    raise
-                metrics = client.fetch_metrics(symbol, now=timestamp)
-                snapshot = metrics.pop("market_snapshot", None)
-                if not snapshot:
-                    raise MarketDataError(
-                        "Binance returned HTTP 451 and Coinalyze did not provide "
-                        "enough aligned 15m OHLCV/OI history for a safe fallback"
-                    )
-                record["data_source"] = "Coinalyze 15m fallback (Binance HTTP 451)"
-                # Coinalyze's closed 15m candles drive setup detection. Fetch a
-                # separate recent 1m quote only for execution, never use the
-                # older 15m close as a substitute for a MARKET fill.
-                live_quote_fetcher = getattr(client, "fetch_live_price", None)
-                if callable(live_quote_fetcher):
-                    try:
-                        live_quote = live_quote_fetcher(symbol, now=timestamp)
-                        if live_quote:
-                            snapshot.update(live_quote)
-                    except (CoinalyzeError, requests.RequestException, ValueError, TypeError) as quote_error:
-                        print(f"Live quote unavailable for {symbol}: {quote_error}")
-            # Derivatives context is a mandatory pre-signal gate, not a
-            # post-signal annotation. Missing optional endpoints fail closed.
-            if metrics is None:
-                metrics = client.fetch_metrics(symbol, now=timestamp)
-            metrics.pop("market_snapshot", None)
-
-            # Evaluate a confirmed closed-candle OI signal independently of
-            # the direction label in the source channel. The channel is a
-            # discovery feed, not a LONG/SHORT instruction.
-            bos_signal = evaluate_snapshot(snapshot)
-            previous_pending_setup = record.get("pending_setup")
-            # Support both LONG and SHORT setups. SHORT signals are
-            # directional trade ideas and require a derivatives/short-capable venue.
-            pullback_signal, pending_setup, setup_reason = advance_pullback_setup(
-                snapshot, previous_pending_setup, None
-            )
+            # Coinalyze is the primary analysis source. No Binance/BOS fallback:
+            # missing aligned Coinalyze OHLCV + OI means no signal.
+            metrics = client.fetch_metrics(symbol, now=timestamp)
+            snapshot = metrics.pop("market_snapshot", None)
+            if not snapshot:
+                raise MarketDataError(
+                    "Coinalyze did not provide aligned closed 15m OHLCV/OI candles"
+                )
+            record["data_source"] = "Coinalyze (primary)"
             metrics.update(source_oi_priority(record.get("source_text", "")))
             record["oi_priority_score"] = metrics["oi_priority_score"]
             record["oi_priority_tier"] = metrics["oi_priority_tier"]
-            record["coinalyze"] = metrics
-            # A BOS is only a setup trigger, never an immediate market entry.
-            # Every directional entry must pass the later retest/rejection path below.
-            geometry_rejection = (
-                signal_price_geometry_rejection(pullback_signal)
-                if pullback_signal is not None else None
-            )
-            if pullback_signal is not None and geometry_rejection:
-                record["status"] = "رد سیگنال به‌دلیل کیفیت قیمت‌ها"
-                record["reason"] = geometry_rejection
-                record["pending_setup"] = pending_setup or previous_pending_setup
-            elif pullback_signal is not None and coinalyze_confirms(pullback_signal, metrics):
-                pullback_metrics = dict(metrics)
-                pullback_metrics["engine"] = "PULLBACK"
-                pullback_metrics["coinalyze_confirmed"] = True
-                candles_for_atr = snapshot.get("candles") or []
-                atr_15m = _atr(candles_for_atr) if candles_for_atr else 0.0
-                stop_distance = abs(pullback_signal.entry - pullback_signal.stop_loss)
-                pullback_metrics["atr_15m"] = atr_15m if atr_15m > 0 else None
-                pullback_metrics["stop_distance_pct"] = stop_distance / pullback_signal.entry * 100.0
-                pullback_metrics["stop_distance_atr"] = stop_distance / atr_15m if atr_15m > 0 else None
-                confirmed.append((pullback_signal, pullback_metrics))
-                record.pop("pending_setup", None)
-                record["status"] = f"سیگنال {pullback_signal.side} آماده ارسال"
-                record["reason"] = "تأیید ساختار، قدرت حرکت، کیفیت ورود و فیلترهای Coinalyze کامل شد"
-            else:
-                record["pending_setup"] = pending_setup or previous_pending_setup
-                if pullback_signal is not None:
-                    record["status"] = "منتظر تأیید مشتقات"
-                    gate_reasons = coinalyze_rejection_reasons(pullback_signal, metrics)
-                    record["reason"] = "رد تأیید مشتقات: " + " | ".join(gate_reasons[:4])
+            record["coinalyze"] = dict(metrics)
+
+            signal, reason = evaluate_liquidity_sweep(snapshot, metrics)
+            if signal is not None:
+                geometry_rejection = signal_price_geometry_rejection(
+                    signal, min_tp1_distance_pct=0.0
+                )
+                if geometry_rejection:
+                    record["status"] = "رد سیگنال؛ ساختار قیمت نامعتبر"
+                    record["reason"] = geometry_rejection
                 else:
-                    record["status"] = "منتظر پولبک و تأیید" if pending_setup else "در حال رصد"
-                    if pending_setup:
-                        record["reason"] = setup_reason
-                    elif bos_signal is None:
-                        reasons = diagnose_snapshot(snapshot)
-                        record["reason"] = "رد شرایط ورود: " + " | ".join(reasons[:3])
-                    else:
-                        # Preserve the pullback engine's exact rejection reason.
-                        # Previously this branch replaced it with a generic
-                        # message, hiding which breakout quality gate failed.
-                        record["reason"] = setup_reason or (
-                            "شکست/شتاب اولیه دیده شد اما ورود بدون پولبک و تأیید صادر نمی‌شود"
-                        )
-            # Only a completed market-data/evaluation pass consumes the fresh-alert
-            # priority. Failed requests remain eligible for retry.
+                    signal_metrics = dict(metrics)
+                    signal_metrics["engine"] = "LIQUIDITY_SWEEP"
+                    signal_metrics["coinalyze_confirmed"] = True
+                    signal_metrics["liquidity_sweep_confirmed"] = True
+                    signal_metrics["sweep_timeframe"] = "15m"
+                    signal_metrics["sweep_reason"] = reason
+                    candles = snapshot.get("candles") or []
+                    atr_value = _atr(candles) if candles else 0.0
+                    stop_distance = abs(signal.entry - signal.stop_loss)
+                    signal_metrics["atr_15m"] = atr_value if atr_value > 0 else None
+                    signal_metrics["stop_distance_pct"] = stop_distance / signal.entry * 100.0
+                    signal_metrics["stop_distance_atr"] = (
+                        stop_distance / atr_value if atr_value > 0 else None
+                    )
+                    confirmed.append((signal, signal_metrics))
+                    record.pop("pending_setup", None)
+                    record["status"] = f"سیگنال {signal.side} آماده ارسال"
+                    record["reason"] = reason
+            else:
+                record["status"] = "در حال رصد نقدینگی"
+                record["reason"] = reason
+                record.pop("pending_setup", None)
+
             record["last_checked"] = timestamp
         except (CoinalyzeError, MarketDataError, OSError, ValueError, KeyError) as exc:
             record["status"] = "خطای دریافت داده"
