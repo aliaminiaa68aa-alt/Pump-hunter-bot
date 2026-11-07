@@ -833,40 +833,19 @@ def main() -> None:
                 record["source_side"] = recovered_side
 
     client = CoinalyzeClient(api_key=api_key, include_optional_metrics=False)
-    # Prefer Binance USD-M /fapi/v1/klines for BOTH 15m and 1m monitoring.
-    # These are traded contract (Last Price) candles, matching a normal
-    # Binance Futures chart in TradingView. Some GitHub runner regions receive
-    # HTTP 451 from Binance; in that case fall back to Coinalyze's Binance-
-    # exchange-specific USDT perpetual candles rather than stopping monitoring.
+    # Price history is Binance USD-M first, then Bybit linear perpetual.
+    # Coinalyze is never used as a price/candle fallback.
     binance_feed = {"15m": None, "1m": None}
 
     def fetch_trade_15m(symbol: str, start_ms: int, end_ms: int):
-        if binance_feed["15m"] is not False:
-            try:
-                rows = _fetch_klines(symbol, start_ms, end_ms)
-                binance_feed["15m"] = True
-                return rows
-            except Exception as exc:
-                binance_feed["15m"] = False
-                print(
-                    "Binance Last Price 15m unavailable; falling back to "
-                    f"Binance-mapped Coinalyze candles: {type(exc).__name__}: {exc}"
-                )
-        return client.fetch_ohlcv_candles(symbol, start_ms, end_ms)
+        rows = _fetch_klines(symbol, start_ms, end_ms)
+        binance_feed["15m"] = getattr(_fetch_klines, "last_source", "unknown") == "Binance USD-M"
+        return rows
 
     def fetch_trade_1m(symbol: str, start_ms: int, end_ms: int):
-        if binance_feed["1m"] is not False:
-            try:
-                rows = _fetch_1m_klines(symbol, start_ms, end_ms)
-                binance_feed["1m"] = True
-                return rows
-            except Exception as exc:
-                binance_feed["1m"] = False
-                print(
-                    "Binance Last Price 1m unavailable; falling back to "
-                    f"Binance-mapped Coinalyze candles: {type(exc).__name__}: {exc}"
-                )
-        return client.fetch_ohlcv_1m_candles(symbol, start_ms, end_ms)
+        rows = _fetch_1m_klines(symbol, start_ms, end_ms)
+        binance_feed["1m"] = getattr(_fetch_1m_klines, "last_source", "unknown") == "Binance USD-M"
+        return rows
 
     added = 0
     public_channel = os.getenv("OI_PUBLIC_CHANNEL", "oi_detector").strip()
@@ -1016,8 +995,8 @@ def main() -> None:
         )
         print(
             "Outcome price feed: "
-            f"15m={'Binance USD-M Last Price' if binance_feed['15m'] else 'Coinalyze Binance fallback'}; "
-            f"1m={'Binance USD-M Last Price' if binance_feed['1m'] else 'Coinalyze Binance fallback'}"
+            f"15m={'Binance USD-M' if binance_feed['15m'] else 'Bybit linear fallback'}; "
+            f"1m={'Binance USD-M' if binance_feed['1m'] else 'Bybit linear fallback'}"
         )
         save_outcome_journal(outcome_journal)
         outcome_journal = dispatch_outcome_notifications(outcome_journal, token, chat_id)
