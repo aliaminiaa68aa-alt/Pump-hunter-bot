@@ -146,7 +146,7 @@ def apply_live_prices(
                 if side == "LONG"
                 else (price - entry) / entry * 100.0
             )
-            if adverse_slippage_pct > MAX_ENTRY_SLIPPAGE_PCT:
+            if adverse_slippage_pct > MAX_ENTRY_SLIPPAGE_PCT and not (price <= original_stop if side == "LONG" else price >= original_stop):
                 record["status"] = "MISSED_ENTRY"
                 record["entry_missed"] = True
                 record["entry_missed_reason"] = (
