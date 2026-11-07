@@ -194,6 +194,18 @@ class TelegramRunnerTests(unittest.TestCase):
             "\nضرر قیمتی: -2.00%",
         )
 
+    def test_new_market_candidates_survive_pruning_before_first_scan(self):
+        now = 2_000_000
+        watchlist = {
+            "NEWCOINUSDT": {
+                "source_type": "market_universe",
+                "first_seen": now,
+                "last_checked": 0,
+            }
+        }
+        kept = telegram_runner.prune_watchlist(watchlist, now=now)
+        self.assertIn("NEWCOINUSDT", kept)
+
     def test_independent_market_candidates_are_added_after_channel_alerts(self):
         class UniverseClient:
             def get_active_binance_usdt_perpetual_symbols(self):
