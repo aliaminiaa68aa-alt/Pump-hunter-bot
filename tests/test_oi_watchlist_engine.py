@@ -71,6 +71,44 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertEqual(found[0][0].side, "SHORT")
         self.assertEqual(updated["ABCUSDT"]["status"], "سیگنال SHORT آماده ارسال")
 
+    def test_long_accepts_recent_sweep_with_next_candle_confirmation(self):
+        candles = make_candles("LONG")
+        candles[-2].update({
+            "open": 99.5, "high": 101.0, "low": 98.0, "close": 100.5,
+            "quote_volume": 180.0, "taker_buy_quote": 120.0,
+        })
+        candles[-1].update({
+            "open": 100.5, "high": 101.8, "low": 100.2, "close": 101.4,
+            "quote_volume": 160.0, "taker_buy_quote": 110.0,
+        })
+        with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                   return_value={"symbol": "ABCUSDT", "candles": candles}):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {}}, FakeClient(make_metrics("LONG")), now=1000
+            )
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0].side, "LONG")
+        self.assertIn("1 کندل قبل", updated["ABCUSDT"]["reason"])
+
+    def test_short_accepts_recent_sweep_with_next_candle_confirmation(self):
+        candles = make_candles("SHORT")
+        candles[-2].update({
+            "open": 100.5, "high": 102.0, "low": 99.0, "close": 99.5,
+            "quote_volume": 180.0, "taker_buy_quote": 60.0,
+        })
+        candles[-1].update({
+            "open": 99.5, "high": 99.8, "low": 98.2, "close": 98.7,
+            "quote_volume": 160.0, "taker_buy_quote": 50.0,
+        })
+        with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                   return_value={"symbol": "ABCUSDT", "candles": candles}):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {}}, FakeClient(make_metrics("SHORT")), now=1000
+            )
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0].side, "SHORT")
+        self.assertIn("1 کندل قبل", updated["ABCUSDT"]["reason"])
+
     def test_mismatched_coinalyze_candle_is_rejected(self):
         metrics = {
             **make_metrics("LONG"),
