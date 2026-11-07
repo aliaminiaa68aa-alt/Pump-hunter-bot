@@ -73,7 +73,7 @@ class WatchlistTests(unittest.TestCase):
     def test_confirmed_short_setup_is_published_and_both_directions_are_enabled(self):
         short = Signal("ABCUSDT", "SHORT", 1.0, 1.02, 0.99, 0.96,
                        .8, .3, .40, 1.4, .0001, 82, 900000)
-        snapshot = {"symbol": "ABCUSDT", "candles": []}
+        snapshot = {"symbol": "ABCUSDT", "candles": [], "oi_values": []}
         with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value=snapshot):
             with patch("oi_engine.watchlist_engine.advance_pullback_setup",
                        return_value=(short, None, "پولبک SHORT تأیید شد")) as advance:
