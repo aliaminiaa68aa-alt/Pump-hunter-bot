@@ -475,7 +475,8 @@ def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[s
             continue
         is_market_candidate = record.get("source_type") == "market_universe"
         last_seen = _safe_int(
-            record.get("last_alert", record.get("last_checked", record.get("first_seen", timestamp))),
+            record.get("last_alert") or record.get("last_checked")
+            or record.get("first_seen") or timestamp,
             timestamp,
         )
         # Keep rotating market-universe candidates long enough to reach them;
