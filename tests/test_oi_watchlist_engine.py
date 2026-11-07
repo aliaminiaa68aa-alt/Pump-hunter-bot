@@ -37,6 +37,7 @@ def make_metrics(side="LONG"):
         "oi_change_15m_window_pct": 0.8,
         "taker_buy_ratio": 0.67 if side == "LONG" else 0.33,
         "funding_rate": 0.0001,
+        "derivatives_candle_open_time_ms": 29 * 900000,
     }
 
 
@@ -69,6 +70,20 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0][0].side, "SHORT")
         self.assertEqual(updated["ABCUSDT"]["status"], "سیگنال SHORT آماده ارسال")
+
+    def test_mismatched_coinalyze_candle_is_rejected(self):
+        metrics = {
+            **make_metrics("LONG"),
+            "derivatives_candle_open_time_ms": 28 * 900000,
+        }
+        with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                   return_value=make_snapshot("LONG")):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {}}, FakeClient(metrics), now=1000
+            )
+        self.assertEqual(found, [])
+        self.assertEqual(updated["ABCUSDT"]["status"], "خطای دریافت داده")
+        self.assertIn("زمان کندل OI/جریان", updated["ABCUSDT"]["reason"])
 
     def test_no_sweep_means_no_entry(self):
         snapshot = make_snapshot("LONG")
