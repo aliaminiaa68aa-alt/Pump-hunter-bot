@@ -363,7 +363,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
             if name == "ENTRY":
                 # Stale ENTRY events were filtered above. Never emit a message
                 # claiming the entry had already activated.
-                label = f"🟡 ورود در پایش فعال شد؛ قیمت مبنای شبیه‌سازی: {float(event.get('fill', record['signal']['entry'])):.8g}"
+                label = f"🟡 ورود فعال شد؛ در پایش قیمت مبنای شبیه‌سازی: {float(event.get('fill', record['signal']['entry'])):.8g}"
             elif name == "TP1":
                 label = "🎯 تارگت اول خورد"
             elif name == "TP2":
