@@ -174,12 +174,12 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     except (TypeError, ValueError, OverflowError):
         current_price = None
     if current_price is None:
-        current_price_line = "💹 قیمت فعلی هنگام صدور سیگنال: <b>ناموجود</b>\\n"
+        current_price_line = "💹 قیمت فعلی هنگام صدور سیگنال: <b>ناموجود</b>\n"
     else:
         current_price_gap = (current_price - entry) / entry * 100.0
         current_price_line = (
             f"💹 قیمت فعلی هنگام صدور سیگنال: <code>{current_price:.8g}</code>"
-            f" | فاصله تا ورود: <b>{current_price_gap:+.2f}%</b>\\n"
+            f" | فاصله تا ورود: <b>{current_price_gap:+.2f}%</b>\n"
         )
     risk_pct = abs(entry - float(signal.stop_loss)) / entry * 100.0
     tp1_pct = abs(float(signal.take_profit_1) - entry) / entry * 100.0
