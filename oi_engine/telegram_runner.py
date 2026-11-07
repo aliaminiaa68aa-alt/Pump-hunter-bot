@@ -114,9 +114,9 @@ def _event_price_result(signal: Dict[str, Any], event: Dict[str, Any]) -> str:
     fill = float(fill)
     signed_pct = ((fill - entry) if side == "LONG" else (entry - fill)) / entry * 100.0
     if name in {"TP1", "TP2"}:
-        return f"\nسود قیمتی: +{signed_pct:.2f}%"
+        return f"\nسود قیمتی شبیه‌سازی‌شده: +{signed_pct:.2f}%"
     if name == "SL":
-        return f"\nضرر قیمتی: {signed_pct:.2f}%"
+        return f"\nضرر قیمتی شبیه‌سازی‌شده: {signed_pct:.2f}%"
     return ""
 
 
@@ -363,7 +363,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
             if name == "ENTRY":
                 # Stale ENTRY events were filtered above. Never emit a message
                 # claiming the entry had already activated.
-                label = f"🟡 ورود فعال شد؛ قیمت اجرا: {float(event.get('fill', record['signal']['entry'])):.8g}"
+                label = f"🟡 ورود در پایش فعال شد؛ قیمت مبنای شبیه‌سازی: {float(event.get('fill', record['signal']['entry'])):.8g}"
             elif name == "TP1":
                 label = "🎯 تارگت اول خورد"
             elif name == "TP2":
