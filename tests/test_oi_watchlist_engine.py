@@ -101,7 +101,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
             "quote_volume": 160.0, "taker_buy_quote": 50.0,
         })
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
-                   return_value={"symbol": "ABCUSDT", "candles": candles}):
+                   return_value={"symbol": "ABCUSDT", "candles": candles, "live_price": candles[-1]["close"]}):
             found, updated = scan_watchlist(
                 {"ABCUSDT": {}}, FakeClient(make_metrics("SHORT")), now=1000
             )
