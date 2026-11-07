@@ -231,6 +231,9 @@ class CoinalyzeClientTests(unittest.TestCase):
         result = client.fetch_metrics("BTCUSDT", now=start + 60 * 900)
         self.assertAlmostEqual(result["oi_change_15m_window_pct"], 1.0)
         self.assertAlmostEqual(result["taker_buy_ratio"], 0.6)
+        self.assertEqual(
+            result["derivatives_candle_open_time_ms"], (start + 58 * 900) * 1000
+        )
         snapshot = result["market_snapshot"]
         self.assertEqual(snapshot["candles"][-1]["open_time"], (start + 58 * 900) * 1000)
         self.assertEqual(snapshot["oi_timestamp"], (start + 59 * 900) * 1000 - 1)
