@@ -36,27 +36,41 @@ def _fetch_with_fallback(symbol: str, interval: str, start_ms: int, end_ms: int,
         _fetch_with_fallback.last_source = "Binance USD-M"
         return payload
     except (requests.RequestException, ValueError) as binance_error:
-        from oi_engine.market_data import fetch_bybit_rows
+        from oi_engine.market_data import fetch_bybit_rows, fetch_gateio_rows
         bybit_interval = "15" if interval == "15m" else "1"
         try:
             rows = fetch_bybit_rows(
                 symbol, bybit_interval, start_ms, end_ms,
                 limit=min(limit, 1000),
             )
-            if not rows:
-                raise ValueError("Bybit returned no closed candles")
-            _fetch_with_fallback.last_source = "Bybit linear fallback"
-            print(
-                f"Price candle provider fallback: {symbol} {interval} "
-                f"Binance unavailable ({type(binance_error).__name__}); Bybit OK"
-            )
-            return rows
+            if rows:
+                _fetch_with_fallback.last_source = "Bybit linear fallback"
+                print(
+                    f"Price candle provider fallback: {symbol} {interval} "
+                    f"Binance unavailable ({type(binance_error).__name__}); Bybit OK"
+                )
+                return rows
+            raise ValueError("Bybit returned no closed candles")
         except Exception as bybit_error:
-            _fetch_with_fallback.last_source = "unavailable"
-            raise RuntimeError(
-                f"Price candles unavailable from Binance ({binance_error}) "
-                f"and Bybit ({bybit_error})"
-            ) from bybit_error
+            try:
+                rows = fetch_gateio_rows(
+                    symbol, interval, start_ms, end_ms,
+                    limit=min(limit, 2000),
+                )
+                if not rows:
+                    raise ValueError("Gate.io returned no closed candles")
+                _fetch_with_fallback.last_source = "Gate.io USDT perpetual fallback"
+                print(
+                    f"Price candle provider fallback: {symbol} {interval} "
+                    f"Binance and Bybit unavailable; Gate.io OK"
+                )
+                return rows
+            except Exception as gate_error:
+                _fetch_with_fallback.last_source = "unavailable"
+                raise RuntimeError(
+                    f"Price candles unavailable from Binance ({binance_error}), "
+                    f"Bybit ({bybit_error}), and Gate.io ({gate_error})"
+                ) from gate_error
 
 
 def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
