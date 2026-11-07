@@ -1,0 +1,104 @@
+"""New strategy: Coinalyze context + price action + liquidity sweep."""
+from __future__ import annotations
+
+import math
+from typing import Any, Dict, Optional, Tuple
+
+from oi_engine.signal_engine import Signal, _atr, score_signal_components
+
+
+def evaluate_liquidity_sweep(
+    snapshot: Dict[str, Any], metrics: Dict[str, Any]
+) -> Tuple[Optional[Signal], str]:
+    """Create an entry only after a closed 15m candle sweeps and reclaims liquidity.
+
+    LONG: take the prior swing low, then close bullish back above it.
+    SHORT: take the prior swing high, then close bearish back below it.
+    Coinalyze OI expansion and taker flow must agree with the reversal.
+    """
+    candles = snapshot.get("candles") or []
+    if len(candles) < 30:
+        return None, "برای تشخیص ساختار و نقدینگی، حداقل ۳۰ کندل بسته‌شده لازم است"
+
+    last = candles[-1]
+    previous = candles[-13:-1]
+    if len(previous) != 12:
+        return None, "تاریخچه کافی برای تعیین نقدینگی سوئینگ وجود ندارد"
+
+    try:
+        oi_change = float(metrics["oi_change_15m_window_pct"])
+        taker_ratio = float(metrics["taker_buy_ratio"])
+        funding = float(metrics["funding_rate"])
+        entry = float(last["close"])
+        open_price = float(last["open"])
+        high = float(last["high"])
+        low = float(last["low"])
+        prior_low = min(float(row["low"]) for row in previous)
+        prior_high = max(float(row["high"]) for row in previous)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None, "داده‌های Coinalyze یا OHLCV ناقص است"
+
+    values = (oi_change, taker_ratio, funding, entry, open_price, high, low, prior_low, prior_high)
+    if not all(math.isfinite(value) for value in values):
+        return None, "داده‌های بازار معتبر نیست"
+    if not (0.0 <= taker_ratio <= 1.0) or min(entry, open_price, high, low, prior_low, prior_high) <= 0:
+        return None, "داده قیمت یا جریان سفارش نامعتبر است"
+
+    atr = _atr(candles)
+    if not math.isfinite(atr) or atr <= 0:
+        return None, "ATR معتبر برای تعیین حد ضرر وجود ندارد"
+
+    # Sweep must happen on the latest CLOSED candle and reclaim the swept level.
+    long_sweep = (
+        low < prior_low and entry > prior_low and entry > open_price
+        and (entry - low) / max(high - low, 1e-12) >= 0.60
+    )
+    short_sweep = (
+        high > prior_high and entry < prior_high and entry < open_price
+        and (high - entry) / max(high - low, 1e-12) >= 0.60
+    )
+
+    side = None
+    swept_level = None
+    sweep_extreme = None
+    if long_sweep and not short_sweep:
+        if oi_change <= 0 or taker_ratio <= 0.50:
+            return None, "نقدینگی کف زده شده، اما OI و جریان خرید Coinalyze برگشت LONG را تأیید نمی‌کنند"
+        side, swept_level, sweep_extreme = "LONG", prior_low, low
+    elif short_sweep and not long_sweep:
+        if oi_change <= 0 or taker_ratio >= 0.50:
+            return None, "نقدینگی سقف زده شده، اما OI و جریان فروش Coinalyze برگشت SHORT را تأیید نمی‌کنند"
+        side, swept_level, sweep_extreme = "SHORT", prior_high, high
+    else:
+        return None, "هنوز شکار نقدینگی همراه با بسته‌شدن برگشتی معتبر دیده نشده است"
+
+    # Stop is placed beyond the actual sweep extreme, with a modest ATR safety buffer.
+    buffer = max(atr * 0.10, entry * 0.0005)
+    stop = sweep_extreme - buffer if side == "LONG" else sweep_extreme + buffer
+    risk = entry - stop if side == "LONG" else stop - entry
+    if risk <= 0 or risk / entry > 0.04:
+        return None, "فاصله حد ضرر ساختاری نامعتبر یا بیش از ۴٪ است"
+
+    tp1 = entry + risk if side == "LONG" else entry - risk
+    tp2 = entry + 2.0 * risk if side == "LONG" else entry - 2.0 * risk
+    previous_close = float(candles[-2]["close"])
+    price_change = (entry / previous_close - 1.0) * 100.0
+    baseline = candles[-21:-1]
+    avg_volume = sum(float(row["quote_volume"]) for row in baseline) / len(baseline)
+    volume_ratio = float(last["quote_volume"]) / avg_volume if avg_volume > 0 else 0.0
+    movement_strength, entry_quality = score_signal_components(
+        candles, side, oi_change, price_change, taker_ratio, volume_ratio, atr, swept_level
+    )
+    signal = Signal(
+        symbol=str(snapshot.get("symbol", "")), side=side, entry=entry,
+        stop_loss=stop, take_profit_1=tp1, take_profit_2=tp2,
+        oi_change_pct=oi_change, price_change_pct=price_change,
+        taker_buy_ratio=taker_ratio, volume_ratio=volume_ratio,
+        funding_rate=funding, confidence=movement_strength,
+        candle_close_time=int(last["close_time"]),
+        movement_strength=movement_strength, entry_quality=entry_quality,
+        setup_level=swept_level, atr_15m=atr,
+        pullback_extreme=sweep_extreme, stop_distance_atr=risk / atr,
+        execution_mode="LIMIT",
+    )
+    return signal, f"Liquidity Sweep {side}: سطح {swept_level:.8g} شکسته و با کندل بسته‌شده پس گرفته شد"
