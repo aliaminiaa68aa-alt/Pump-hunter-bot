@@ -127,4 +127,8 @@ def evaluate_liquidity_sweep(
         pullback_extreme=sweep_extreme, stop_distance_atr=risk / atr,
         execution_mode="LIMIT",
     )
-    return signal, f"Liquidity Sweep {side}: سطح {swept_level:.8g} شکسته و با کندل بسته‌شده پس گرفته شد"
+    age_text = "همین کندل" if sweep_age == 0 else f"{sweep_age} کندل قبل"
+    return signal, (
+        f"Liquidity Sweep {side}: سطح {swept_level:.8g} در {age_text} شکسته و پس گرفته شد؛ "
+        "کندل بسته‌شده فعلی ادامه برگشت را تأیید کرد"
+    )
