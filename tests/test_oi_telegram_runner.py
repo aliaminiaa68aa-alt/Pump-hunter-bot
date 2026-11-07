@@ -349,6 +349,41 @@ class TelegramRunnerTests(unittest.TestCase):
             telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = original_limit
             telegram_runner.MARKET_DISCOVERY_PER_RUN = original_add
 
+    def test_full_market_queue_retires_scanned_coins_and_advances_universe_cursor(self):
+        class UniverseClient:
+            def get_active_binance_usdt_perpetual_symbols(self):
+                return [f"COIN{i}USDT" for i in range(8)]
+
+        watchlist = {
+            "COIN0USDT": {"source_type": "market_universe", "last_attempted_at": 100, "last_checked": 100},
+            "COIN1USDT": {"source_type": "market_universe", "last_attempted_at": 110, "last_checked": 110},
+            "COIN2USDT": {"source_type": "market_universe", "last_attempted_at": 0, "last_checked": 0},
+            "COIN3USDT": {
+                "source_type": "market_universe", "last_attempted_at": 120,
+                "last_checked": 120, "pending_setup": {"expires_at_close_time": 9999},
+            },
+        }
+        old_limit = telegram_runner.MAX_MARKET_QUEUE_SYMBOLS
+        old_add = telegram_runner.MARKET_DISCOVERY_PER_RUN
+        try:
+            telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = 4
+            telegram_runner.MARKET_DISCOVERY_PER_RUN = 2
+            cursor, added = telegram_runner.add_market_universe_candidates(
+                watchlist, UniverseClient(), "COIN3USDT", now=200
+            )
+        finally:
+            telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = old_limit
+            telegram_runner.MARKET_DISCOVERY_PER_RUN = old_add
+
+        self.assertEqual(added, 2)
+        self.assertEqual(cursor, "COIN5USDT")
+        self.assertNotIn("COIN0USDT", watchlist)
+        self.assertNotIn("COIN1USDT", watchlist)
+        self.assertIn("COIN2USDT", watchlist)
+        self.assertIn("COIN3USDT", watchlist)
+        self.assertIn("COIN4USDT", watchlist)
+        self.assertIn("COIN5USDT", watchlist)
+
     def test_market_universe_queue_trims_legacy_overflow_and_preserves_pending(self):
         class UniverseClient:
             def get_active_binance_usdt_perpetual_symbols(self):
