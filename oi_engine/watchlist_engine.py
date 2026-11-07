@@ -241,9 +241,10 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 # materially away before the alert is generated.
                 live_price = snapshot.get("live_price")
                 atr_for_entry = _atr(snapshot.get("candles") or [])
-                if live_price is None or not math.isfinite(float(live_price)) or float(live_price) <= 0:
+                is_live_binance_snapshot = snapshot.get("price_source") == "Binance USD-M Futures (USDT perpetual)"
+                if is_live_binance_snapshot and (live_price is None or not math.isfinite(float(live_price)) or float(live_price) <= 0):
                     geometry_rejection = "قیمت لحظه‌ای Binance Futures موجود نیست؛ سیگنال برای جلوگیری از ورود با قیمت قدیمی رد شد"
-                elif abs(float(live_price) - float(signal.entry)) > max(atr_for_entry * 0.50, float(signal.entry) * 0.001):
+                elif is_live_binance_snapshot and abs(float(live_price) - float(signal.entry)) > max(atr_for_entry * 0.50, float(signal.entry) * 0.001):
                     deviation_pct = abs(float(live_price) - float(signal.entry)) / float(signal.entry) * 100.0
                     geometry_rejection = (
                         f"فاصله قیمت زنده Binance تا ورود کندل {deviation_pct:.2f}٪ است؛ "
