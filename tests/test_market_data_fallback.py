@@ -3,7 +3,7 @@ import time
 from unittest.mock import patch, Mock
 
 from oi_engine import signal_engine
-from oi_engine.market_data import fetch_bybit_rows, bybit_rows_to_snapshot
+from oi_engine.market_data import fetch_bybit_rows, bybit_rows_to_snapshot, fetch_gateio_rows
 from oi_engine.outcome_tracker import _fetch_klines, _fetch_1m_klines
 
 
@@ -29,6 +29,23 @@ class BybitPriceFallbackTests(unittest.TestCase):
         snapshot = bybit_rows_to_snapshot(rows, "ABCUSDT")
         self.assertEqual(snapshot["price_source"], "Bybit linear perpetual")
         self.assertEqual(snapshot["candles"][-1]["quote_volume"], 1212.0)
+
+
+    @patch("oi_engine.market_data.requests.get")
+    def test_gateio_candles_are_normalized(self, get):
+        response = Mock()
+        now = int(time.time())
+        response.json.return_value = [
+            {"t": now - 1800, "v": "100", "sum": "1200",
+             "c": "101", "h": "102", "l": "99", "o": "100"}
+        ]
+        response.raise_for_status.return_value = None
+        get.return_value = response
+        rows = fetch_gateio_rows("ABCUSDT", "15m", limit=10)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][1:5], ["100", "102", "99", "101"])
+        self.assertEqual(rows[0][7], "1200")
+        self.assertIn("/api/v4/futures/usdt/candlesticks", get.call_args.args[0])
 
     @patch("oi_engine.signal_engine._get")
     @patch("oi_engine.market_data.fetch_bybit_rows")
