@@ -153,6 +153,7 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
     return {
         "symbol": symbol, "candles": parsed,
         "live_price": live_price,
+        "live_price_time_ms": int(time.time() * 1000),
         "price_source": "Binance USD-M Futures (USDT perpetual)",
     }
 
