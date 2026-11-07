@@ -358,12 +358,26 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
             name = event.get("event")
             symbol = str(record.get("signal", {}).get("symbol", "UNKNOWN"))
             timestamp = _safe_int(event.get("time_ms"), 0)
-            delayed = bool(timestamp and now_ms - timestamp > 120000)
+            event_age_ms = max(0, now_ms - timestamp) if timestamp else 0
+            delayed = bool(timestamp and event_age_ms > 120000)
             clock = _format_event_time_iran(event)
             if name == "ENTRY":
-                # Stale ENTRY events were filtered above. Never emit a message
-                # claiming the entry had already activated.
-                label = f"🟡 ورود فعال شد؛ در پایش قیمت مبنای شبیه‌سازی: {float(event.get('fill', record['signal']['entry'])):.8g}"
+                # Only a tick-based live monitor can prove a fresh entry touch.
+                # Historical 1m/15m candle replay is useful for outcome analysis,
+                # but must never create a late "entry activated" Telegram alert.
+                if event.get("source") != "live_price_poll" or event_age_ms > 30000:
+                    delivery[key] = {
+                        "status": "ignored",
+                        "reason": "entry_notification_not_realtime",
+                    }
+                    save_outcome_journal(journal)
+                    print(
+                        f"Suppressed non-realtime ENTRY notification: trade={trade_id} "
+                        f"source={event.get('source', 'historical_candle_replay')} "
+                        f"age_ms={event_age_ms}"
+                    )
+                    continue
+                label = f"🟡 ورود فعال شد؛ قیمت ثبت‌شده در لحظه لمس: {float(event.get('fill', record['signal']['entry'])):.8g}"
             elif name == "TP1":
                 label = "🎯 تارگت اول خورد"
             elif name == "TP2":
