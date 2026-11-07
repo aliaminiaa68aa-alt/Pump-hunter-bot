@@ -187,11 +187,11 @@ class TelegramRunnerTests(unittest.TestCase):
         )
         self.assertEqual(
             telegram_runner._event_price_result(short_signal, {"event": "TP1", "fill": 98.0}),
-            "\nسود قیمتی: +2.00%",
+            "\nسود قیمتی شبیه‌سازی‌شده: +2.00%",
         )
         self.assertEqual(
             telegram_runner._event_price_result(short_signal, {"event": "SL", "fill": 102.0}),
-            "\nضرر قیمتی: -2.00%",
+            "\nضرر قیمتی شبیه‌سازی‌شده: -2.00%",
         )
 
     def test_new_market_candidates_survive_pruning_before_first_scan(self):
