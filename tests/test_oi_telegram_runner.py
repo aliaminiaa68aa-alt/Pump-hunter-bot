@@ -879,12 +879,10 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assertEqual(send.call_count, 2)
-        self.assertIn("ورود فعال شد", send.call_args_list[0].args[2])
-        self.assertIn("حد ضرر خورد", send.call_args_list[1].args[2])
+        self.assertEqual(send.call_count, 1)
+        self.assertIn("حد ضرر خورد", send.call_args_list[0].args[2])
         self.assertEqual(send.call_args_list[0].kwargs["reply_to_message_id"], 77)
-        self.assertEqual(send.call_args_list[1].kwargs["reply_to_message_id"], 77)
-        self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["0"]["status"], "sent")
+        self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["0"]["reason"], "entry_notification_not_realtime")
         self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["1"]["status"], "sent")
 
 
@@ -921,11 +919,14 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assertEqual(send.call_count, 2)
-        self.assertIn("ورود فعال شد", send.call_args_list[0].args[2])
-        ambiguity_message = send.call_args_list[1].args[2]
+        self.assertEqual(send.call_count, 1)
+        ambiguity_message = send.call_args_list[0].args[2]
         self.assertIn("ترتیب برخورد مشخص نیست", ambiguity_message)
         self.assertIn("نتیجه معامله قابل تأیید نیست", ambiguity_message)
+        self.assertEqual(
+            result["trades"]["ambiguous-entry-candle"]["notification_state"]["0"]["reason"],
+            "entry_notification_not_realtime",
+        )
         self.assertEqual(
             result["trades"]["ambiguous-entry-candle"]["notification_state"]["1"]["status"],
             "sent",
@@ -959,14 +960,11 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assertEqual(send.call_count, 2)
-        entry_message = send.call_args_list[0].args[2]
-        target_message = send.call_args_list[1].args[2]
-        self.assertIn("ورود فعال شد", entry_message)
-        self.assertIn("این اعلان با تأخیر ارسال شده؛ مبنای ورود تازه نیست.", entry_message)
+        self.assertEqual(send.call_count, 1)
+        target_message = send.call_args_list[0].args[2]
         self.assertIn("تارگت اول خورد", target_message)
         record = result["trades"]["slightly-delayed-entry"]
-        self.assertEqual(record["notification_state"]["0"]["status"], "sent")
+        self.assertEqual(record["notification_state"]["0"]["reason"], "entry_notification_not_realtime")
         self.assertEqual(record["notification_state"]["1"]["status"], "sent")
 
 
@@ -996,17 +994,14 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assertEqual(send.call_count, 2)
-        entry_message = send.call_args_list[0].args[2]
-        stop_message = send.call_args_list[1].args[2]
-        self.assertIn("ورود فعال شد", entry_message)
-        self.assertIn("این اعلان با تأخیر ارسال شده؛ مبنای ورود تازه نیست.", entry_message)
+        self.assertEqual(send.call_count, 1)
+        stop_message = send.call_args_list[0].args[2]
         self.assertIn("حد ضرر خورد", stop_message)
         self.assertIn("برای ورود جدید اقدام نکنید", stop_message)
         record = result["trades"]["delayed-trade"]
         self.assertEqual(record["status"], "CLOSED_SL")
         self.assertFalse(record.get("entry_missed", False))
-        self.assertEqual(record["notification_state"]["0"]["status"], "sent")
+        self.assertEqual(record["notification_state"]["0"]["reason"], "entry_notification_not_realtime")
         self.assertEqual(record["notification_state"]["1"]["status"], "sent")
 
 
