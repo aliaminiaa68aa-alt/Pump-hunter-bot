@@ -21,10 +21,6 @@ def evaluate_liquidity_sweep(
         return None, "برای تشخیص ساختار و نقدینگی، حداقل ۳۰ کندل بسته‌شده لازم است"
 
     last = candles[-1]
-    previous = candles[-13:-1]
-    if len(previous) != 12:
-        return None, "تاریخچه کافی برای تعیین نقدینگی سوئینگ وجود ندارد"
-
     try:
         oi_change = float(metrics["oi_change_15m_window_pct"])
         taker_ratio = float(metrics["taker_buy_ratio"])
@@ -33,44 +29,74 @@ def evaluate_liquidity_sweep(
         open_price = float(last["open"])
         high = float(last["high"])
         low = float(last["low"])
-        prior_low = min(float(row["low"]) for row in previous)
-        prior_high = max(float(row["high"]) for row in previous)
     except (KeyError, TypeError, ValueError, OverflowError):
         return None, "داده‌های Coinalyze یا OHLCV ناقص است"
 
-    values = (oi_change, taker_ratio, funding, entry, open_price, high, low, prior_low, prior_high)
+    values = (oi_change, taker_ratio, funding, entry, open_price, high, low)
     if not all(math.isfinite(value) for value in values):
         return None, "داده‌های بازار معتبر نیست"
-    if not (0.0 <= taker_ratio <= 1.0) or min(entry, open_price, high, low, prior_low, prior_high) <= 0:
+    if not (0.0 <= taker_ratio <= 1.0) or min(entry, open_price, high, low) <= 0:
         return None, "داده قیمت یا جریان سفارش نامعتبر است"
 
     atr = _atr(candles)
     if not math.isfinite(atr) or atr <= 0:
         return None, "ATR معتبر برای تعیین حد ضرر وجود ندارد"
 
-    # Sweep must happen on the latest CLOSED candle and reclaim the swept level.
-    long_sweep = (
-        low < prior_low and entry > prior_low and entry > open_price
-        and (entry - low) / max(high - low, 1e-12) >= 0.60
-    )
-    short_sweep = (
-        high > prior_high and entry < prior_high and entry < open_price
-        and (high - entry) / max(high - low, 1e-12) >= 0.60
-    )
+    # Search the latest three CLOSED candles for a completed sweep/reclaim.
+    # If the sweep occurred one or two candles earlier, require the newest
+    # closed candle to continue away from the reclaimed level before entering.
+    setup = None
+    for sweep_index in range(len(candles) - 1, max(10, len(candles) - 4), -1):
+        sweep = candles[sweep_index]
+        previous = candles[sweep_index - 12:sweep_index]
+        if len(previous) != 12:
+            continue
+        try:
+            sweep_open = float(sweep["open"])
+            sweep_high = float(sweep["high"])
+            sweep_low = float(sweep["low"])
+            sweep_close = float(sweep["close"])
+            prior_low = min(float(row["low"]) for row in previous)
+            prior_high = max(float(row["high"]) for row in previous)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
 
-    side = None
-    swept_level = None
-    sweep_extreme = None
-    if long_sweep and not short_sweep:
+        span = max(sweep_high - sweep_low, 1e-12)
+        long_sweep = (
+            sweep_low < prior_low and sweep_close > prior_low and sweep_close > sweep_open
+            and (sweep_close - sweep_low) / span >= 0.60
+        )
+        short_sweep = (
+            sweep_high > prior_high and sweep_close < prior_high and sweep_close < sweep_open
+            and (sweep_high - sweep_close) / span >= 0.60
+        )
+        if long_sweep and not short_sweep:
+            continued = (
+                entry > prior_low and
+                (sweep_index == len(candles) - 1 or (entry > sweep_close and entry > open_price))
+            )
+            if continued:
+                setup = ("LONG", prior_low, sweep_low, len(candles) - 1 - sweep_index)
+                break
+        elif short_sweep and not long_sweep:
+            continued = (
+                entry < prior_high and
+                (sweep_index == len(candles) - 1 or (entry < sweep_close and entry < open_price))
+            )
+            if continued:
+                setup = ("SHORT", prior_high, sweep_high, len(candles) - 1 - sweep_index)
+                break
+
+    if setup is None:
+        return None, "در ۳ کندل بسته‌شده اخیر شکار نقدینگی و تأیید ادامه برگشت دیده نشد"
+
+    side, swept_level, sweep_extreme, sweep_age = setup
+    if side == "LONG":
         if oi_change <= 0 or taker_ratio <= 0.50:
             return None, "نقدینگی کف زده شده، اما OI و جریان خرید Coinalyze برگشت LONG را تأیید نمی‌کنند"
-        side, swept_level, sweep_extreme = "LONG", prior_low, low
-    elif short_sweep and not long_sweep:
+    else:
         if oi_change <= 0 or taker_ratio >= 0.50:
             return None, "نقدینگی سقف زده شده، اما OI و جریان فروش Coinalyze برگشت SHORT را تأیید نمی‌کنند"
-        side, swept_level, sweep_extreme = "SHORT", prior_high, high
-    else:
-        return None, "هنوز شکار نقدینگی همراه با بسته‌شدن برگشتی معتبر دیده نشده است"
 
     # Stop is placed beyond the actual sweep extreme, with a modest ATR safety buffer.
     buffer = max(atr * 0.10, entry * 0.0005)
