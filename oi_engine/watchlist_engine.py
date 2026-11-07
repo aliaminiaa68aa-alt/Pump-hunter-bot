@@ -161,8 +161,10 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     engine = engine_names.get(str(metrics.get("engine", "")), "OI Signal")
     oi_change = metrics.get("oi_change_15m_window_pct")
     taker_ratio = metrics.get("taker_buy_ratio")
+    funding_rate = metrics.get("funding_rate")
     oi_text = f"{float(oi_change):+.2f}%" if oi_change is not None else "—"
     taker_text = f"{float(taker_ratio):.0%}" if taker_ratio is not None else "—"
+    funding_text = f"{float(funding_rate):+.4%}" if funding_rate is not None else "—"
 
     entry = float(signal.entry)
     risk_pct = abs(entry - float(signal.stop_loss)) / entry * 100.0
@@ -185,6 +187,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         f"⚖️ نسبت سود به ریسک تا هدف ۱: <b>{rr_tp1:.2f}R</b>\n"
         "━━━━━━━━━━━━━━\n"
         f"📊 OI ۱۵دقیقه: <b>{oi_text}</b>  |  جریان {taker_text}\n"
+        f"💸 Funding: <b>{funding_text}</b> (اطلاعات زمینه‌ای، نه فیلتر جهت‌دار)\n"
         f"⚙️ حجم: {signal.volume_ratio:.1f}x  |  روش: {engine}\\n"
         f"🧭 تایم‌فریم: {html.escape(str(metrics.get('sweep_timeframe', '15m')))}\\n"
         f"💧 شکار نقدینگی: {html.escape(str(metrics.get('sweep_reason', 'تأیید شد')))}"
@@ -208,6 +211,19 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             snapshot = fetch_snapshot(symbol)
             record["data_source"] = f"{snapshot.get('price_source', 'Binance USD-M Futures')} prices + Coinalyze derivatives metrics"
             metrics = client.fetch_metrics(symbol, now=timestamp)
+            # OI change and taker flow must describe the very same closed
+            # 15m candle as the price-action liquidity sweep. Reject stale or
+            # cross-candle derivatives data rather than mixing timestamps.
+            candles = snapshot.get("candles") or []
+            price_candle_time = int(candles[-1].get("open_time", 0)) if candles else 0
+            derivatives_candle_time = metrics.get("derivatives_candle_open_time_ms")
+            if not price_candle_time or derivatives_candle_time is None:
+                raise CoinalyzeError("زمان کندل مشتقات Coinalyze یا قیمت موجود نیست")
+            if abs(int(derivatives_candle_time) - price_candle_time) > 60_000:
+                raise CoinalyzeError(
+                    "زمان کندل OI/جریان Coinalyze با کندل قیمت یکسان نیست؛ "
+                    f"price={price_candle_time}, derivatives={int(derivatives_candle_time)}"
+                )
             # Discard any provider-side OHLCV snapshot: it must not affect entries.
             metrics.pop("market_snapshot", None)
             metrics.update(source_oi_priority(record.get("source_text", "")))
