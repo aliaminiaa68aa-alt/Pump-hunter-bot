@@ -185,7 +185,9 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         f"⚖️ نسبت سود به ریسک تا هدف ۱: <b>{rr_tp1:.2f}R</b>\n"
         "━━━━━━━━━━━━━━\n"
         f"📊 OI ۱۵دقیقه: <b>{oi_text}</b>  |  جریان {taker_text}\n"
-        f"⚙️ حجم: {signal.volume_ratio:.1f}x  |  روش: {engine}"
+        f"⚙️ حجم: {signal.volume_ratio:.1f}x  |  روش: {engine}\\n"
+        f"🧭 تایم‌فریم: {html.escape(str(metrics.get('sweep_timeframe', '15m')))}\\n"
+        f"💧 شکار نقدینگی: {html.escape(str(metrics.get('sweep_reason', 'تأیید شد')))}"
     )
 
 
