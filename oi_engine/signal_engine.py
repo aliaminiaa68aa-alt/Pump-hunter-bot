@@ -130,26 +130,26 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
         candles = _get("/fapi/v1/klines", {
             "symbol": symbol, "interval": INTERVAL, "limit": 80
         })
-    candles = candles[:-1]  # Exclude the currently-forming Binance candle.
-    parsed = [{
-        "open_time": int(row[0]),
-        "open": _float(row[1], "open"),
-        "high": _float(row[2], "high"),
-        "low": _float(row[3], "low"),
-        "close": _float(row[4], "close"),
-        "volume": _float(row[5], "volume"),
-        "quote_volume": _float(row[7], "quote volume"),
-        "taker_buy_quote": _float(row[10], "taker buy quote"),
-        "close_time": int(row[6]),
-    } for row in candles]
-    if len(parsed) < 55:
-        raise MarketDataError("Not enough closed Binance USD-M 15m candles")
+        candles = candles[:-1]  # Exclude the currently-forming Binance candle.
+        parsed = [{
+            "open_time": int(row[0]),
+            "open": _float(row[1], "open"),
+            "high": _float(row[2], "high"),
+            "low": _float(row[3], "low"),
+            "close": _float(row[4], "close"),
+            "volume": _float(row[5], "volume"),
+            "quote_volume": _float(row[7], "quote volume"),
+            "taker_buy_quote": _float(row[10], "taker buy quote"),
+            "close_time": int(row[6]),
+        } for row in candles]
+        if len(parsed) < 55:
+            raise MarketDataError("Not enough closed Binance USD-M 15m candles")
         ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
         live_price = _float(ticker.get("price"), "Binance USD-M live price")
+        if live_price <= 0:
+            raise MarketDataError("Invalid Binance USD-M live price")
     except (requests.RequestException, MarketDataError, ValueError, TypeError, KeyError) as exc:
         raise MarketDataError(f"Binance USD-M price feed unavailable: {exc}") from exc
-    if live_price <= 0:
-        raise MarketDataError("Invalid Binance USD-M live price")
     return {
         "symbol": symbol, "candles": parsed,
         "live_price": live_price,
