@@ -1002,8 +1002,8 @@ def main() -> None:
         )
         print(
             "Outcome price feed: "
-            f"15m={'Binance USD-M' if binance_feed['15m'] else 'Bybit linear fallback'}; "
-            f"1m={'Binance USD-M' if binance_feed['1m'] else 'Bybit linear fallback'}"
+            f"15m={('Binance USD-M' if binance_feed['15m'] else 'Bybit/Gate fallback') if binance_feed['15m'] is not None else 'not used'}; "
+            f"1m={('Binance USD-M' if binance_feed['1m'] else 'Bybit/Gate fallback') if binance_feed['1m'] is not None else 'not used'}"
         )
         save_outcome_journal(outcome_journal)
         outcome_journal = dispatch_outcome_notifications(outcome_journal, token, chat_id)
