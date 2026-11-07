@@ -206,7 +206,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             # Binance supplies executable market prices and OHLCV candles.
             # Coinalyze is used ONLY for derivatives/positioning metrics, never prices.
             snapshot = fetch_snapshot(symbol)
-            record["data_source"] = "Binance Futures prices + Coinalyze derivatives metrics"
+            record["data_source"] = f"{snapshot.get('price_source', 'Binance USD-M Futures')} prices + Coinalyze derivatives metrics"
             metrics = client.fetch_metrics(symbol, now=timestamp)
             # Discard any provider-side OHLCV snapshot: it must not affect entries.
             metrics.pop("market_snapshot", None)
