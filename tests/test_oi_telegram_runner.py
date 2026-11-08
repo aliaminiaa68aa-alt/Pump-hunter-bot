@@ -940,7 +940,7 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
             with patch.object(telegram_runner, "save_outcome_journal"):
-                with patch.object(telegram_runner, "send_telegram", side_effect=[101, 102]) as send:
+                with patch.object(telegram_runner, "send_telegram", side_effect=[101, 102, 103]) as send:
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
@@ -1255,14 +1255,15 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        send.assert_not_called()
+        self.assertEqual(send.call_count, 1)
+        self.assertIn("ورود با پایش زنده تأیید نشد", send.call_args.args[2])
         record = result["trades"]["already-entered"]
-        self.assertEqual(record["status"], "MISSED_ENTRY")
-        self.assertTrue(record["entry_missed"])
-        self.assertTrue(all(
-            state["status"] == "ignored"
-            for state in record["notification_state"].values()
-        ))
+        self.assertEqual(record["status"], "EXPIRED_NO_ENTRY")
+        self.assertFalse(record["entry_missed"])
+        self.assertEqual(record["notification_state"]["0"]["reason"], "entry_not_live_confirmed")
+        self.assertEqual(record["notification_state"]["1"]["reason"], "entry_not_live_confirmed")
+        self.assertEqual(record["notification_state"]["2"]["reason"], "entry_not_live_confirmed")
+        self.assertEqual(record["notification_state"]["3"]["status"], "sent")
 
 
 
