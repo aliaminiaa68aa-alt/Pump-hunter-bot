@@ -47,14 +47,25 @@ class BybitPriceFallbackTests(unittest.TestCase):
         self.assertEqual(rows[0][7], "1200")
         self.assertIn("/api/v4/futures/usdt/candlesticks", get.call_args.args[0])
 
+    @patch("oi_engine.signal_engine.fetch_bybit_live_price", return_value=101.2)
+    @patch("oi_engine.signal_engine.fetch_bybit_rows")
     @patch("oi_engine.signal_engine._get")
-    @patch("oi_engine.market_data.fetch_bybit_rows")
-    def test_signal_snapshot_fails_closed_when_binance_unavailable(self, bybit, get):
+    def test_signal_snapshot_falls_back_to_bybit_without_mixing_prices(self, get, bybit, ticker):
         import requests
+        now = int(time.time() * 1000)
+        rows = []
+        for index in range(60):
+            start = now - (60 - index) * 900000
+            rows.append([start, "100", "102", "99", "101", "12",
+                         start + 899999, "1212", "0", "0", "0", "0"])
         get.side_effect = requests.HTTPError("451 Client Error")
-        with self.assertRaises(signal_engine.MarketDataError):
-            signal_engine.fetch_snapshot("ABCUSDT")
-        bybit.assert_not_called()
+        bybit.return_value = rows
+        snapshot = signal_engine.fetch_snapshot("ABCUSDT")
+        self.assertEqual(snapshot["price_source"], "Bybit linear perpetual (USDT)")
+        self.assertEqual(snapshot["live_price"], 101.2)
+        self.assertEqual(len(snapshot["candles"]), 60)
+        bybit.assert_called_once()
+        ticker.assert_called_once_with("ABCUSDT")
 
     @patch("oi_engine.signal_engine._get")
     def test_signal_snapshot_uses_binance_candles_and_live_price(self, get):
