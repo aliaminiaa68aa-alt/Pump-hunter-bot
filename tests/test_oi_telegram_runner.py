@@ -932,7 +932,7 @@ class TelegramRunnerTests(unittest.TestCase):
                         "take_profit_1": 101.0, "take_profit_2": 102.0,
                     },
                     "events": [
-                        {"event": "ENTRY", "time_ms": 990_000, "fill": 100.0},
+                        {"event": "ENTRY", "time_ms": 990_000, "fill": 100.0, "source": "live_price_poll"},
                         {"event": "SL", "time_ms": 995_000, "fill": 99.0},
                     ],
                 }
@@ -944,10 +944,11 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assertEqual(send.call_count, 1)
-        self.assertIn("حد ضرر خورد", send.call_args_list[0].args[2])
+        self.assertEqual(send.call_count, 2)
+        self.assertIn("ورود فعال شد", send.call_args_list[0].args[2])
+        self.assertIn("حد ضرر خورد", send.call_args_list[1].args[2])
         self.assertEqual(send.call_args_list[0].kwargs["reply_to_message_id"], 77)
-        self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["0"]["reason"], "entry_notification_not_realtime")
+        self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["0"]["status"], "sent")
         self.assertEqual(result["trades"]["fast-stop"]["notification_state"]["1"]["status"], "sent")
 
 
@@ -965,7 +966,7 @@ class TelegramRunnerTests(unittest.TestCase):
                         "take_profit_1": 102.0, "take_profit_2": 104.0,
                     },
                     "events": [
-                        {"event": "ENTRY", "time_ms": 990_000, "fill": 100.0},
+                        {"event": "ENTRY", "time_ms": 990_000, "fill": 100.0, "source": "live_price_poll"},
                         {
                             "event": "AMBIGUOUS_ENTRY_CANDLE",
                             "time_ms": 995_000,
@@ -984,13 +985,14 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assertEqual(send.call_count, 1)
-        ambiguity_message = send.call_args_list[0].args[2]
+        self.assertEqual(send.call_count, 2)
+        self.assertIn("ورود فعال شد", send.call_args_list[0].args[2])
+        ambiguity_message = send.call_args_list[1].args[2]
         self.assertIn("ترتیب برخورد مشخص نیست", ambiguity_message)
         self.assertIn("نتیجه معامله قابل تأیید نیست", ambiguity_message)
         self.assertEqual(
-            result["trades"]["ambiguous-entry-candle"]["notification_state"]["0"]["reason"],
-            "entry_notification_not_realtime",
+            result["trades"]["ambiguous-entry-candle"]["notification_state"]["0"]["status"],
+            "sent",
         )
         self.assertEqual(
             result["trades"]["ambiguous-entry-candle"]["notification_state"]["1"]["status"],
@@ -1013,7 +1015,7 @@ class TelegramRunnerTests(unittest.TestCase):
                         "take_profit_1": 101.0, "take_profit_2": 102.0,
                     },
                     "events": [
-                        {"event": "ENTRY", "time_ms": sent_at_ms + 20_000, "fill": 100.0},
+                        {"event": "ENTRY", "time_ms": sent_at_ms + 20_000, "fill": 100.0, "source": "live_price_poll"},
                         {"event": "TP1", "time_ms": sent_at_ms + 120_000, "fill": 101.0},
                     ],
                 }
@@ -1025,13 +1027,15 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assertEqual(send.call_count, 1)
-        target_message = send.call_args_list[0].args[2]
+        self.assertEqual(send.call_count, 2)
+        self.assertIn("ورود فعال شد", send.call_args_list[0].args[2])
+        self.assertIn("اعلان با تأخیر ارسال شده", send.call_args_list[0].args[2])
+        target_message = send.call_args_list[1].args[2]
         self.assertIn("تارگت اول تاچ شد", target_message)
         self.assertIn("ریسک‌فری", target_message)
         self.assertIn("حد ضرر را به نقطه ورود منتقل کنید", target_message)
         record = result["trades"]["slightly-delayed-entry"]
-        self.assertEqual(record["notification_state"]["0"]["reason"], "entry_notification_not_realtime")
+        self.assertEqual(record["notification_state"]["0"]["status"], "sent")
         self.assertEqual(record["notification_state"]["1"]["status"], "sent")
 
 
@@ -1049,7 +1053,7 @@ class TelegramRunnerTests(unittest.TestCase):
                         "take_profit_1": 101.0, "take_profit_2": 102.0,
                     },
                     "events": [
-                        {"event": "ENTRY", "time_ms": 1_060_000, "fill": 100.0},
+                        {"event": "ENTRY", "time_ms": 1_060_000, "fill": 100.0, "source": "live_price_poll"},
                         {"event": "SL", "time_ms": 1_120_000, "fill": 99.0},
                     ],
                 }
@@ -1061,14 +1065,15 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assertEqual(send.call_count, 1)
-        stop_message = send.call_args_list[0].args[2]
+        self.assertEqual(send.call_count, 2)
+        self.assertIn("ورود فعال شد", send.call_args_list[0].args[2])
+        stop_message = send.call_args_list[1].args[2]
         self.assertIn("حد ضرر خورد", stop_message)
         self.assertIn("برای ورود جدید اقدام نکنید", stop_message)
         record = result["trades"]["delayed-trade"]
         self.assertEqual(record["status"], "CLOSED_SL")
         self.assertFalse(record.get("entry_missed", False))
-        self.assertEqual(record["notification_state"]["0"]["reason"], "entry_notification_not_realtime")
+        self.assertEqual(record["notification_state"]["0"]["status"], "sent")
         self.assertEqual(record["notification_state"]["1"]["status"], "sent")
 
 
@@ -1088,7 +1093,7 @@ class TelegramRunnerTests(unittest.TestCase):
                         "take_profit_1": 99.0, "take_profit_2": 98.0,
                     },
                     "events": [
-                        {"event": "ENTRY", "time_ms": 1_060_000, "fill": 100.0},
+                        {"event": "ENTRY", "time_ms": 1_060_000, "fill": 100.0, "source": "live_price_poll"},
                         {"event": "TP1", "time_ms": 1_120_000, "fill": 99.0},
                         {"event": "TP2", "time_ms": 1_180_000, "fill": 98.0},
                     ],
@@ -1106,19 +1111,121 @@ class TelegramRunnerTests(unittest.TestCase):
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
-        self.assertEqual(send.call_count, 2)
-        self.assertIn("تارگت اول تاچ شد", send.call_args_list[0].args[2])
-        self.assertIn("تارگت دوم خورد", send.call_args_list[1].args[2])
+        self.assertEqual(send.call_count, 3)
+        self.assertIn("ورود فعال شد", send.call_args_list[0].args[2])
+        self.assertIn("تارگت اول تاچ شد", send.call_args_list[1].args[2])
+        self.assertIn("تارگت دوم خورد", send.call_args_list[2].args[2])
         self.assertTrue(all(
             "برای ورود جدید اقدام نکنید" in call.args[2]
-            for call in send.call_args_list
+            for call in send.call_args_list[1:]
         ))
         record = result["trades"]["old-false-missed"]
         self.assertEqual(record["status"], "CLOSED_TP2")
         self.assertFalse(record["entry_missed"])
-        self.assertEqual(record["notification_state"]["0"]["reason"], "late_entry_notification")
+        self.assertEqual(record["notification_state"]["0"]["status"], "sent")
         self.assertEqual(record["notification_state"]["1"]["status"], "sent")
         self.assertEqual(record["notification_state"]["2"]["status"], "sent")
+
+
+    def test_historical_entry_and_targets_are_not_counted_without_live_confirmation(self):
+        now_ms = 2_000_000
+        journal = {
+            "trades": {
+                "historical-only": {
+                    "status": "CLOSED_TP2",
+                    "sent_at_ms": 1_000_000,
+                    "telegram_message_id": 91,
+                    "signal": {
+                        "symbol": "HISTUSDT", "side": "SHORT",
+                        "entry": 100.0, "stop_loss": 101.0,
+                        "take_profit_1": 99.0, "take_profit_2": 98.0,
+                    },
+                    "events": [
+                        {"event": "ENTRY", "time_ms": 1_100_000, "fill": 100.0},
+                        {"event": "TP1", "time_ms": 1_200_000, "fill": 99.0},
+                        {"event": "TP2", "time_ms": 1_300_000, "fill": 98.0},
+                    ],
+                }
+            }
+        }
+        with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
+            with patch.object(telegram_runner, "save_outcome_journal"):
+                with patch.object(telegram_runner, "send_telegram", return_value=92) as send:
+                    result = telegram_runner.dispatch_outcome_notifications(
+                        journal, "token", "chat"
+                    )
+        self.assertEqual(send.call_count, 1)
+        self.assertIn("ورود با پایش زنده تأیید نشد", send.call_args.args[2])
+        record = result["trades"]["historical-only"]
+        self.assertEqual(record["status"], "EXPIRED_NO_ENTRY")
+        self.assertEqual(
+            [record["notification_state"][str(i)]["status"] for i in range(3)],
+            ["ignored", "ignored", "ignored"],
+        )
+        self.assertEqual(record["notification_state"]["0"]["reason"], "entry_not_live_confirmed")
+        self.assertEqual(record["notification_state"]["1"]["reason"], "entry_not_live_confirmed")
+        self.assertEqual(record["notification_state"]["2"]["reason"], "entry_not_live_confirmed")
+        self.assertEqual(record["notification_state"]["3"]["status"], "sent")
+
+    def test_target_without_any_entry_is_not_reported_as_a_trade(self):
+        now_ms = 2_000_000
+        journal = {
+            "trades": {
+                "target-only": {
+                    "status": "TP1_HIT",
+                    "sent_at_ms": 1_000_000,
+                    "signal": {
+                        "symbol": "NOENTRYUSDT", "side": "LONG",
+                        "entry": 100.0, "stop_loss": 99.0,
+                        "take_profit_1": 101.0, "take_profit_2": 102.0,
+                    },
+                    "events": [{"event": "TP1", "time_ms": 1_500_000, "fill": 101.0}],
+                }
+            }
+        }
+        with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
+            with patch.object(telegram_runner, "save_outcome_journal"):
+                with patch.object(telegram_runner, "send_telegram", return_value=93) as send:
+                    result = telegram_runner.dispatch_outcome_notifications(
+                        journal, "token", "chat"
+                    )
+        self.assertEqual(send.call_count, 1)
+        self.assertIn("ورود با پایش زنده تأیید نشد", send.call_args.args[2])
+        self.assertEqual(result["trades"]["target-only"]["status"], "EXPIRED_NO_ENTRY")
+
+
+    def test_tp1_before_entry_sends_expired_not_profit_message(self):
+        now_ms = 2_000_000
+        journal = {
+            "trades": {
+                "tp-before-entry": {
+                    "status": "EXPIRED_NO_ENTRY",
+                    "sent_at_ms": 1_000_000,
+                    "signal": {
+                        "symbol": "PRETPUSDT", "side": "SHORT",
+                        "entry": 100.0, "stop_loss": 101.0,
+                        "take_profit_1": 99.0, "take_profit_2": 98.0,
+                    },
+                    "events": [{
+                        "event": "EXPIRED_NO_ENTRY",
+                        "time_ms": 1_500_000,
+                        "source": "live_price_poll",
+                        "reason": "tp1_before_entry",
+                    }],
+                }
+            }
+        }
+        with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
+            with patch.object(telegram_runner, "save_outcome_journal"):
+                with patch.object(telegram_runner, "send_telegram", return_value=94) as send:
+                    result = telegram_runner.dispatch_outcome_notifications(
+                        journal, "token", "chat"
+                    )
+        self.assertEqual(send.call_count, 1)
+        message = send.call_args.args[2]
+        self.assertIn("تارگت اول قبل از فعال شدن ورود لمس شد", message)
+        self.assertIn("سود معامله محسوب نمی‌شود", message)
+        self.assertEqual(result["trades"]["tp-before-entry"]["notification_state"]["0"]["status"], "sent")
 
 
     def test_entry_that_predates_signal_suppresses_all_outcomes(self):

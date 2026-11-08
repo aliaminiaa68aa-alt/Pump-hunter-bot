@@ -63,6 +63,12 @@ def apply_live_prices(
                 record["status"] = "EXPIRED_NO_ENTRY"
                 record["entry_expired_reason"] = "Pending entry exceeded the one-hour validity window"
                 record["exit_time_ms"] = now
+                record.setdefault("events", []).append({
+                    "event": "EXPIRED_NO_ENTRY",
+                    "time_ms": now,
+                    "source": "live_price_poll",
+                    "reason": "entry_window_expired",
+                })
                 continue
 
         price = normalized.get(symbol)
@@ -95,6 +101,15 @@ def apply_live_prices(
                 record["exit_time_ms"] = now
                 record["live_last_price"] = price
                 record["live_last_price_ms"] = now
+                record.setdefault("events", []).append({
+                    "event": "EXPIRED_NO_ENTRY",
+                    "time_ms": now,
+                    "source": "live_price_poll",
+                    "reason": "tp1_before_entry",
+                    "planned_entry": entry,
+                    "observed_price": price,
+                    "take_profit_1": tp1,
+                })
                 continue
 
         previous_price = _finite_positive(record.get("live_last_price"))

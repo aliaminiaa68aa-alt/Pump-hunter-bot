@@ -75,23 +75,26 @@ class LivePriceMonitorTests(unittest.TestCase):
         apply_live_prices(journal, {"TESTUSDT": 101.0}, now_ms=2_000)
         apply_live_prices(journal, {"TESTUSDT": 102.1}, now_ms=3_000)
         self.assertEqual(record["status"], "EXPIRED_NO_ENTRY")
-        self.assertEqual(record["events"], [])
+        self.assertEqual([e["event"] for e in record["events"]], ["EXPIRED_NO_ENTRY"])
+        self.assertEqual(record["events"][0]["reason"], "tp1_before_entry")
         apply_live_prices(journal, {"TESTUSDT": 99.9}, now_ms=4_000)
         self.assertEqual(record["status"], "EXPIRED_NO_ENTRY")
-        self.assertEqual(record["events"], [])
+        self.assertEqual([e["event"] for e in record["events"]], ["EXPIRED_NO_ENTRY"])
 
     def test_short_setup_expires_if_tp1_is_reached_before_entry(self):
         journal, record = make_journal("SHORT")
         apply_live_prices(journal, {"TESTUSDT": 99.0}, now_ms=2_000)
         apply_live_prices(journal, {"TESTUSDT": 97.9}, now_ms=3_000)
         self.assertEqual(record["status"], "EXPIRED_NO_ENTRY")
-        self.assertEqual(record["events"], [])
+        self.assertEqual([e["event"] for e in record["events"]], ["EXPIRED_NO_ENTRY"])
+        self.assertEqual(record["events"][0]["reason"], "tp1_before_entry")
 
     def test_waiting_entry_expires_after_one_hour(self):
         journal, record = make_journal("LONG")
         apply_live_prices(journal, {}, now_ms=3_601_000)
         self.assertEqual(record["status"], "EXPIRED_NO_ENTRY")
-        self.assertEqual(record["events"], [])
+        self.assertEqual([e["event"] for e in record["events"]], ["EXPIRED_NO_ENTRY"])
+        self.assertEqual(record["events"][0]["reason"], "entry_window_expired")
 
     def test_entry_and_stop_crossed_in_one_poll_are_ambiguous(self):
         journal, record = make_journal("LONG")
