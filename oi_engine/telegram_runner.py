@@ -305,10 +305,23 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                     "reason": "entry_not_live_confirmed",
                 })
             record["events"] = events
-        elif entry_event and record.get("entry_missed") and sent_at and entry_time > sent_at:
-                # Recover only entries that were actually recorded by the live
-                # poller; never revive a candle-replay-only trade.
-                record["entry_missed"] = False
+        elif entry_event:
+                # If an earlier dispatcher version suppressed a delayed live
+                # ENTRY ping, restore it so TP/SL can never be delivered alone.
+                delivery = record.setdefault("notification_state", {})
+                entry_index = next(
+                    index for index, event in enumerate(events)
+                    if event.get("event") == "ENTRY"
+                )
+                previous_entry_delivery = delivery.get(str(entry_index), {})
+                if previous_entry_delivery.get("reason") in {
+                    "entry_notification_not_realtime", "late_entry_notification"
+                }:
+                    delivery[str(entry_index)] = {"status": "pending", "attempts": 0}
+                if record.get("entry_missed") and sent_at and entry_time > sent_at:
+                    # Recover only entries that were actually recorded by the live
+                    # poller; never revive a candle-replay-only trade.
+                    record["entry_missed"] = False
                 record.pop("entry_missed_reason", None)
                 event_names = [event.get("event") for event in events]
                 if "TP2" in event_names:
