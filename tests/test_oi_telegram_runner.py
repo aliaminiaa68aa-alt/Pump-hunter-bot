@@ -334,14 +334,16 @@ class TelegramRunnerTests(unittest.TestCase):
         try:
             telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = 5
             telegram_runner.MARKET_DISCOVERY_PER_RUN = 3
-            cursor, added = telegram_runner.add_market_universe_candidates(
-                watchlist, UniverseClient(), "", now=300
-            )
+            with patch("oi_engine.signal_engine.get_active_symbols", return_value=[f"COIN{i}USDT" for i in range(30)]):
+                cursor, added = telegram_runner.add_market_universe_candidates(
+                    watchlist, UniverseClient(), "", now=300
+                )
             self.assertEqual(added, 3)
             self.assertEqual(cursor, "COIN2USDT")
-            cursor, added = telegram_runner.add_market_universe_candidates(
-                watchlist, UniverseClient(), cursor, now=301
-            )
+            with patch("oi_engine.signal_engine.get_active_symbols", return_value=[f"COIN{i}USDT" for i in range(30)]):
+                cursor, added = telegram_runner.add_market_universe_candidates(
+                    watchlist, UniverseClient(), cursor, now=301
+                )
             self.assertEqual(added, 2)
             self.assertEqual(cursor, "COIN4USDT")
             self.assertEqual(len(watchlist), 5)
@@ -368,9 +370,10 @@ class TelegramRunnerTests(unittest.TestCase):
         try:
             telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = 4
             telegram_runner.MARKET_DISCOVERY_PER_RUN = 2
-            cursor, added = telegram_runner.add_market_universe_candidates(
-                watchlist, UniverseClient(), "COIN3USDT", now=200
-            )
+            with patch("oi_engine.signal_engine.get_active_symbols", return_value=[f"COIN{i}USDT" for i in range(8)]):
+                cursor, added = telegram_runner.add_market_universe_candidates(
+                    watchlist, UniverseClient(), "COIN3USDT", now=200
+                )
         finally:
             telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = old_limit
             telegram_runner.MARKET_DISCOVERY_PER_RUN = old_add
@@ -408,9 +411,10 @@ class TelegramRunnerTests(unittest.TestCase):
         original_limit = telegram_runner.MAX_MARKET_QUEUE_SYMBOLS
         try:
             telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = 5
-            _, added = telegram_runner.add_market_universe_candidates(
-                watchlist, UniverseClient(), "", now=300
-            )
+            with patch("oi_engine.signal_engine.get_active_symbols", return_value=[f"COIN{i}USDT" for i in range(30)]):
+                _, added = telegram_runner.add_market_universe_candidates(
+                    watchlist, UniverseClient(), "", now=300
+                )
             market_symbols = {
                 symbol for symbol, record in watchlist.items()
                 if record.get("source_type") == "market_universe"
