@@ -435,12 +435,19 @@ class TelegramRunnerTests(unittest.TestCase):
         if initial_watchlist is not None:
             watch_path.write_text(json.dumps({"public_channel_last_id": 10, "symbols": initial_watchlist}), encoding="utf-8")
         env = {"BOT_TOKEN": "token", "CHAT_ID": "chat", "COINALYZE_API_KEY": "key"}
+        spot_universe = {"BTCUSDT", "ETHUSDT", "TESTUSDT", "ABCUSDT", "OIUSDT", "AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT"}
+        if initial_watchlist:
+            spot_universe.update(initial_watchlist)
+        if scan_result and scan_result[0]:
+            spot_universe.update(item[0].symbol for item in scan_result[0])
         with patch.object(telegram_runner, "STATE_PATH", state_path), \
              patch.object(telegram_runner, "WATCHLIST_PATH", watch_path), \
              patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
              patch.dict(os.environ, env), \
              patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
-             patch.object(telegram_runner, "fetch_live_price_with_source", return_value=(fresh_price, "Binance USD-M Futures (USDT perpetual)")), \
+             patch("oi_engine.signal_engine.get_active_symbols", return_value=sorted(spot_universe)), \
+             patch.object(telegram_runner, "add_market_universe_candidates", return_value=("", 0)), \
+             patch.object(telegram_runner, "fetch_live_price_with_source", return_value=(fresh_price, "Binance Spot")), \
              patch.object(telegram_runner, "verify_telegram_connection"), \
              patch.object(telegram_runner, "poll_public_channel_alerts", return_value=public_result) as poll, \
              patch.object(telegram_runner, "scan_watchlist", return_value=scan_result), \
