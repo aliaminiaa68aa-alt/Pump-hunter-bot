@@ -423,7 +423,7 @@ class TelegramRunnerTests(unittest.TestCase):
         finally:
             telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = original_limit
 
-    def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None, send_side_effect=None):
+    def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None, send_side_effect=None, fresh_price=101.0):
         state_path = Path(directory) / "sent_signals.json"
         watch_path = Path(directory) / "watchlist.json"
         outcome_path = Path(directory) / "trade_outcomes.json"
@@ -437,7 +437,7 @@ class TelegramRunnerTests(unittest.TestCase):
              patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
              patch.dict(os.environ, env), \
              patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
-             patch.object(telegram_runner, "fetch_live_price_with_source", return_value=(100.0, "Binance USD-M Futures (USDT perpetual)")), \
+             patch.object(telegram_runner, "fetch_live_price_with_source", return_value=(fresh_price, "Binance USD-M Futures (USDT perpetual)")), \
              patch.object(telegram_runner, "verify_telegram_connection"), \
              patch.object(telegram_runner, "poll_public_channel_alerts", return_value=public_result) as poll, \
              patch.object(telegram_runner, "scan_watchlist", return_value=scan_result), \
@@ -451,7 +451,7 @@ class TelegramRunnerTests(unittest.TestCase):
             signal, metrics = sample_signal(), sample_metrics()
             signal.entry = 100.0
             _, _, _, send = self._run_main(
-                directory, ([(signal, metrics)], {"TESTUSDT": {"status": "تأیید LONG"}}),
+                directory, ([(signal, metrics)], {"TESTUSDT": {"status": "تأیید LONG"}}), fresh_price=100.0,
             )
             # _run_main's fresh quote is 100.0: exactly at the LONG limit,
             # so it is already touched and must not be published as waiting.
