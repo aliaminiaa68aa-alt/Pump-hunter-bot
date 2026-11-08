@@ -269,34 +269,43 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
         # notifications because the user never received a live entry activation.
         events = record.get("events", [])
         entry_event = next((event for event in events if event.get("event") == "ENTRY"), None)
+        has_outcome_without_entry = (
+            entry_event is None
+            and any(event.get("event") in {"TP1", "TP2", "SL"} for event in events)
+        )
         if entry_event:
             entry_time = _safe_int(entry_event.get("time_ms"), 0)
             sent_at = _safe_int(record.get("sent_at_ms"), 0)
             entry_predates_signal = bool(entry_time and sent_at and entry_time <= sent_at)
             live_entry = entry_event.get("source") == "live_price_poll"
-            if not live_entry or entry_predates_signal:
-                record["status"] = "EXPIRED_NO_ENTRY"
-                record["entry_missed"] = False
-                record.pop("entry_missed_reason", None)
-                record["entry_expired_reason"] = (
-                    "Entry was not confirmed by the live price monitor"
-                    if not live_entry else "Entry touch predates Telegram signal"
-                )
-                delivery = record.setdefault("notification_state", {})
-                for index in range(len(events)):
-                    delivery[str(index)] = {
-                        "status": "ignored",
-                        "reason": "entry_not_live_confirmed",
-                    }
-                if not any(event.get("event") == "EXPIRED_NO_ENTRY" for event in events):
-                    events.append({
-                        "event": "EXPIRED_NO_ENTRY",
-                        "time_ms": now_ms,
-                        "source": "outcome_dispatch",
-                        "reason": "entry_not_live_confirmed",
-                    })
-                record["events"] = events
-            elif record.get("entry_missed") and sent_at and entry_time > sent_at:
+        else:
+            entry_predates_signal = False
+            live_entry = False
+        if has_outcome_without_entry or (entry_event and (not live_entry or entry_predates_signal)):
+            record["status"] = "EXPIRED_NO_ENTRY"
+            record["entry_missed"] = False
+            record.pop("entry_missed_reason", None)
+            record["entry_expired_reason"] = (
+                "Target/stop event exists without a confirmed entry"
+                if has_outcome_without_entry else
+                "Entry was not confirmed by the live price monitor"
+                if not live_entry else "Entry touch predates Telegram signal"
+            )
+            delivery = record.setdefault("notification_state", {})
+            for index in range(len(events)):
+                delivery[str(index)] = {
+                    "status": "ignored",
+                    "reason": "entry_not_live_confirmed",
+                }
+            if not any(event.get("event") == "EXPIRED_NO_ENTRY" for event in events):
+                events.append({
+                    "event": "EXPIRED_NO_ENTRY",
+                    "time_ms": now_ms,
+                    "source": "outcome_dispatch",
+                    "reason": "entry_not_live_confirmed",
+                })
+            record["events"] = events
+        elif entry_event and record.get("entry_missed") and sent_at and entry_time > sent_at:
                 # Recover only entries that were actually recorded by the live
                 # poller; never revive a candle-replay-only trade.
                 record["entry_missed"] = False
