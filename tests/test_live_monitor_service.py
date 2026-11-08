@@ -38,7 +38,7 @@ class LiveMonitorServiceTests(unittest.TestCase):
         response.json.return_value = [{"symbol": "OTHERUSDT", "price": "1.0"}]
         get.return_value = response
 
-        with self.assertRaisesRegex(RuntimeError, "no usable active symbols"):
+        with self.assertRaisesRegex(RuntimeError, "no usable Binance Spot prices"):
             fetch_binance_last_prices({"BTCUSDT", "ETHUSDT"})
 
     def test_empty_symbol_set_does_not_call_network(self):
