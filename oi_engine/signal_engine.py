@@ -118,30 +118,14 @@ def validate_oi_cadence(rows: List[dict]) -> None:
 
 
 def fetch_live_price_with_source(symbol: str) -> tuple[float, str]:
-    """Fetch a live price and return the exact exchange that supplied it."""
-    errors = []
-    try:
-        ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
-        price = _float(ticker.get("price"), "Binance USD-M live price")
-        if price > 0:
-            return price, "Binance USD-M Futures (USDT perpetual)"
-        raise MarketDataError("Invalid Binance USD-M live price")
-    except Exception as exc:
-        errors.append(f"Binance: {type(exc).__name__}: {exc}")
-    for name, provider, label in (
-        ("Bybit", fetch_bybit_live_price, "Bybit linear perpetual (USDT)"),
-        ("Gate.io", fetch_gateio_live_price, "Gate.io USDT perpetual"),
-    ):
-        try:
-            price = _float(provider(symbol), f"{name} live price")
-            return price, label
-        except Exception as exc:
-            errors.append(f"{name}: {type(exc).__name__}: {exc}")
-    raise MarketDataError("Live price unavailable from all providers: " + " | ".join(errors))
-
+    """Fetch live Binance Spot price only; no other exchange fallback."""
+    ticker = _get("/api/v3/ticker/price", {"symbol": symbol})
+    price = _float(ticker.get("price"), "Binance Spot live price")
+    if price <= 0:
+        raise MarketDataError("Invalid Binance Spot live price for " + symbol)
+    return price, "Binance Spot"
 
 def fetch_live_price(symbol: str) -> float:
-    """Backward-compatible price-only wrapper around the source-aware fetch."""
     return fetch_live_price_with_source(symbol)[0]
 
 
