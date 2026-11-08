@@ -10,6 +10,8 @@ from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
 from oi_engine.signal_engine import MarketDataError, Signal, _atr, fetch_snapshot
 from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep
 
+DATA_ERROR_RETRY_SECONDS = 300
+
 
 def coinalyze_rejection_reasons(signal: Signal, metrics: Dict[str, Any]) -> List[str]:
     """Return precise derivatives-gate failures for diagnostics; never loosen a gate."""
@@ -313,12 +315,17 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 record.pop("pending_setup", None)
 
             record["last_checked"] = timestamp
+            record.pop("retry_after", None)
         except (CoinalyzeError, MarketDataError, OSError, ValueError, KeyError) as exc:
             record["status"] = "خطای دریافت داده"
             record["reason"] = f"{type(exc).__name__}: {exc}"
+            record["last_checked"] = timestamp
+            record["retry_after"] = timestamp + DATA_ERROR_RETRY_SECONDS
         except Exception as exc:
             record["status"] = "خطای غیرمنتظره"
             record["reason"] = f"{type(exc).__name__}: {exc}"
+            record["last_checked"] = timestamp
+            record["retry_after"] = timestamp + DATA_ERROR_RETRY_SECONDS
         finally:
             elapsed = time.monotonic() - symbol_started
             print(
