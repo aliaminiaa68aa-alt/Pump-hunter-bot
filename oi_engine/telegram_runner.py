@@ -264,24 +264,41 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
     # A delayed/queued GitHub Actions run must not silently discard real fills.
     legacy_cutoff = now_ms - 96 * 60 * 60 * 1000
     for trade_id, record in journal.get("trades", {}).items():
-        # Distinguish a genuinely missed setup from a delayed polling cycle.
-        # If entry happened BEFORE the signal was sent, suppress the whole
-        # trade. If entry happened AFTER the signal but this runner noticed it
-        # late, suppress only the stale ENTRY ping; preserve TP/SL reporting.
+        # A trade is actionable only when ENTRY was confirmed by the live
+        # Binance price poll. Historical candle replay cannot authorize TP/SL
+        # notifications because the user never received a live entry activation.
         events = record.get("events", [])
         entry_event = next((event for event in events if event.get("event") == "ENTRY"), None)
-        late_entry_notification = False
         if entry_event:
             entry_time = _safe_int(entry_event.get("time_ms"), 0)
             sent_at = _safe_int(record.get("sent_at_ms"), 0)
             entry_predates_signal = bool(entry_time and sent_at and entry_time <= sent_at)
-            # Repair records classified by the previous overly broad rule:
-            # a valid post-signal entry was marked MISSED_ENTRY solely because
-            # the five-minute runner noticed it more than two minutes later.
-            if (
-                record.get("entry_missed")
-                and entry_time and sent_at and entry_time > sent_at
-            ):
+            live_entry = entry_event.get("source") == "live_price_poll"
+            if not live_entry or entry_predates_signal:
+                record["status"] = "EXPIRED_NO_ENTRY"
+                record["entry_missed"] = False
+                record.pop("entry_missed_reason", None)
+                record["entry_expired_reason"] = (
+                    "Entry was not confirmed by the live price monitor"
+                    if not live_entry else "Entry touch predates Telegram signal"
+                )
+                delivery = record.setdefault("notification_state", {})
+                for index in range(len(events)):
+                    delivery[str(index)] = {
+                        "status": "ignored",
+                        "reason": "entry_not_live_confirmed",
+                    }
+                if not any(event.get("event") == "EXPIRED_NO_ENTRY" for event in events):
+                    events.append({
+                        "event": "EXPIRED_NO_ENTRY",
+                        "time_ms": now_ms,
+                        "source": "outcome_dispatch",
+                        "reason": "entry_not_live_confirmed",
+                    })
+                record["events"] = events
+            elif record.get("entry_missed") and sent_at and entry_time > sent_at:
+                # Recover only entries that were actually recorded by the live
+                # poller; never revive a candle-replay-only trade.
                 record["entry_missed"] = False
                 record.pop("entry_missed_reason", None)
                 event_names = [event.get("event") for event in events]
@@ -297,34 +314,12 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 for index, event in enumerate(events):
                     previous = delivery.get(str(index), {})
                     if previous.get("reason") == "missed_entry":
-                        if event.get("event") == "ENTRY":
-                            delivery[str(index)] = {
-                                "status": "ignored",
-                                "reason": "late_entry_notification",
-                            }
-                        else:
-                            delivery[str(index)] = {"status": "pending", "attempts": 0}
-                print(
-                    f"Recovered valid delayed trade outcomes: trade={trade_id} "
-                    f"entry_time_ms={entry_time} sent_at_ms={sent_at} "
-                    f"events={event_names}"
-                )
-            # Always report a confirmed post-signal entry, even when polling
-            # noticed it late. The message is explicitly marked historical below;
-            # suppressing it made users see TP/SL without ever seeing ENTRY.
-            if entry_predates_signal and not record.get("entry_missed"):
-                record["entry_missed"] = True
-                record["status"] = "MISSED_ENTRY"
-                record["entry_missed_reason"] = "Entry touch occurred before the signal was sent"
-                print(
-                    f"Outcome trade invalidated: entry predates signal: trade={trade_id} "
-                    f"entry_time_ms={entry_time} sent_at_ms={sent_at}"
-                )
-            if record.get("entry_missed"):
-                delivery = record.setdefault("notification_state", {})
-                for index in range(len(events)):
+                        delivery[str(index)] = {"status": "pending", "attempts": 0}
+        if record.get("entry_missed") and not entry_event:
+            delivery = record.setdefault("notification_state", {})
+            for index, event in enumerate(events):
+                if event.get("event") != "MISSED_ENTRY":
                     delivery[str(index)] = {"status": "ignored", "reason": "missed_entry"}
-                continue
         anchor_id = record.get("telegram_message_id")
         # A missing original-message ID must not suppress outcome alerts.
         # Send them as standalone chat messages when reply threading is unavailable.
@@ -343,7 +338,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 # delivered even when the trade has already closed in the same
                 # replay cycle. The old status gate silently discarded ENTRY,
                 # TP1, TP2 and SL for fast trades that completed before dispatch.
-                supported_event = event.get("event") in {"ENTRY", "TP1", "TP2", "SL", "MISSED_ENTRY", "AMBIGUOUS_ENTRY_POLL", "AMBIGUOUS_ENTRY_CANDLE"}
+                supported_event = event.get("event") in {"ENTRY", "TP1", "TP2", "SL", "MISSED_ENTRY", "AMBIGUOUS_ENTRY_POLL", "AMBIGUOUS_ENTRY_CANDLE", "EXPIRED_NO_ENTRY"}
                 sent_at = _safe_int(record.get("sent_at_ms"), 0)
                 if (
                     not timestamp or timestamp < legacy_cutoff
@@ -366,7 +361,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 # Only a tick-based live monitor can prove a fresh entry touch.
                 # Historical 1m/15m candle replay is useful for outcome analysis,
                 # but must never create a late "entry activated" Telegram alert.
-                if event.get("source") != "live_price_poll" or event_age_ms > 30000:
+                if event.get("source") != "live_price_poll":
                     delivery[key] = {
                         "status": "ignored",
                         "reason": "entry_notification_not_realtime",
@@ -385,6 +380,14 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 label = "🏆 تارگت دوم خورد؛ معامله به پایان رسید"
             elif name == "SL":
                 label = "🛑 حد ضرر خورد"
+            elif name == "EXPIRED_NO_ENTRY":
+                reason = str(event.get("reason", record.get("entry_expired_reason", "")))
+                if reason == "tp1_before_entry":
+                    label = "⚠️ تارگت اول قبل از فعال شدن ورود لمس شد؛ ورود انجام نشد و سیگنال منقضی شد. این حرکت سود معامله محسوب نمی‌شود."
+                elif reason == "entry_window_expired":
+                    label = "⌛ اعتبار نقطه ورود تمام شد؛ ورود فعال نشد و سیگنال منقضی شد."
+                else:
+                    label = "⚠️ ورود با پایش زنده تأیید نشد؛ نتیجه تاریخی این سیگنال معامله‌شده محسوب نمی‌شود."
             elif name == "MISSED_ENTRY":
                 planned = _safe_float(event.get("planned_entry"), 0.0)
                 observed = _safe_float(event.get("observed_price"), 0.0)
@@ -406,7 +409,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
             if clock:
                 message += f"\nزمان لمس: {clock} (به وقت ایران)"
             if delayed and name == "ENTRY":
-                message += "\nاین اعلان با تأخیر ارسال شده؛ مبنای ورود تازه نیست."
+                message += "\nورود در زمان ثبت‌شده فعال شده، اما اعلان با تأخیر ارسال شده است؛ قیمت فعلی ممکن است متفاوت باشد."
             elif delayed and name in {"TP1", "TP2", "SL"}:
                 message += "\nاین گزارش مربوط به نتیجه قبلی است؛ برای ورود جدید اقدام نکنید."
             message += _event_price_result(record["signal"], event)
