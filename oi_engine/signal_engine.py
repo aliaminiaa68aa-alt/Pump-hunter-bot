@@ -1,9 +1,4 @@
-"""Standalone 15m Open Interest signal engine.
-
-Price/candle provider order: Binance USD-M, Bybit linear, then Gate.io USDT perpetual.
-Each snapshot's candles and live price always come from the same exchange.
-Coinalyze remains the derivatives-metrics source.
-"""
+"""Standalone 15m Open Interest signal engine. Binance Spot provides every market price and candle; Coinalyze provides derivatives metrics only."""
 from __future__ import annotations
 
 import math
