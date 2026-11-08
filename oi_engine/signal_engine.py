@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-BASE_URL = "https://api.binance.com"
+BASE_URLS = ("https://api.binance.com", "https://data-api.binance.vision")
 INTERVAL = "15m"
 MIN_OI_CHANGE_PCT = 0.10
 MIN_DIRECTIONAL_PRICE_CHANGE_PCT = 0.03
@@ -57,12 +57,19 @@ class Signal:
 
 
 def _get(path: str, params: Optional[dict] = None) -> Any:
-    response = SESSION.get(BASE_URL + path, params=params, timeout=12)
-    response.raise_for_status()
-    payload = response.json()
-    if isinstance(payload, dict) and payload.get("code") not in (None, 0):
-        raise MarketDataError(str(payload))
-    return payload
+    """Use Binance Spot REST; public-data host is the official Spot-only fallback."""
+    errors = []
+    for base_url in BASE_URLS:
+        try:
+            response = SESSION.get(base_url + path, params=params, timeout=12)
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict) and payload.get("code") not in (None, 0):
+                raise MarketDataError(str(payload))
+            return payload
+        except (requests.RequestException, ValueError, MarketDataError) as exc:
+            errors.append(base_url + ": " + type(exc).__name__ + ": " + str(exc))
+    raise MarketDataError("Binance Spot unavailable on all official endpoints: " + " | ".join(errors))
 
 
 def _float(value: Any, field: str) -> float:
