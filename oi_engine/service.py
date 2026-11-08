@@ -1,4 +1,4 @@
-"""Continuous live outcome monitor with independent multi-provider price fallback."""
+"""Continuous live outcome monitor using Binance Spot prices only."""
 from __future__ import annotations
 
 import os
