@@ -298,11 +298,16 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                     "reason": "entry_not_live_confirmed",
                 }
             if not any(event.get("event") == "EXPIRED_NO_ENTRY" for event in events):
+                expiry_reason = (
+                    "tp1_before_entry"
+                    if any(event.get("event") == "TP1" for event in events)
+                    else "entry_not_live_confirmed"
+                )
                 events.append({
                     "event": "EXPIRED_NO_ENTRY",
                     "time_ms": now_ms,
                     "source": "outcome_dispatch",
-                    "reason": "entry_not_live_confirmed",
+                    "reason": expiry_reason,
                 })
             record["events"] = events
         elif entry_event:
@@ -404,7 +409,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
             elif name == "EXPIRED_NO_ENTRY":
                 reason = str(event.get("reason", record.get("entry_expired_reason", "")))
                 if reason == "tp1_before_entry":
-                    label = "⚠️ تارگت اول قبل از فعال شدن ورود لمس شد؛ ورود انجام نشد و سیگنال منقضی شد. این حرکت سود معامله محسوب نمی‌شود."
+                    label = "⚪ نقطه ورود فعال نشد؛ تارگت اول قبل از ورود لمس شد. این حرکت سود معامله محسوب نمی‌شود."
                 elif reason == "entry_window_expired":
                     label = "⌛ اعتبار نقطه ورود تمام شد؛ ورود فعال نشد و سیگنال منقضی شد."
                 else:
