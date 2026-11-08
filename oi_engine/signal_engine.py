@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-BASE_URL = "https://fapi.binance.com"
+BASE_URL = "https://api.binance.com"
 INTERVAL = "15m"
 MIN_OI_CHANGE_PCT = 0.10
 MIN_DIRECTIONAL_PRICE_CHANGE_PCT = 0.03
@@ -23,11 +23,6 @@ MIN_ACTIVE_VOLUME_RATIO = 1.00
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "OI-Signal-Engine/1.0"})
 
-from oi_engine.market_data import (
-    fetch_bybit_rows, fetch_gateio_rows,
-    fetch_bybit_live_price, fetch_gateio_live_price,
-    fetch_bybit_active_symbols,
-)
 
 
 class MarketDataError(RuntimeError):
@@ -86,51 +81,30 @@ def _float(value: Any, field: str) -> float:
 
 
 def get_active_symbols() -> List[str]:
-    """Return liquid USDT perpetuals; use Bybit if Binance's universe feed is blocked."""
-    excluded = {
-        "USDCUSDT", "BTCDOMUSDT", "DEFIUSDT",
-        "1000SHIBUSDT", "1000PEPEUSDT", "1000BONKUSDT",
-    }
-    try:
-        info = _get("/fapi/v1/exchangeInfo")
-        active = {
-            item.get("symbol", "") for item in info.get("symbols", [])
-            if item.get("status") == "TRADING"
-            and item.get("contractType") == "PERPETUAL"
-            and item.get("quoteAsset") == "USDT"
-            and str(item.get("symbol", "")).endswith("USDT")
-            and item.get("symbol") not in excluded
-        }
-        tickers = _get("/fapi/v1/ticker/24hr")
-        ranked = []
-        for ticker in tickers:
-            symbol = ticker.get("symbol")
-            if symbol not in active:
-                continue
-            try:
-                turnover = _float(ticker.get("quoteVolume"), "24h quote volume")
-            except MarketDataError:
-                continue
-            if turnover > 0:
-                ranked.append((turnover, symbol))
-        ranked.sort(reverse=True)
-        if ranked:
-            return [symbol for _, symbol in ranked]
-        raise MarketDataError("Binance returned no liquid USDT perpetuals")
-    except (requests.RequestException, MarketDataError, ValueError, TypeError) as exc:
+    """Return active, liquid Binance Spot USDT pairs only."""
+    info = _get("/api/v3/exchangeInfo")
+    active = {item.get("symbol", "") for item in info.get("symbols", [])
+              if item.get("status") == "TRADING"
+              and item.get("isSpotTradingAllowed", True)
+              and item.get("quoteAsset") == "USDT"
+              and str(item.get("symbol", "")).endswith("USDT")
+              and item.get("baseAsset") not in {"USDC", "BUSD", "TUSD", "FDUSD"}}
+    tickers = _get("/api/v3/ticker/24hr")
+    ranked = []
+    for ticker in tickers:
+        symbol = ticker.get("symbol")
+        if symbol not in active:
+            continue
         try:
-            symbols = [s for s in fetch_bybit_active_symbols() if s not in excluded]
-            if symbols:
-                print(
-                    f"Market universe fallback: Binance unavailable ({type(exc).__name__}); "
-                    f"Bybit linear returned {len(symbols)} symbols", flush=True
-                )
-                return symbols
-        except Exception as bybit_error:
-            raise MarketDataError(
-                f"Binance universe unavailable ({exc}); Bybit universe unavailable ({bybit_error})"
-            ) from bybit_error
-        raise MarketDataError(f"Binance and Bybit returned no usable market universe: {exc}") from exc
+            turnover = _float(ticker.get("quoteVolume"), "24h spot quote volume")
+        except MarketDataError:
+            continue
+        if turnover > 0:
+            ranked.append((turnover, symbol))
+    ranked.sort(reverse=True)
+    if not ranked:
+        raise MarketDataError("Binance Spot returned no liquid USDT pairs")
+    return [symbol for _, symbol in ranked]
 
 
 def validate_oi_cadence(rows: List[dict]) -> None:
@@ -194,73 +168,19 @@ def _validate_closed_candles(candles: list[dict], provider: str) -> None:
 
 
 def fetch_snapshot(symbol: str) -> Dict[str, Any]:
-    """Fetch closed candles and live price from one provider; never mix exchanges."""
-    errors = []
-    try:
-        rows = _get("/fapi/v1/klines", {
-            "symbol": symbol, "interval": INTERVAL, "limit": 80
-        })
-        candles = _parse_binance_candles(rows[:-1])  # Drop forming candle.
-        _validate_closed_candles(candles, "Binance USD-M")
-        ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
-        live_price = _float(ticker.get("price"), "Binance USD-M live price")
-        if live_price <= 0:
-            raise MarketDataError("Invalid Binance USD-M live price")
-        source = "Binance USD-M Futures (USDT perpetual)"
-    except Exception as exc:
-        errors.append(f"Binance: {type(exc).__name__}: {exc}")
-        candles = None
-        live_price = None
-        source = None
-
-    if candles is None:
-        try:
-            rows = fetch_bybit_rows(symbol, "15", limit=80)
-            # Bybit response turnover is quote volume; its public kline feed does
-            # not expose taker-buy quote. Neutral flow is deliberately used here;
-            # Coinalyze remains the authoritative taker-flow input for watchlist entries.
-            candles = [{
-                "open_time": int(row[0]), "open": _float(row[1], "open"),
-                "high": _float(row[2], "high"), "low": _float(row[3], "low"),
-                "close": _float(row[4], "close"), "volume": _float(row[5], "volume"),
-                "quote_volume": _float(row[7], "quote volume"),
-                "taker_buy_quote": _float(row[7], "quote volume") * 0.5,
-                "close_time": int(row[6]),
-            } for row in rows]
-            _validate_closed_candles(candles, "Bybit linear")
-            live_price = _float(fetch_bybit_live_price(symbol), "Bybit live price")
-            source = "Bybit linear perpetual (USDT)"
-            print(f"Price provider fallback: {symbol} Binance unavailable ({errors[0]}); Bybit candles + ticker OK", flush=True)
-        except Exception as exc:
-            errors.append(f"Bybit: {type(exc).__name__}: {exc}")
-            candles = None
-
-    if candles is None:
-        try:
-            rows = fetch_gateio_rows(symbol, "15m", limit=80)
-            candles = [{
-                "open_time": int(row[0]), "open": _float(row[1], "open"),
-                "high": _float(row[2], "high"), "low": _float(row[3], "low"),
-                "close": _float(row[4], "close"), "volume": _float(row[5], "volume"),
-                "quote_volume": _float(row[7], "quote volume"),
-                "taker_buy_quote": _float(row[7], "quote volume") * 0.5,
-                "close_time": int(row[6]),
-            } for row in rows]
-            _validate_closed_candles(candles, "Gate.io")
-            live_price = _float(fetch_gateio_live_price(symbol), "Gate.io live price")
-            source = "Gate.io USDT perpetual"
-            print("Price provider fallback: " + symbol + " Binance/Bybit unavailable (" + " | ".join(errors) + "); Gate.io candles + ticker OK", flush=True)
-        except Exception as exc:
-            errors.append(f"Gate.io: {type(exc).__name__}: {exc}")
-            candles = None
-
-    if candles is None or live_price is None or live_price <= 0:
-        raise MarketDataError("No consistent candle+live-price provider available: " + " | ".join(errors))
-
-    return {
-        "symbol": symbol, "candles": candles, "live_price": live_price,
-        "live_price_time_ms": int(time.time() * 1000), "price_source": source,
-    }
+    """Fetch closed 15m candles and live quote from Binance Spot only."""
+    symbol = str(symbol).upper()
+    rows = _get("/api/v3/klines", {"symbol": symbol, "interval": INTERVAL, "limit": 80})
+    if not isinstance(rows, list) or len(rows) < 56:
+        raise MarketDataError("Binance Spot returned insufficient candles for " + symbol)
+    candles = _parse_binance_candles(rows[:-1])
+    _validate_closed_candles(candles, "Binance Spot")
+    ticker = _get("/api/v3/ticker/price", {"symbol": symbol})
+    live_price = _float(ticker.get("price"), "Binance Spot live price")
+    if live_price <= 0:
+        raise MarketDataError("Invalid Binance Spot live price for " + symbol)
+    return {"symbol": symbol, "candles": candles, "live_price": live_price,
+            "live_price_time_ms": int(time.time() * 1000), "price_source": "Binance Spot"}
 
 
 def _atr(candles: List[dict], period: int = 14) -> float:
