@@ -1,8 +1,8 @@
 """Standalone 15m Open Interest signal engine.
 
-This module is intentionally independent of the legacy Pump Hunter strategies.
-It emits only confirmed LONG/SHORT candidates; it does not send Telegram messages.
-Binance USD-M Futures is the sole price source. Coinalyze supplies derivatives metrics.
+Price/candle provider order: Binance USD-M, Bybit linear, then Gate.io USDT perpetual.
+Each snapshot's candles and live price always come from the same exchange.
+Coinalyze remains the derivatives-metrics source.
 """
 from __future__ import annotations
 
@@ -22,6 +22,12 @@ MAX_SHORT_TAKER_RATIO = 0.495
 MIN_ACTIVE_VOLUME_RATIO = 1.00
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "OI-Signal-Engine/1.0"})
+
+from oi_engine.market_data import (
+    fetch_bybit_rows, fetch_gateio_rows,
+    fetch_bybit_live_price, fetch_gateio_live_price,
+    fetch_bybit_active_symbols,
+)
 
 
 class MarketDataError(RuntimeError):
@@ -81,7 +87,14 @@ def _float(value: Any, field: str) -> float:
 
 def get_active_symbols() -> List[str]:
     """Return liquid active USDT perpetuals, ranked by 24h quote turnover."""
-    info = _get("/fapi/v1/exchangeInfo")
+    try:
+        info = _get("/fapi/v1/exchangeInfo")
+    except (requests.RequestException, MarketDataError, ValueError, TypeError) as exc:
+        symbols = fetch_bybit_active_symbols()
+        if symbols:
+            print(f"Market universe fallback: Binance unavailable ({type(exc).__name__}); Bybit linear returned {len(symbols)} symbols", flush=True)
+            return symbols
+        raise MarketDataError(f"Binance and Bybit market-universe feeds unavailable: {exc}") from exc
     excluded = {
         "USDCUSDT", "BTCDOMUSDT", "DEFIUSDT",
         "1000SHIBUSDT", "1000PEPEUSDT", "1000BONKUSDT",
@@ -125,45 +138,116 @@ def validate_oi_cadence(rows: List[dict]) -> None:
 
 
 def fetch_live_price(symbol: str) -> float:
-    """Fetch the latest executable Binance USD-M perpetual price for a signal card."""
-    ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
-    price = _float(ticker.get("price"), "Binance USD-M live price")
-    if price <= 0:
+    """Fetch a live price using the selected provider fallback order."""
+    errors = []
+    try:
+        ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
+        price = _float(ticker.get("price"), "Binance USD-M live price")
+        if price > 0:
+            return price
         raise MarketDataError("Invalid Binance USD-M live price")
-    return price
+    except Exception as exc:
+        errors.append(f"Binance: {type(exc).__name__}: {exc}")
+    for name, provider in (
+        ("Bybit", fetch_bybit_live_price),
+        ("Gate.io", fetch_gateio_live_price),
+    ):
+        try:
+            return _float(provider(symbol), f"{name} live price")
+        except Exception as exc:
+            errors.append(f"{name}: {type(exc).__name__}: {exc}")
+    raise MarketDataError("Live price unavailable from all providers: " + " | ".join(errors))
+
+
+def _parse_binance_candles(rows: list) -> list[dict]:
+    return [{
+        "open_time": int(row[0]), "open": _float(row[1], "open"),
+        "high": _float(row[2], "high"), "low": _float(row[3], "low"),
+        "close": _float(row[4], "close"), "volume": _float(row[5], "volume"),
+        "quote_volume": _float(row[7], "quote volume"),
+        "taker_buy_quote": _float(row[10], "taker buy quote"),
+        "close_time": int(row[6]),
+    } for row in rows]
+
+
+def _validate_closed_candles(candles: list[dict], provider: str) -> None:
+    if len(candles) < 55:
+        raise MarketDataError(f"Not enough closed {provider} 15m candles ({len(candles)}/55)")
+    expected = 15 * 60 * 1000
+    for previous, current in zip(candles, candles[1:]):
+        if int(current["open_time"]) - int(previous["open_time"]) != expected:
+            raise MarketDataError(f"{provider} 15m candle sequence has a gap")
+        if int(current["close_time"]) != int(current["open_time"]) + expected - 1:
+            raise MarketDataError(f"{provider} 15m candle close-time alignment is invalid")
 
 
 def fetch_snapshot(symbol: str) -> Dict[str, Any]:
-    """Fetch Binance USD-M perpetual candles and live price; never mix exchanges."""
+    """Fetch closed candles and live price from one provider; never mix exchanges."""
+    errors = []
     try:
-        candles = _get("/fapi/v1/klines", {
+        rows = _get("/fapi/v1/klines", {
             "symbol": symbol, "interval": INTERVAL, "limit": 80
         })
-        candles = candles[:-1]  # Exclude the currently-forming Binance candle.
-        parsed = [{
-            "open_time": int(row[0]),
-            "open": _float(row[1], "open"),
-            "high": _float(row[2], "high"),
-            "low": _float(row[3], "low"),
-            "close": _float(row[4], "close"),
-            "volume": _float(row[5], "volume"),
-            "quote_volume": _float(row[7], "quote volume"),
-            "taker_buy_quote": _float(row[10], "taker buy quote"),
-            "close_time": int(row[6]),
-        } for row in candles]
-        if len(parsed) < 55:
-            raise MarketDataError("Not enough closed Binance USD-M 15m candles")
+        candles = _parse_binance_candles(rows[:-1])  # Drop forming candle.
+        _validate_closed_candles(candles, "Binance USD-M")
         ticker = _get("/fapi/v1/ticker/price", {"symbol": symbol})
         live_price = _float(ticker.get("price"), "Binance USD-M live price")
         if live_price <= 0:
             raise MarketDataError("Invalid Binance USD-M live price")
-    except (requests.RequestException, MarketDataError, ValueError, TypeError, KeyError) as exc:
-        raise MarketDataError(f"Binance USD-M price feed unavailable: {exc}") from exc
+        source = "Binance USD-M Futures (USDT perpetual)"
+    except Exception as exc:
+        errors.append(f"Binance: {type(exc).__name__}: {exc}")
+        candles = None
+        live_price = None
+        source = None
+
+    if candles is None:
+        try:
+            rows = fetch_bybit_rows(symbol, "15", limit=80)
+            # Bybit response turnover is quote volume; its public kline feed does
+            # not expose taker-buy quote. Neutral flow is deliberately used here;
+            # Coinalyze remains the authoritative taker-flow input for watchlist entries.
+            candles = [{
+                "open_time": int(row[0]), "open": _float(row[1], "open"),
+                "high": _float(row[2], "high"), "low": _float(row[3], "low"),
+                "close": _float(row[4], "close"), "volume": _float(row[5], "volume"),
+                "quote_volume": _float(row[7], "quote volume"),
+                "taker_buy_quote": _float(row[7], "quote volume") * 0.5,
+                "close_time": int(row[6]),
+            } for row in rows]
+            _validate_closed_candles(candles, "Bybit linear")
+            live_price = _float(fetch_bybit_live_price(symbol), "Bybit live price")
+            source = "Bybit linear perpetual (USDT)"
+            print(f"Price provider fallback: {symbol} Binance unavailable; Bybit candles + ticker OK", flush=True)
+        except Exception as exc:
+            errors.append(f"Bybit: {type(exc).__name__}: {exc}")
+            candles = None
+
+    if candles is None:
+        try:
+            rows = fetch_gateio_rows(symbol, "15m", limit=80)
+            candles = [{
+                "open_time": int(row[0]), "open": _float(row[1], "open"),
+                "high": _float(row[2], "high"), "low": _float(row[3], "low"),
+                "close": _float(row[4], "close"), "volume": _float(row[5], "volume"),
+                "quote_volume": _float(row[7], "quote volume"),
+                "taker_buy_quote": _float(row[7], "quote volume") * 0.5,
+                "close_time": int(row[6]),
+            } for row in rows]
+            _validate_closed_candles(candles, "Gate.io")
+            live_price = _float(fetch_gateio_live_price(symbol), "Gate.io live price")
+            source = "Gate.io USDT perpetual"
+            print(f"Price provider fallback: {symbol} Binance and Bybit unavailable; Gate.io candles + ticker OK", flush=True)
+        except Exception as exc:
+            errors.append(f"Gate.io: {type(exc).__name__}: {exc}")
+            candles = None
+
+    if candles is None or live_price is None or live_price <= 0:
+        raise MarketDataError("No consistent candle+live-price provider available: " + " | ".join(errors))
+
     return {
-        "symbol": symbol, "candles": parsed,
-        "live_price": live_price,
-        "live_price_time_ms": int(time.time() * 1000),
-        "price_source": "Binance USD-M Futures (USDT perpetual)",
+        "symbol": symbol, "candles": candles, "live_price": live_price,
+        "live_price_time_ms": int(time.time() * 1000), "price_source": source,
     }
 
 
