@@ -6,6 +6,7 @@ one candle are resolved conservatively as stop-first.
 from __future__ import annotations
 
 import time
+import math
 from typing import Any, Callable, Dict, List
 
 import requests
