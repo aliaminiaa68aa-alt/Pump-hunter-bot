@@ -116,7 +116,7 @@ class LiveOutcomePipelineTests(unittest.TestCase):
         self.assertEqual(send.call_count, 3)
         messages = [call.args[2] for call in send.call_args_list]
         self.assertIn("ورود فعال شد", messages[0])
-        self.assertIn("تارگت اول خورد", messages[1])
+        self.assertIn("تارگت اول تاچ شد", messages[1])
         self.assertIn("تارگت دوم خورد", messages[2])
         self.assertTrue(all(
             call.kwargs["reply_to_message_id"] == 700
