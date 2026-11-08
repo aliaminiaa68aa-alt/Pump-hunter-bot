@@ -141,12 +141,17 @@ def main() -> None:
     )
     # This foreground loop is independent of the scanner thread: a slow scan
     # cannot pause the 10-second outcome polling cadence.
+    last_heartbeat = 0.0
     while True:
         started = time.monotonic()
         try:
             result = monitor_live_outcomes_once()
+            now = time.monotonic()
             if result.get("events") or result.get("missing_symbols"):
                 print(f"Live outcome monitor update: {result}", flush=True)
+            elif now - last_heartbeat >= 60:
+                print(f"Live outcome monitor heartbeat: {result}", flush=True)
+                last_heartbeat = now
         except Exception as exc:
             print(f"ERROR live outcome monitor: {type(exc).__name__}: {exc}", flush=True)
         elapsed = time.monotonic() - started
