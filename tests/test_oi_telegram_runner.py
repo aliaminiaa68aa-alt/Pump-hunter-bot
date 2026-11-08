@@ -1155,7 +1155,7 @@ class TelegramRunnerTests(unittest.TestCase):
                         journal, "token", "chat"
                     )
         self.assertEqual(send.call_count, 1)
-        self.assertIn("ورود با پایش زنده تأیید نشد", send.call_args.args[2])
+        self.assertIn("نقطه ورود فعال نشد", send.call_args.args[2])
         record = result["trades"]["historical-only"]
         self.assertEqual(record["status"], "EXPIRED_NO_ENTRY")
         self.assertEqual(
@@ -1190,7 +1190,7 @@ class TelegramRunnerTests(unittest.TestCase):
                         journal, "token", "chat"
                     )
         self.assertEqual(send.call_count, 1)
-        self.assertIn("ورود با پایش زنده تأیید نشد", send.call_args.args[2])
+        self.assertIn("نقطه ورود فعال نشد", send.call_args.args[2])
         self.assertEqual(result["trades"]["target-only"]["status"], "EXPIRED_NO_ENTRY")
 
 
@@ -1223,7 +1223,7 @@ class TelegramRunnerTests(unittest.TestCase):
                     )
         self.assertEqual(send.call_count, 1)
         message = send.call_args.args[2]
-        self.assertIn("تارگت اول قبل از فعال شدن ورود لمس شد", message)
+        self.assertIn("تارگت اول قبل از ورود لمس شد", message)
         self.assertIn("سود معامله محسوب نمی‌شود", message)
         self.assertEqual(result["trades"]["tp-before-entry"]["notification_state"]["0"]["status"], "sent")
 
@@ -1256,7 +1256,7 @@ class TelegramRunnerTests(unittest.TestCase):
                         journal, "token", "chat"
                     )
         self.assertEqual(send.call_count, 1)
-        self.assertIn("ورود با پایش زنده تأیید نشد", send.call_args.args[2])
+        self.assertIn("نقطه ورود فعال نشد", send.call_args.args[2])
         record = result["trades"]["already-entered"]
         self.assertEqual(record["status"], "EXPIRED_NO_ENTRY")
         self.assertFalse(record["entry_missed"])
