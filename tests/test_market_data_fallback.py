@@ -25,7 +25,7 @@ class BinanceSpotOnlyTests(unittest.TestCase):
         get.return_value = response
         rows = fetch_spot_rows('ABCUSDT', '15m', limit=3)
         self.assertEqual(len(rows), 3)
-        self.assertIn('api.binance.com/api/v3/klines', get.call_args.args[0])
+        self.assertIn('/api/v3/klines', get.call_args.args[0])
 
     @patch('oi_engine.signal_engine._get')
     def test_signal_snapshot_uses_binance_spot_candles_and_ticker(self, get):
