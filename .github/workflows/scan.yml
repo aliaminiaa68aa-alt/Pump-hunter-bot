@@ -2,7 +2,7 @@ name: Pump Hunter Cloud Scanner
 
 "on":
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "0 */6 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [scheduled-scan]
@@ -17,7 +17,7 @@ name: Pump Hunter Cloud Scanner
 
 concurrency:
   group: pump-hunter-scheduled-scanner
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -26,7 +26,7 @@ jobs:
   scan:
     name: Run crypto signal scanner
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 360
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -104,12 +104,12 @@ jobs:
           LIVE_MONITOR_INTERVAL_SECONDS: "5"
         run: |
           set +e
-          timeout --signal=TERM --kill-after=10s 225s python -m oi_engine.service
+          timeout --signal=TERM --kill-after=30s 20500s python -m oi_engine.service
           status=$?
           if [ "$status" -ne 124 ]; then
             exit "$status"
           fi
-          echo "Scheduled live-monitor window ended normally after 225 seconds."
+          echo "Scheduled live-monitor window ended normally after 20,500 seconds (~5h42m)."
 
       - name: Save scanner state
         if: always()
