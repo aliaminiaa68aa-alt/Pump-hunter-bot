@@ -12,6 +12,8 @@ from typing import Any, Dict, Mapping
 
 ACTIVE_STATUSES = {"WAITING_ENTRY", "OPEN", "TP1_HIT"}
 MAX_PENDING_ENTRY_MS = 60 * 60 * 1000
+# Retained only as metadata for legacy first-observation MISSED_ENTRY events.
+MAX_ENTRY_SLIPPAGE_PCT = 0.15
 # Reject a polling fill if the observed price has moved too far beyond the
 # planned entry in the adverse direction. This prevents chasing stale alerts.
 TERMINAL_STATUSES = {
