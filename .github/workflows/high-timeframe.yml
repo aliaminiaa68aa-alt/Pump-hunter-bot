@@ -1,6 +1,12 @@
 name: High timeframe 4H and 1D scanner
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "high_timeframe_bot.py"
+      - ".github/workflows/high-timeframe.yml"
+      - "tests/test_high_timeframe_bot.py"
   schedule:
     - cron: "*/30 * * * *"
   workflow_dispatch:
