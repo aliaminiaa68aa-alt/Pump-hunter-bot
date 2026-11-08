@@ -224,7 +224,7 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
             _validate_closed_candles(candles, "Bybit linear")
             live_price = _float(fetch_bybit_live_price(symbol), "Bybit live price")
             source = "Bybit linear perpetual (USDT)"
-            print(f"Price provider fallback: {symbol} Binance unavailable; Bybit candles + ticker OK", flush=True)
+            print(f"Price provider fallback: {symbol} Binance unavailable ({errors[0]}); Bybit candles + ticker OK", flush=True)
         except Exception as exc:
             errors.append(f"Bybit: {type(exc).__name__}: {exc}")
             candles = None
@@ -243,7 +243,7 @@ def fetch_snapshot(symbol: str) -> Dict[str, Any]:
             _validate_closed_candles(candles, "Gate.io")
             live_price = _float(fetch_gateio_live_price(symbol), "Gate.io live price")
             source = "Gate.io USDT perpetual"
-            print(f"Price provider fallback: {symbol} Binance and Bybit unavailable; Gate.io candles + ticker OK", flush=True)
+            print("Price provider fallback: " + symbol + " Binance/Bybit unavailable (" + " | ".join(errors) + "); Gate.io candles + ticker OK", flush=True)
         except Exception as exc:
             errors.append(f"Gate.io: {type(exc).__name__}: {exc}")
             candles = None
