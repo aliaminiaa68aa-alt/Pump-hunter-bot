@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -31,6 +32,10 @@ _retry = Retry(total=3, connect=3, read=2, backoff_factor=0.6,
                allowed_methods=frozenset(["GET", "POST"]))
 _adapter = HTTPAdapter(max_retries=_retry, pool_connections=12, pool_maxsize=12)
 SESSION.mount("https://", _adapter)
+
+
+class InsufficientHistoryError(ValueError):
+    """A newly listed symbol has not accumulated enough candles for this timeframe."""
 
 
 @dataclass
@@ -88,7 +93,8 @@ def universe() -> list[tuple[str, float]]:
     for item in info.get("symbols", []):
         symbol = str(item.get("symbol", "")).upper()
         base = str(item.get("baseAsset", "")).upper()
-        if (item.get("status") == "TRADING"
+        if (re.fullmatch(r"[A-Z0-9]+USDT", symbol)
+                and item.get("status") == "TRADING"
                 and item.get("isSpotTradingAllowed", True)
                 and item.get("quoteAsset") == "USDT"
                 and base not in {"USDC", "BUSD", "TUSD", "FDUSD", "USDP", "DAI"}
@@ -143,7 +149,7 @@ def candles(symbol: str, interval: str) -> list[dict]:
             result.append(candle)
     result.sort(key=lambda c: c["open_time"])
     if len(result) < 65:
-        raise ValueError(f"Not enough closed {interval} candles for {symbol}: {len(result)}")
+        raise InsufficientHistoryError(f"Not enough closed {interval} candles for {symbol}: {len(result)}")
     return result
 
 
@@ -395,7 +401,8 @@ def run_once() -> dict:
         raise RuntimeError("Binance returned no eligible liquid USDT Spot symbols")
     stats = {"symbols": len(pairs), "timeframes_checked": 0,
              "technical_setups": 0, "sent": [], "duplicates": 0,
-             "analysis_errors": 0, "coinalyze_errors": 0}
+             "analysis_errors": 0, "coinalyze_errors": 0,
+             "insufficient_history": 0}
     for symbol, current_price in pairs:
         for tf in TIMEFRAMES:
             stats["timeframes_checked"] += 1
@@ -429,9 +436,13 @@ def run_once() -> dict:
                 LOG.info("Telegram signal delivered: %s", key)
             except TelegramDeliveryError:
                 raise
+            except InsufficientHistoryError as exc:
+                stats["insufficient_history"] += 1
+                LOG.info("%s %s skipped: %s", symbol, tf, exc)
             except Exception as exc:
                 stats["analysis_errors"] += 1
                 LOG.exception("%s %s scan error: %s", symbol, tf, exc)
+    save_state(state)
     LOG.info("Scan summary: %s", stats)
     return stats
 
