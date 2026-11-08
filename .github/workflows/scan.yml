@@ -75,6 +75,8 @@ jobs:
               "BINANCE_PUBLIC_DATA_TIME": "https://data-api.binance.vision/api/v3/time",
               "BINANCE_PUBLIC_DATA_EXCHANGE_INFO": "https://data-api.binance.vision/api/v3/exchangeInfo",
               "BINANCE_PUBLIC_DATA_TICKER": "https://data-api.binance.vision/api/v3/ticker/price?symbol=BTCUSDT",
+              "BINANCE_PUBLIC_DATA_24HR": "https://data-api.binance.vision/api/v3/ticker/24hr",
+              "BINANCE_PUBLIC_DATA_KLINES": "https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=2",
               "BINANCE_SPOT_EXCHANGE_INFO": "https://api.binance.com/api/v3/exchangeInfo",
               "BINANCE_SPOT_BTCUSDT_TICKER": "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
           }
