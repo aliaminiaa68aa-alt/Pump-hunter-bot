@@ -380,7 +380,7 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                     continue
                 label = f"🟡 ورود فعال شد؛ قیمت ثبت‌شده در لحظه لمس: {float(event.get('fill', record['signal']['entry'])):.8g}"
             elif name == "TP1":
-                label = "🎯 تارگت اول خورد"
+                label = "🎯 تارگت اول تاچ شد\n💰 مدیریت سرمایه: بخشی از سود را ذخیره کنید و حد ضرر را به نقطه ورود منتقل کنید (ریسک‌فری)."
             elif name == "TP2":
                 label = "🏆 تارگت دوم خورد؛ معامله به پایان رسید"
             elif name == "SL":
