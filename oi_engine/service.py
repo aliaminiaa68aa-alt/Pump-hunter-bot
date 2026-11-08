@@ -17,20 +17,30 @@ from oi_engine.telegram_runner import (
     main as run_signal_scan,
 )
 
-BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/price"
+BINANCE_TICKER_URLS = ("https://api.binance.com/api/v3/ticker/price", "https://data-api.binance.vision/api/v3/ticker/price")
 
 
 def fetch_binance_last_prices(symbols: set[str]) -> Dict[str, float]:
-    """Fetch requested live prices from Binance Spot in one bulk ticker request."""
+    """Fetch requested prices from Binance Spot; fallback is Binance official Spot data host."""
     if not symbols:
         return {}
     wanted = {symbol.upper() for symbol in symbols}
-    response = requests.get(BINANCE_TICKER_URL, timeout=8,
-                            headers={"User-Agent": "Pump-Hunter/1.0"})
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        raise ValueError("Unexpected Binance Spot ticker response")
+    errors = []
+    payload = None
+    for ticker_url in BINANCE_TICKER_URLS:
+        try:
+            response = requests.get(ticker_url, timeout=8,
+                                    headers={"User-Agent": "Pump-Hunter/1.0"})
+            response.raise_for_status()
+            candidate = response.json()
+            if not isinstance(candidate, list):
+                raise ValueError("Unexpected Binance Spot ticker response")
+            payload = candidate
+            break
+        except Exception as exc:
+            errors.append(ticker_url + ": " + type(exc).__name__ + ": " + str(exc))
+    if payload is None:
+        raise RuntimeError("Binance Spot ticker unavailable: " + " | ".join(errors))
     result: Dict[str, float] = {}
     for item in payload:
         symbol = str(item.get("symbol", "")).upper()
