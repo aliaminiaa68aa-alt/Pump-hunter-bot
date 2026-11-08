@@ -208,8 +208,7 @@ class TelegramRunnerTests(unittest.TestCase):
 
     def test_independent_market_candidates_are_added_after_channel_alerts(self):
         class UniverseClient:
-            def get_active_binance_usdt_perpetual_symbols(self):
-                return ["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT"]
+            pass
 
         watchlist = {
             "OIUSDT": {
@@ -219,9 +218,10 @@ class TelegramRunnerTests(unittest.TestCase):
                 "source_type": "oi_channel",
             }
         }
-        cursor, added = telegram_runner.add_market_universe_candidates(
-            watchlist, UniverseClient(), "", now=300
-        )
+        with patch("oi_engine.signal_engine.get_active_symbols", return_value=["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT"]), patch.object(telegram_runner, "_has_supported_perpetual", return_value=True):
+            cursor, added = telegram_runner.add_market_universe_candidates(
+                watchlist, UniverseClient(), "", now=300
+            )
         self.assertEqual(added, 4)
         self.assertEqual(cursor, "DDDUSDT")
         self.assertEqual(watchlist["AAAUSDT"]["source_type"], "market_universe")
