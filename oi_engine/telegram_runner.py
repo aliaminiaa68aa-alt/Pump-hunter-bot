@@ -322,21 +322,20 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                     # Recover only entries that were actually recorded by the live
                     # poller; never revive a candle-replay-only trade.
                     record["entry_missed"] = False
-                record.pop("entry_missed_reason", None)
-                event_names = [event.get("event") for event in events]
-                if "TP2" in event_names:
-                    record["status"] = "CLOSED_TP2"
-                elif "SL" in event_names:
-                    record["status"] = "CLOSED_SL"
-                elif "TP1" in event_names:
-                    record["status"] = "TP1_HIT"
-                else:
-                    record["status"] = "OPEN"
-                delivery = record.setdefault("notification_state", {})
-                for index, event in enumerate(events):
-                    previous = delivery.get(str(index), {})
-                    if previous.get("reason") == "missed_entry":
-                        delivery[str(index)] = {"status": "pending", "attempts": 0}
+                    record.pop("entry_missed_reason", None)
+                    event_names = [event.get("event") for event in events]
+                    if "TP2" in event_names:
+                        record["status"] = "CLOSED_TP2"
+                    elif "SL" in event_names:
+                        record["status"] = "CLOSED_SL"
+                    elif "TP1" in event_names:
+                        record["status"] = "TP1_HIT"
+                    else:
+                        record["status"] = "OPEN"
+                    for index, event in enumerate(events):
+                        previous = delivery.get(str(index), {})
+                        if previous.get("reason") == "missed_entry":
+                            delivery[str(index)] = {"status": "pending", "attempts": 0}
         if record.get("entry_missed") and not entry_event:
             delivery = record.setdefault("notification_state", {})
             for index, event in enumerate(events):
