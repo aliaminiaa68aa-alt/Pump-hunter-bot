@@ -979,6 +979,22 @@ def main() -> None:
             )
             continue
         entry_price = float(signal.entry)
+        expected_source = str(metrics.get("price_source") or "")
+        if expected_source and current_price_source != expected_source:
+            state[key] = candle_id
+            save_state(state)
+            record = watchlist.get(signal.symbol)
+            if isinstance(record, dict):
+                record["status"] = "رد سیگنال؛ منبع قیمت تغییر کرد"
+                record["reason"] = (
+                    f"منبع کندل‌ها {expected_source} بود اما قیمت لحظه‌ای از "
+                    f"{current_price_source} دریافت شد؛ برای جلوگیری از ترکیب قیمت صرافی‌ها سیگنال ارسال نشد"
+                )
+            print(
+                f"Signal invalidated before Telegram: price source changed; "
+                f"symbol={signal.symbol} candles={expected_source} live={current_price_source}"
+            )
+            continue
         atr_value = _safe_float(metrics.get("atr_15m"), 0.0)
         allowed_gap = max(atr_value * 0.50, entry_price * 0.001)
         price_gap = abs(current_price - entry_price)
