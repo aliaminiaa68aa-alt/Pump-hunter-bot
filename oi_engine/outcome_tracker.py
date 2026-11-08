@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List
 
 import requests
 
-BASE_URL = "https://fapi.binance.com"
+BASE_URL = "https://api.binance.com"
 INTERVAL_MS = 15 * 60 * 1000
 MAX_ACTIVE_HOURS = 96
 MAX_PENDING_ENTRY_HOURS = 1
@@ -19,59 +19,21 @@ MAX_PENDING_ENTRY_HOURS = 1
 
 def _fetch_with_fallback(symbol: str, interval: str, start_ms: int, end_ms: int,
                           limit: int) -> List[list]:
-    """Use Binance USD-M candles first, then Bybit linear candles for price only."""
-    path = "/fapi/v1/klines"
-    try:
-        response = requests.get(
-            BASE_URL + path,
-            params={
-                "symbol": symbol, "interval": interval,
-                "startTime": start_ms, "endTime": end_ms, "limit": limit,
-            },
-            timeout=15,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
-            raise ValueError("Unexpected Binance kline response")
-        _fetch_with_fallback.last_source = "Binance USD-M"
-        return payload
-    except (requests.RequestException, ValueError) as binance_error:
-        from oi_engine.market_data import fetch_bybit_rows, fetch_gateio_rows
-        bybit_interval = "15" if interval == "15m" else "1"
-        try:
-            rows = fetch_bybit_rows(
-                symbol, bybit_interval, start_ms, end_ms,
-                limit=min(limit, 1000),
-            )
-            if rows:
-                _fetch_with_fallback.last_source = "Bybit linear fallback"
-                print(
-                    f"Price candle provider fallback: {symbol} {interval} "
-                    f"Binance unavailable ({type(binance_error).__name__}); Bybit OK"
-                )
-                return rows
-            raise ValueError("Bybit returned no closed candles")
-        except Exception as bybit_error:
-            try:
-                rows = fetch_gateio_rows(
-                    symbol, interval, start_ms, end_ms,
-                    limit=min(limit, 2000),
-                )
-                if not rows:
-                    raise ValueError("Gate.io returned no closed candles")
-                _fetch_with_fallback.last_source = "Gate.io USDT perpetual fallback"
-                print(
-                    f"Price candle provider fallback: {symbol} {interval} "
-                    f"Binance and Bybit unavailable; Gate.io OK"
-                )
-                return rows
-            except Exception as gate_error:
-                _fetch_with_fallback.last_source = "unavailable"
-                raise RuntimeError(
-                    f"Price candles unavailable from Binance ({binance_error}), "
-                    f"Bybit ({bybit_error}), and Gate.io ({gate_error})"
-                ) from gate_error
+    """Fetch Binance Spot candles only; never fall back to futures or other venues."""
+    if interval not in {"15m", "1m"}:
+        raise ValueError("Unsupported Binance Spot interval: " + interval)
+    response = requests.get(
+        BASE_URL + "/api/v3/klines",
+        params={"symbol": symbol, "interval": interval, "startTime": int(start_ms),
+                "endTime": int(end_ms), "limit": min(int(limit), 1000)},
+        timeout=15, headers={"User-Agent": "Pump-Hunter/1.0"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise RuntimeError("Unexpected Binance Spot kline response")
+    _fetch_with_fallback.last_source = "Binance Spot"
+    return payload
 
 
 def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
