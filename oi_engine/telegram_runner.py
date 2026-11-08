@@ -887,7 +887,7 @@ def main() -> None:
 
     def fetch_trade_1m(symbol: str, start_ms: int, end_ms: int):
         rows = _fetch_1m_klines(symbol, start_ms, end_ms)
-        binance_feed["1m"] = getattr(_fetch_1m_klines, "last_source", "unknown") == "Binance USD-M"
+        binance_feed["1m"] = getattr(_fetch_1m_klines, "last_source", "unknown") == "Binance Spot"
         return rows
 
     added = 0
