@@ -71,11 +71,9 @@ jobs:
               print(f"EGRESS_IP_LOOKUP_ERROR={type(exc).__name__}: {exc}")
 
           checks = {
-              "BINANCE_USDM_TIME": "https://fapi.binance.com/fapi/v1/time",
-              "BINANCE_USDM_PING": "https://fapi.binance.com/fapi/v1/ping",
               "BINANCE_SPOT_TIME": "https://api.binance.com/api/v3/time",
-              "BINANCE_PUBLIC_DATA_TIME": "https://data-api.binance.vision/api/v3/time",
-              "BYBIT_PUBLIC_TIME": "https://api.bybit.com/v5/market/time",
+              "BINANCE_SPOT_EXCHANGE_INFO": "https://api.binance.com/api/v3/exchangeInfo",
+              "BINANCE_SPOT_BTCUSDT_TICKER": "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
           }
           for name, url in checks.items():
               try:
