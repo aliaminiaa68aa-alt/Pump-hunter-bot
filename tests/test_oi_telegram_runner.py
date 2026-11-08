@@ -965,7 +965,9 @@ class TelegramRunnerTests(unittest.TestCase):
                     )
         self.assertEqual(send.call_count, 1)
         target_message = send.call_args_list[0].args[2]
-        self.assertIn("تارگت اول خورد", target_message)
+        self.assertIn("تارگت اول تاچ شد", target_message)
+        self.assertIn("ریسک‌فری", target_message)
+        self.assertIn("حد ضرر را به نقطه ورود منتقل کنید", target_message)
         record = result["trades"]["slightly-delayed-entry"]
         self.assertEqual(record["notification_state"]["0"]["reason"], "entry_notification_not_realtime")
         self.assertEqual(record["notification_state"]["1"]["status"], "sent")
