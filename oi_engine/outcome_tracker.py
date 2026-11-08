@@ -91,7 +91,15 @@ def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> 
     data = signal.to_dict() if hasattr(signal, "to_dict") else dict(signal)
     data["engine"] = metrics.get("engine", data.get("engine", "UNSPECIFIED"))
     trade_id = f"{data['engine']}:{data['symbol']}:{data['side']}:{int(data['candle_close_time'])}:{int(sent_at_ms)}"
-    return {
+    try:
+        initial_live_price = float(metrics.get("current_price"))
+    except (TypeError, ValueError, OverflowError):
+        initial_live_price = None
+    if initial_live_price is not None and not (
+        math.isfinite(initial_live_price) and initial_live_price > 0
+    ):
+        initial_live_price = None
+    record = {
         "trade_id": trade_id,
         "signal": data,
         "source": {
@@ -105,15 +113,6 @@ def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> 
         },
         "sent_at_ms": int(sent_at_ms),
         "last_checked_ms": int(sent_at_ms),  # Never count price action before the alert reached Telegram.
-        # The fresh executable quote is the pre-alert baseline. This lets the
-        # first monitor poll detect a crossing that happened after signal send.
-        "live_last_price": (
-            float(metrics["current_price"])
-            if metrics.get("current_price") is not None
-            and math.isfinite(float(metrics["current_price"]))
-            and float(metrics["current_price"]) > 0 else None
-        ),
-        "live_last_price_ms": int(sent_at_ms),
         "status": "WAITING_ENTRY",
         "events": [],
         "entry_fill_price": None,
@@ -125,6 +124,11 @@ def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> 
         "tp1_candle_excursion_ambiguous": False,
         "last_error": None,
     }
+    # Only add a baseline when a valid pre-alert quote was actually captured.
+    if initial_live_price is not None:
+        record["live_last_price"] = initial_live_price
+        record["live_last_price_ms"] = int(sent_at_ms)
+    return record
 
 
 
