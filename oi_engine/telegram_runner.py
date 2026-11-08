@@ -513,7 +513,7 @@ def prune_watchlist(watchlist: Dict[str, Any], now: int | None = None) -> Dict[s
 
 
 def _has_supported_perpetual(client: CoinalyzeClient, symbol: str) -> bool:
-    """Return False only for a genuine missing Binance perpetual mapping."""
+    """Check derivatives-metrics availability; prices are always Binance Spot."""
     from oi_engine.coinalyze_client import CoinalyzeError
     try:
         return bool(client.resolve_market(symbol))
@@ -529,16 +529,13 @@ def add_market_universe_candidates(
     last_universe_symbol: str = "",
     now: int | None = None,
 ) -> tuple[str, int]:
-    """Add a rotating slice of non-channel crypto perps as the SECOND scan source.
+    """Add Binance Spot USDT pairs with available Coinalyze derivatives metrics.
 
-    Channel alerts remain first priority. Market-universe candidates are queued
-    behind fresh channel alerts and pending setups, and all use the same engine.
+    Channel alerts remain first priority; market candidates follow them.
     """
-    discover = getattr(client, "get_active_binance_usdt_perpetual_symbols", None)
-    if not callable(discover):
-        print("Market-universe scan unavailable: provider has no symbol discovery method")
-        return last_universe_symbol, 0
-    symbols = discover()
+    from oi_engine.signal_engine import get_active_symbols
+    symbols = [symbol for symbol in get_active_symbols()
+               if _has_supported_perpetual(client, symbol)]
     if not symbols:
         print("Market-universe scan: provider returned no supported USDT perpetuals")
         return last_universe_symbol, 0
@@ -859,8 +856,8 @@ def main() -> None:
     state = load_state()
     watch_state = load_watchlist_state()
     outcome_journal = load_outcome_journal()
-    # @oi_detector alerts are the first-priority source; the independent
-    # Coinalyze-supported crypto perpetual universe is scanned after them.
+    # @oi_detector alerts are first priority; Binance Spot USDT pairs with
+    # Coinalyze derivatives metrics are scanned after them.
     # Never delete queued market candidates between scheduled runs.
     watchlist = watch_state.get("symbols", {})
     if not isinstance(watchlist, dict):
@@ -875,13 +872,13 @@ def main() -> None:
                 record["source_side"] = recovered_side
 
     client = CoinalyzeClient(api_key=api_key, include_optional_metrics=False)
-    # Price history is Binance USD-M first, then Bybit linear perpetual.
-    # Coinalyze is never used as a price/candle fallback.
+    # All trade prices, candles and outcome replay use Binance Spot only.
+    # Coinalyze is exclusively a derivatives-metrics provider.
     binance_feed = {"15m": None, "1m": None}
 
     def fetch_trade_15m(symbol: str, start_ms: int, end_ms: int):
         rows = _fetch_klines(symbol, start_ms, end_ms)
-        binance_feed["15m"] = getattr(_fetch_klines, "last_source", "unknown") == "Binance USD-M"
+        binance_feed["15m"] = getattr(_fetch_klines, "last_source", "unknown") == "Binance Spot"
         return rows
 
     def fetch_trade_1m(symbol: str, start_ms: int, end_ms: int):
@@ -1109,8 +1106,8 @@ def main() -> None:
         )
         print(
             "Outcome price feed: "
-            f"15m={('Binance USD-M' if binance_feed['15m'] else 'Bybit/Gate fallback') if binance_feed['15m'] is not None else 'not used'}; "
-            f"1m={('Binance USD-M' if binance_feed['1m'] else 'Bybit/Gate fallback') if binance_feed['1m'] is not None else 'not used'}"
+            f"15m={('Binance Spot' if binance_feed['15m'] else 'unavailable') if binance_feed['15m'] is not None else 'not used'}; "
+            f"1m={('Binance Spot' if binance_feed['1m'] else 'unavailable') if binance_feed['1m'] is not None else 'not used'}"
         )
         save_outcome_journal(outcome_journal)
         outcome_journal = dispatch_outcome_notifications(outcome_journal, token, chat_id)
