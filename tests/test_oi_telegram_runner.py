@@ -506,6 +506,8 @@ class TelegramRunnerTests(unittest.TestCase):
                  patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
                  patch.dict(os.environ, env), \
                  patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
+                 patch("oi_engine.signal_engine.get_active_symbols", return_value=["NEWUSDT"]), \
+                 patch.object(telegram_runner, "add_market_universe_candidates", return_value=("", 0)), \
                  patch.object(telegram_runner, "verify_telegram_connection"), \
                  patch.object(telegram_runner, "poll_public_channel_alerts", side_effect=ingest), \
                  patch.object(telegram_runner, "scan_watchlist", side_effect=scan), \
@@ -785,6 +787,8 @@ class TelegramRunnerTests(unittest.TestCase):
                  patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
                  patch.dict(os.environ, env), \
                  patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
+                 patch("oi_engine.signal_engine.get_active_symbols", return_value=["BTCUSDT", "ETHUSDT"]), \
+                 patch.object(telegram_runner, "add_market_universe_candidates", return_value=("", 0)), \
                  patch.object(telegram_runner, "verify_telegram_connection"), \
                  patch.object(telegram_runner, "poll_public_channel_alerts", return_value=(10, 0)), \
                  patch.object(telegram_runner, "scan_watchlist", side_effect=scan), \
