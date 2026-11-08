@@ -86,45 +86,51 @@ def _float(value: Any, field: str) -> float:
 
 
 def get_active_symbols() -> List[str]:
-    """Return liquid active USDT perpetuals, ranked by 24h quote turnover."""
-    try:
-        info = _get("/fapi/v1/exchangeInfo")
-    except (requests.RequestException, MarketDataError, ValueError, TypeError) as exc:
-        symbols = fetch_bybit_active_symbols()
-        if symbols:
-            print(f"Market universe fallback: Binance unavailable ({type(exc).__name__}); Bybit linear returned {len(symbols)} symbols", flush=True)
-            return symbols
-        raise MarketDataError(f"Binance and Bybit market-universe feeds unavailable: {exc}") from exc
+    """Return liquid USDT perpetuals; use Bybit if Binance's universe feed is blocked."""
     excluded = {
         "USDCUSDT", "BTCDOMUSDT", "DEFIUSDT",
         "1000SHIBUSDT", "1000PEPEUSDT", "1000BONKUSDT",
     }
-    active = set()
-    for item in info.get("symbols", []):
-        symbol = item.get("symbol", "")
-        if (
-            item.get("status") == "TRADING"
+    try:
+        info = _get("/fapi/v1/exchangeInfo")
+        active = {
+            item.get("symbol", "") for item in info.get("symbols", [])
+            if item.get("status") == "TRADING"
             and item.get("contractType") == "PERPETUAL"
             and item.get("quoteAsset") == "USDT"
-            and symbol.endswith("USDT")
-            and symbol not in excluded
-        ):
-            active.add(symbol)
-
-    tickers = _get("/fapi/v1/ticker/24hr")
-    ranked = []
-    for ticker in tickers:
-        symbol = ticker.get("symbol")
-        if symbol not in active:
-            continue
+            and str(item.get("symbol", "")).endswith("USDT")
+            and item.get("symbol") not in excluded
+        }
+        tickers = _get("/fapi/v1/ticker/24hr")
+        ranked = []
+        for ticker in tickers:
+            symbol = ticker.get("symbol")
+            if symbol not in active:
+                continue
+            try:
+                turnover = _float(ticker.get("quoteVolume"), "24h quote volume")
+            except MarketDataError:
+                continue
+            if turnover > 0:
+                ranked.append((turnover, symbol))
+        ranked.sort(reverse=True)
+        if ranked:
+            return [symbol for _, symbol in ranked]
+        raise MarketDataError("Binance returned no liquid USDT perpetuals")
+    except (requests.RequestException, MarketDataError, ValueError, TypeError) as exc:
         try:
-            turnover = _float(ticker.get("quoteVolume"), "24h quote volume")
-        except MarketDataError:
-            continue
-        if turnover > 0:
-            ranked.append((turnover, symbol))
-    ranked.sort(reverse=True)
-    return [symbol for _, symbol in ranked]
+            symbols = [s for s in fetch_bybit_active_symbols() if s not in excluded]
+            if symbols:
+                print(
+                    f"Market universe fallback: Binance unavailable ({type(exc).__name__}); "
+                    f"Bybit linear returned {len(symbols)} symbols", flush=True
+                )
+                return symbols
+        except Exception as bybit_error:
+            raise MarketDataError(
+                f"Binance universe unavailable ({exc}); Bybit universe unavailable ({bybit_error})"
+            ) from bybit_error
+        raise MarketDataError(f"Binance and Bybit returned no usable market universe: {exc}") from exc
 
 
 def validate_oi_cadence(rows: List[dict]) -> None:
