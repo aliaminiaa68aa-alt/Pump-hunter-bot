@@ -271,8 +271,8 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
 
             signal, reason = evaluate_liquidity_sweep(snapshot, metrics)
             if signal is not None:
-                # The signal entry is the last closed Binance 15m candle close.
-                # Do not publish it if Binance's live perpetual price has moved
+                # The signal entry is the last closed Binance Spot 15m candle close.
+                # Do not publish it if Binance Spot live price has moved
                 # materially away before the alert is generated.
                 live_price = snapshot.get("live_price")
                 atr_for_entry = _atr(snapshot.get("candles") or [])
