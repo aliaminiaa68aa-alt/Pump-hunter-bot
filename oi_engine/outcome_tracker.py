@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List
 
 import requests
 
-BASE_URLS = ("https://api.binance.com", "https://data-api.binance.vision")
+BASE_URLS = ("https://data-api.binance.vision", "https://api.binance.com")
 INTERVAL_MS = 15 * 60 * 1000
 MAX_ACTIVE_HOURS = 96
 MAX_PENDING_ENTRY_HOURS = 1
