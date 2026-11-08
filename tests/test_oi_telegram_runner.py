@@ -777,6 +777,39 @@ class TelegramRunnerTests(unittest.TestCase):
             self.assertNotIn("source_side", saved["symbols"]["ETHUSDT"])
 
 
+    def test_data_error_cooldown_does_not_consume_fresh_alert_slots(self):
+        watchlist = {
+            "FAILEDUSDT": {
+                "source_type": "oi_channel",
+                "last_alert_received_at": 1000,
+                "last_checked": 900,
+                "last_attempted_at": 950,
+                "oi_priority_score": 99.0,
+                "retry_after": 1300,
+            },
+            "FRESHUSDT": {
+                "source_type": "oi_channel",
+                "last_alert_received_at": 1200,
+                "last_checked": 0,
+                "last_attempted_at": 0,
+                "oi_priority_score": 1.0,
+            },
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(
+            watchlist, limit=1, now=1200
+        )
+        self.assertEqual(list(batch), ["FRESHUSDT"])
+
+        before_deadline, _ = telegram_runner.select_watchlist_batch(
+            {"FAILEDUSDT": watchlist["FAILEDUSDT"]}, limit=1, now=1299
+        )
+        self.assertEqual(before_deadline, {})
+
+        at_deadline, _ = telegram_runner.select_watchlist_batch(
+            {"FAILEDUSDT": watchlist["FAILEDUSDT"]}, limit=1, now=1300
+        )
+        self.assertEqual(list(at_deadline), ["FAILEDUSDT"])
+
     def test_fresh_oi_alerts_precede_pending_and_hot_candidates(self):
         watchlist = {
             "PENDINGUSDT": {
