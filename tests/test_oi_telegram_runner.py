@@ -1045,7 +1045,7 @@ class TelegramRunnerTests(unittest.TestCase):
                         journal, "token", "chat"
                     )
         self.assertEqual(send.call_count, 2)
-        self.assertIn("تارگت اول خورد", send.call_args_list[0].args[2])
+        self.assertIn("تارگت اول تاچ شد", send.call_args_list[0].args[2])
         self.assertIn("تارگت دوم خورد", send.call_args_list[1].args[2])
         self.assertTrue(all(
             "برای ورود جدید اقدام نکنید" in call.args[2]
