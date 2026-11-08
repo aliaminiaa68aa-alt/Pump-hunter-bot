@@ -21,26 +21,32 @@ BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/price"
 
 
 def fetch_binance_last_prices(symbols: set[str]) -> Dict[str, float]:
-    """Fetch live Binance Spot prices only; no derivatives-venue fallback."""
+    """Fetch requested live prices from Binance Spot in one bulk ticker request."""
     if not symbols:
         return {}
     wanted = {symbol.upper() for symbol in symbols}
+    response = requests.get(BINANCE_TICKER_URL, timeout=8,
+                            headers={"User-Agent": "Pump-Hunter/1.0"})
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise ValueError("Unexpected Binance Spot ticker response")
     result: Dict[str, float] = {}
-    for symbol in sorted(wanted):
+    for item in payload:
+        symbol = str(item.get("symbol", "")).upper()
+        if symbol not in wanted:
+            continue
         try:
-            response = requests.get(BINANCE_TICKER_URL, params={"symbol": symbol}, timeout=8,
-                                    headers={"User-Agent": "Pump-Hunter/1.0"})
-            response.raise_for_status()
-            item = response.json()
-            if not isinstance(item, dict) or item.get("symbol") != symbol:
-                raise ValueError("Unexpected Binance Spot ticker response")
             price = float(item.get("price", 0))
-            if not (price > 0 and price < float("inf")):
-                raise ValueError("Invalid Binance Spot price")
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if price > 0 and price < float("inf"):
             result[symbol] = price
-        except Exception as exc:
-            print("Binance Spot live price unavailable for " + symbol + ": " +
-                  type(exc).__name__ + ": " + str(exc), flush=True)
+    missing = wanted - result.keys()
+    if missing and not result:
+        raise RuntimeError("no usable Binance Spot prices for " + str(sorted(missing)))
+    if missing:
+        print("Binance Spot ticker missing: " + ", ".join(sorted(missing)), flush=True)
     return result
 
 
