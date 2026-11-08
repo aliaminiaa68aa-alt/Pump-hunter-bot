@@ -102,9 +102,10 @@ jobs:
           COINMARKETCAP_API_KEY: ${{ secrets.COINMARKETCAP_API_KEY }}
           SIGNAL_SCAN_INTERVAL_SECONDS: "300"
           LIVE_MONITOR_INTERVAL_SECONDS: "5"
+          PYTHONUNBUFFERED: "1"
         run: |
           set +e
-          timeout --signal=TERM --kill-after=30s 20500s python -m oi_engine.service
+          timeout --signal=TERM --kill-after=30s 20500s python -u -m oi_engine.service
           status=$?
           if [ "$status" -ne 124 ]; then
             exit "$status"
