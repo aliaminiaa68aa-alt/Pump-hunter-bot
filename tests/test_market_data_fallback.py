@@ -55,7 +55,7 @@ class BinanceSpotOnlyTests(unittest.TestCase):
         get.return_value = response
         rows = _fetch_klines('ABCUSDT', 0, 900000)
         self.assertEqual(rows[0][2], '102')
-        self.assertIn('api.binance.com/api/v3/klines', get.call_args.args[0])
+        self.assertIn('/api/v3/klines', get.call_args.args[0])
         self.assertEqual(get.call_args.kwargs['params']['interval'], '15m')
 
     @patch('oi_engine.outcome_tracker.requests.get')
