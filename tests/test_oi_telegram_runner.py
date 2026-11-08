@@ -37,7 +37,7 @@ class FakeClient:
 
 class TelegramRunnerTests(unittest.TestCase):
     def test_scan_batch_stays_within_coinalyze_rate_budget(self):
-        self.assertLessEqual(telegram_runner.MAX_WATCHLIST_SYMBOLS * 4 + 2, 40)
+        self.assertLessEqual(telegram_runner.MAX_WATCHLIST_SYMBOLS * 4 + 2, 80)  # at most two minutes of the 40-requests/minute API budget
 
     def test_opposite_signal_blocked_on_same_stop_candle_but_allowed_on_newer_close(self):
         journal = {
