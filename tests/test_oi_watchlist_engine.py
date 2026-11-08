@@ -3,7 +3,8 @@ from unittest.mock import patch
 
 from oi_engine.signal_engine import MarketDataError
 from oi_engine.watchlist_engine import (
-    scan_watchlist, format_confirmed_signal, signal_price_geometry_rejection,
+    DATA_ERROR_RETRY_SECONDS, scan_watchlist, format_confirmed_signal,
+    signal_price_geometry_rejection,
 )
 
 
@@ -168,6 +169,32 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertEqual(found, [])
         self.assertEqual(updated["ABCUSDT"]["status"], "خطای دریافت داده")
         self.assertNotIn("coinalyze", updated["ABCUSDT"])
+
+    def test_data_errors_are_marked_checked_and_cooled_down_then_cleared(self):
+        with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                   side_effect=MarketDataError("temporary provider outage")):
+            _, failed = scan_watchlist(
+                {"ABCUSDT": {}}, FakeClient(make_metrics()), now=1000
+            )
+        failed_record = failed["ABCUSDT"]
+        self.assertEqual(failed_record["last_attempted_at"], 1000)
+        self.assertEqual(failed_record["last_checked"], 1000)
+        self.assertEqual(
+            failed_record["retry_after"], 1000 + DATA_ERROR_RETRY_SECONDS
+        )
+
+        with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                   return_value=make_snapshot("LONG")):
+            _, recovered = scan_watchlist(
+                {"ABCUSDT": failed_record},
+                FakeClient(make_metrics("LONG")),
+                now=1000 + DATA_ERROR_RETRY_SECONDS,
+            )
+        self.assertEqual(
+            recovered["ABCUSDT"]["last_checked"],
+            1000 + DATA_ERROR_RETRY_SECONDS,
+        )
+        self.assertNotIn("retry_after", recovered["ABCUSDT"])
 
     def test_signal_levels_have_correct_long_and_short_geometry(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
