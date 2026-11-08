@@ -114,8 +114,8 @@ def fetch_gateio_rows(symbol: str, interval: str, start_ms: int | None = None,
             quote_volume = row.get("sum", row.get("v", 0))
         elif isinstance(row, (list, tuple)) and len(row) >= 6:
             start = int(row[0]) * 1000
-            quote_volume, close, high, low, open_price = row[1:6]
-            volume = row[6] if len(row) > 6 else quote_volume
+            volume, close, high, low, open_price = row[1:6]
+            quote_volume = row[6] if len(row) > 6 else volume
         else:
             continue
         close_time = start + duration - 1
