@@ -49,6 +49,43 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
+      - name: Diagnose exchange network access
+        run: |
+          python - <<'PY'
+          import json
+          import requests
+
+          session = requests.Session()
+          session.headers.update({"User-Agent": "Pump-Hunter-Network-Diagnostic/1.0"})
+          try:
+              ip = session.get("https://api.ipify.org", timeout=10).text.strip()
+              print(f"RUNNER_EGRESS_IP={ip}")
+              try:
+                  geo = session.get(f"https://ipapi.co/{ip}/json/", timeout=10).json()
+                  print("RUNNER_EGRESS_GEO=" + json.dumps({
+                      key: geo.get(key) for key in ("ip", "country_name", "country_code", "region", "city", "org")
+                  }, ensure_ascii=False))
+              except Exception as exc:
+                  print(f"IP_GEO_LOOKUP_ERROR={type(exc).__name__}: {exc}")
+          except Exception as exc:
+              print(f"EGRESS_IP_LOOKUP_ERROR={type(exc).__name__}: {exc}")
+
+          checks = {
+              "BINANCE_USDM_TIME": "https://fapi.binance.com/fapi/v1/time",
+              "BINANCE_USDM_PING": "https://fapi.binance.com/fapi/v1/ping",
+              "BINANCE_SPOT_TIME": "https://api.binance.com/api/v3/time",
+              "BINANCE_PUBLIC_DATA_TIME": "https://data-api.binance.vision/api/v3/time",
+              "BYBIT_PUBLIC_TIME": "https://api.bybit.com/v5/market/time",
+          }
+          for name, url in checks.items():
+              try:
+                  response = session.get(url, timeout=12)
+                  print(f"{name}: status={response.status_code} server={response.headers.get('server')} via={response.headers.get('via')}")
+                  print(f"{name}_BODY={response.text[:500]!r}")
+              except Exception as exc:
+                  print(f"{name}_ERROR={type(exc).__name__}: {exc}")
+          PY
+
       - name: Compile-check all strategy code
         run: python -m compileall -q Bot.py oi_engine
 
