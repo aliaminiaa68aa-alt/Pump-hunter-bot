@@ -20,7 +20,7 @@ from oi_engine.outcome_tracker import (
     make_trade_record, monitor_journal, summarize_outcomes,
     _fetch_klines, _fetch_1m_klines,
 )
-from oi_engine.signal_engine import fetch_live_price
+from oi_engine.signal_engine import fetch_live_price_with_source
 
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
@@ -971,7 +971,7 @@ def main() -> None:
         # If the market has moved away from the planned entry, invalidate this
         # candle's setup rather than sending a stale alert with an old price.
         try:
-            current_price = fetch_live_price(signal.symbol)
+            current_price, current_price_source = fetch_live_price_with_source(signal.symbol)
         except Exception as exc:
             print(
                 f"Signal held; fresh Binance price unavailable: "
@@ -982,19 +982,32 @@ def main() -> None:
         atr_value = _safe_float(metrics.get("atr_15m"), 0.0)
         allowed_gap = max(atr_value * 0.50, entry_price * 0.001)
         price_gap = abs(current_price - entry_price)
+        already_touched = (
+            current_price <= entry_price if signal.side == "LONG"
+            else current_price >= entry_price
+        )
+        if already_touched:
+            state[key] = candle_id
+            save_state(state)
+            print(
+                f"Signal invalidated before Telegram: entry was already touched; "
+                f"symbol={signal.symbol} side={signal.side} entry={entry_price:.8g} "
+                f"live_price={current_price:.8g} source={current_price_source}"
+            )
+            continue
         if price_gap > allowed_gap:
             state[key] = candle_id
             save_state(state)
             print(
                 f"Signal invalidated before Telegram: symbol={signal.symbol} "
                 f"entry={entry_price:.8g} live_price={current_price:.8g} "
-                f"gap_pct={price_gap / entry_price * 100.0:.3f}"
+                f"gap_pct={price_gap / entry_price * 100.0:.3f} source={current_price_source}"
             )
             continue
         send_metrics = dict(metrics)
         send_metrics["current_price"] = current_price
         send_metrics["current_price_time_ms"] = int(time.time() * 1000)
-        send_metrics["price_source"] = "Binance USD-M Futures (USDT perpetual)"
+        send_metrics["price_source"] = current_price_source
 
         # Persist the trade and reserve this signal BEFORE the network request.
         # Telegram sendMessage has no idempotency key: if the request succeeds
