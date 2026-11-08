@@ -271,6 +271,39 @@ def coinalyze_request(path: str, params: Optional[dict] = None):
     return payload
 
 
+def coinalyze_preflight() -> None:
+    """Verify the configured Coinalyze credential and preload public market metadata."""
+    markets = coinalyze_request("/future-markets")
+    exchanges = coinalyze_request("/exchanges")
+    if not markets or not exchanges:
+        raise RuntimeError("Coinalyze preflight returned empty market/exchange metadata")
+    _COI_CACHE["markets"] = markets
+    _COI_CACHE["exchange_names"] = {
+        str(row.get("code", "")).upper(): str(row.get("name", row.get("code", "")))
+        for row in exchanges if row.get("code")
+    }
+    _COI_CACHE["fetched_at"] = int(time.time())
+    LOG.info("Coinalyze preflight OK: %s futures markets, %s exchanges",
+             len(markets), len(_COI_CACHE["exchange_names"]))
+
+
+def telegram_preflight() -> None:
+    """Check bot authentication and destination chat without sending a test message."""
+    token = os.getenv("HIGH_TF_BOT_TOKEN") or os.getenv("BOT_TOKEN")
+    chat_id = os.getenv("HIGH_TF_CHAT_ID") or os.getenv("CHAT_ID")
+    if not token or not chat_id:
+        raise RuntimeError("Telegram bot token/chat id secrets are missing")
+    me = get_json("https://api.telegram.org", f"/bot{token}/getMe")
+    if not isinstance(me, dict) or not me.get("ok"):
+        raise RuntimeError("Telegram getMe preflight failed")
+    chat = get_json("https://api.telegram.org", f"/bot{token}/getChat",
+                    {"chat_id": chat_id})
+    if not isinstance(chat, dict) or not chat.get("ok"):
+        raise RuntimeError("Telegram destination chat preflight failed")
+    bot_name = me.get("result", {}).get("username", "unknown")
+    LOG.info("Telegram preflight OK: bot=@%s; destination chat resolved", bot_name)
+
+
 def coinalyze_metrics(symbol: str) -> tuple[float, float, str]:
     """Return cross-exchange OI change and mean funding; metrics are context, not direction filters."""
     now = int(time.time())
@@ -395,6 +428,8 @@ def run_once() -> dict:
             and (os.getenv("HIGH_TF_CHAT_ID") or os.getenv("CHAT_ID"))):
         raise RuntimeError("Telegram bot token/chat id secrets are missing")
 
+    coinalyze_preflight()
+    telegram_preflight()
     state = load_state()
     pairs = universe()
     if not pairs:
