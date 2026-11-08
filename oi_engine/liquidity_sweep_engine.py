@@ -112,6 +112,12 @@ def evaluate_liquidity_sweep(
     baseline = candles[-21:-1]
     avg_volume = sum(float(row["quote_volume"]) for row in baseline) / len(baseline)
     volume_ratio = float(last["quote_volume"]) / avg_volume if avg_volume > 0 else 0.0
+    # A modest floor blocks very weak sweeps without requiring a volume spike.
+    if not math.isfinite(volume_ratio) or volume_ratio < 0.50:
+        return None, (
+            f"شکار نقدینگی تأیید شد، اما حجم کندل فقط {volume_ratio:.2f}x میانگین است؛ "
+            "حداقل قابل قبول 0.50x است"
+        )
     movement_strength, entry_quality = score_signal_components(
         candles, side, oi_change, price_change, taker_ratio, volume_ratio, atr, swept_level
     )
