@@ -17,56 +17,30 @@ from oi_engine.telegram_runner import (
     main as run_signal_scan,
 )
 
-BINANCE_TICKER_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
+BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/price"
 
 
 def fetch_binance_last_prices(symbols: set[str]) -> Dict[str, float]:
-    """Fetch live prices with per-symbol Binance -> Bybit -> Gate.io fallback."""
+    """Fetch live Binance Spot prices only; no derivatives-venue fallback."""
     if not symbols:
         return {}
     wanted = {symbol.upper() for symbol in symbols}
     result: Dict[str, float] = {}
-    errors: Dict[str, list[str]] = {symbol: [] for symbol in wanted}
-    try:
-        response = requests.get(BINANCE_TICKER_URL, timeout=8)
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
-            raise ValueError("Unexpected Binance ticker response")
-        for item in payload:
-            symbol = str(item.get("symbol", "")).upper()
-            if symbol not in wanted:
-                continue
-            try:
-                price = float(item.get("price"))
-            except (TypeError, ValueError, OverflowError):
-                continue
-            if price > 0 and price < float("inf"):
-                result[symbol] = price
-    except Exception as exc:
-        for symbol in wanted:
-            errors[symbol].append(f"Binance {type(exc).__name__}: {exc}")
-
-    from oi_engine.market_data import fetch_bybit_live_price, fetch_gateio_live_price
-    for symbol in sorted(wanted - result.keys()):
+    for symbol in sorted(wanted):
         try:
-            result[symbol] = float(fetch_bybit_live_price(symbol))
-            print(f"Live price fallback: {symbol} Binance unavailable; Bybit OK", flush=True)
-            continue
+            response = requests.get(BINANCE_TICKER_URL, params={"symbol": symbol}, timeout=8,
+                                    headers={"User-Agent": "Pump-Hunter/1.0"})
+            response.raise_for_status()
+            item = response.json()
+            if not isinstance(item, dict) or item.get("symbol") != symbol:
+                raise ValueError("Unexpected Binance Spot ticker response")
+            price = float(item.get("price", 0))
+            if not (price > 0 and price < float("inf")):
+                raise ValueError("Invalid Binance Spot price")
+            result[symbol] = price
         except Exception as exc:
-            errors[symbol].append(f"Bybit {type(exc).__name__}: {exc}")
-        try:
-            result[symbol] = float(fetch_gateio_live_price(symbol))
-            print(f"Live price fallback: {symbol} Binance and Bybit unavailable; Gate.io OK", flush=True)
-        except Exception as exc:
-            errors[symbol].append(f"Gate.io {type(exc).__name__}: {exc}")
-
-    missing = wanted - result.keys()
-    if missing:
-        detail = "; ".join(f"{symbol}: {' | '.join(errors[symbol])}" for symbol in sorted(missing))
-        print(f"Live price unavailable for symbols: {detail}", flush=True)
-    if not result:
-        raise RuntimeError(f"no usable active symbols: Binance, Bybit and Gate.io failed for {sorted(wanted)}")
+            print("Binance Spot live price unavailable for " + symbol + ": " +
+                  type(exc).__name__ + ": " + str(exc), flush=True)
     return result
 
 
