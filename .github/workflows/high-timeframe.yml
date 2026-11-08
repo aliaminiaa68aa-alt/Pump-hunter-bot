@@ -40,7 +40,7 @@ jobs:
       - name: Compile scanner and tests
         run: |
           python -m py_compile high_timeframe_bot.py
-          python -m unittest tests.test_high_timeframe_bot -v
+          python -m unittest discover -s tests -p 'test_high_timeframe_bot.py' -v
 
       - name: Run independent 4H and daily scanner
         env:
