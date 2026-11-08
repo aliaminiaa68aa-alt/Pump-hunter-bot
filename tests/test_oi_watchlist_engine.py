@@ -206,6 +206,8 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertIn("هدف ۱:", message)
         self.assertIn("هدف ۲:", message)
         self.assertIn("OI ۱۵دقیقه:", message)
+        self.assertIn("Funding API خام:", message)
+        self.assertIn("0.0001", message)
         self.assertIn("جریان", message)
         self.assertIn("شکار نقدینگی", message)
 
