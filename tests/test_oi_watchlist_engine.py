@@ -109,6 +109,20 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertEqual(found[0][0].side, "SHORT")
         self.assertIn("1 کندل قبل", updated["ABCUSDT"]["reason"])
 
+    def test_low_volume_sweep_is_not_sent_as_entry(self):
+        for side in ("LONG", "SHORT"):
+            with self.subTest(side=side):
+                snapshot = make_snapshot(side)
+                snapshot["candles"][-1]["quote_volume"] = 40.0
+                with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                           return_value=snapshot):
+                    found, updated = scan_watchlist(
+                        {"ABCUSDT": {}}, FakeClient(make_metrics(side)), now=1000
+                    )
+                self.assertEqual(found, [])
+                self.assertEqual(updated["ABCUSDT"]["status"], "در حال رصد نقدینگی")
+                self.assertIn("حجم کندل فقط", updated["ABCUSDT"]["reason"])
+
     def test_mismatched_coinalyze_candle_is_rejected(self):
         metrics = {
             **make_metrics("LONG"),
