@@ -102,9 +102,11 @@ class LivePriceMonitorTests(unittest.TestCase):
         self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_POLL")
         self.assertEqual(
             [event["event"] for event in record["events"]],
-            ["ENTRY", "AMBIGUOUS_ENTRY_POLL"],
+            ["AMBIGUOUS_ENTRY_POLL"],
         )
         self.assertTrue(record["entry_poll_ambiguous"])
+        self.assertNotIn("entry_fill_price", record)
+        self.assertEqual(record["possible_entry_fill_price"], 100.0)
         apply_live_prices(journal, {"TESTUSDT": 102.5}, now_ms=4_000)
         self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_POLL")
         self.assertEqual(len(record["events"]), 2)
@@ -116,8 +118,9 @@ class LivePriceMonitorTests(unittest.TestCase):
         self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_POLL")
         self.assertEqual(
             [event["event"] for event in record["events"]],
-            ["ENTRY", "AMBIGUOUS_ENTRY_POLL"],
+            ["AMBIGUOUS_ENTRY_POLL"],
         )
+        self.assertNotIn("entry_fill_price", record)
 
     def test_target_one_then_breakeven_stop(self):
         journal, record = make_journal("LONG")
