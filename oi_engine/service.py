@@ -66,7 +66,7 @@ def fetch_binance_last_prices(symbols: set[str]) -> Dict[str, float]:
         detail = "; ".join(f"{symbol}: {' | '.join(errors[symbol])}" for symbol in sorted(missing))
         print(f"Live price unavailable for symbols: {detail}", flush=True)
     if not result:
-        raise RuntimeError(f"No usable active symbols: Binance, Bybit and Gate.io failed for {sorted(wanted)}")
+        raise RuntimeError(f"no usable active symbols: Binance, Bybit and Gate.io failed for {sorted(wanted)}")
     return result
 
 
