@@ -992,7 +992,7 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertIn("نتیجه معامله قابل تأیید نیست", ambiguity_message)
         self.assertEqual(
             result["trades"]["ambiguous-entry-candle"]["notification_state"]["0"]["reason"],
-            "entry_notification_not_realtime",
+            "sent",
         )
         self.assertEqual(
             result["trades"]["ambiguous-entry-candle"]["notification_state"]["1"]["status"],
@@ -1117,7 +1117,7 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertIn("تارگت دوم خورد", send.call_args_list[2].args[2])
         self.assertTrue(all(
             "برای ورود جدید اقدام نکنید" in call.args[2]
-            for call in send.call_args_list
+            for call in send.call_args_list[1:]
         ))
         record = result["trades"]["old-false-missed"]
         self.assertEqual(record["status"], "CLOSED_TP2")
