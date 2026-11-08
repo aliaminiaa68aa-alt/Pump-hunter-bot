@@ -186,6 +186,20 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     except (TypeError, ValueError, OverflowError, OSError):
         pass
     price_source_label = html.escape(str(metrics.get("price_source", "Binance Futures")))
+    raw_price_source = str(metrics.get("price_source", "unknown"))
+    if raw_price_source.startswith("Bybit"):
+        chart_exchange = "Bybit"
+    elif raw_price_source.startswith("Gate.io"):
+        chart_exchange = "Gate.io"
+    elif raw_price_source.startswith("Binance"):
+        chart_exchange = "Binance"
+    else:
+        chart_exchange = raw_price_source.split(" ", 1)[0] or "نامشخص"
+    chart_exchange_label = html.escape(chart_exchange)
+    chart_contract_line = (
+        f"📈 صرافی نمودار TradingView: <b>{chart_exchange_label}</b> "
+        f"| قرارداد: <code>{html.escape(str(signal.symbol))}</code> Perpetual (USDT)\\n"
+    )
     if current_price is None:
         current_price_line = f"💹 قیمت فعلی {price_source_label}: <b>ناموجود</b>\\n"
     else:
@@ -209,6 +223,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         "━━━━━━━━━━━━━━\n"
         f"💵 ورود: <code>{signal.entry:.8g}</code>\n"
         f"{current_price_line}"
+        f"{chart_contract_line}"
         f"{entry_instruction}"
         f"🛡 حد ضرر: <code>{signal.stop_loss:.8g}</code>  |  ریسک: <b>{risk_pct:.2f}%</b>\n"
         f"🎯 هدف ۱: <code>{signal.take_profit_1:.8g}</code>  |  فاصله: <b>{tp1_pct:.2f}%</b>\n"
