@@ -67,7 +67,7 @@ jobs:
           LIVE_MONITOR_INTERVAL_SECONDS: "5"
         run: |
           set +e
-          timeout 225s python -m oi_engine.service
+          timeout --signal=TERM --kill-after=10s 225s python -m oi_engine.service
           status=$?
           if [ "$status" -ne 124 ]; then
             exit "$status"
