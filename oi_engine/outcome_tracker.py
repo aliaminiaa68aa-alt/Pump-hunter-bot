@@ -1,6 +1,6 @@
 """Persistent outcome journal for confirmed OI signals.
 
-Uses closed 15m Binance/Bybit perpetual candles. Ambiguous stop/target touches within
+Uses closed 15m Binance Spot candles. Ambiguous stop/target touches within
 one candle are resolved conservatively as stop-first.
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
 
 
 def _fetch_1m_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
-    """Fetch 1m trade-price candles with the same Binance -> Bybit fallback."""
+    """Fetch 1m trade-price candles from Binance Spot only."""
     rows = _fetch_with_fallback(symbol, "1m", start_ms, end_ms, 1500)
     _fetch_1m_klines.last_source = getattr(_fetch_with_fallback, "last_source", "unknown")
     return rows
