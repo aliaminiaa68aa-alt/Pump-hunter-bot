@@ -46,6 +46,8 @@ def evaluate_liquidity_sweep(
     # If the sweep occurred one or two candles earlier, require the newest
     # closed candle to continue away from the reclaimed level before entering.
     setup = None
+    sweep_seen = False
+    continuation_seen = False
     for sweep_index in range(len(candles) - 1, max(10, len(candles) - 4), -1):
         sweep = candles[sweep_index]
         previous = candles[sweep_index - 12:sweep_index]
@@ -71,24 +73,33 @@ def evaluate_liquidity_sweep(
             and (sweep_high - sweep_close) / span >= 0.60
         )
         if long_sweep and not short_sweep:
+            sweep_seen = True
             continued = (
                 entry > prior_low and
                 (sweep_index == len(candles) - 1 or (entry > sweep_close and entry > open_price))
             )
             if continued:
+                continuation_seen = True
                 setup = ("LONG", prior_low, sweep_low, len(candles) - 1 - sweep_index)
                 break
         elif short_sweep and not long_sweep:
+            sweep_seen = True
             continued = (
                 entry < prior_high and
                 (sweep_index == len(candles) - 1 or (entry < sweep_close and entry < open_price))
             )
             if continued:
+                continuation_seen = True
                 setup = ("SHORT", prior_high, sweep_high, len(candles) - 1 - sweep_index)
                 break
 
     if setup is None:
-        return None, "در ۳ کندل بسته‌شده اخیر شکار نقدینگی و تأیید ادامه برگشت دیده نشد"
+        if sweep_seen and not continuation_seen:
+            return None, (
+                "شکار نقدینگی در ۳ کندل اخیر دیده شد، اما کندل بسته‌شده بعدی "
+                "ادامه برگشت را تأیید نکرد؛ برای جلوگیری از ورود زودهنگام سیگنال صادر نشد"
+            )
+        return None, "در ۳ کندل بسته‌شده اخیر شکست معتبر سقف/کف ۱۲ کندل قبل و بازپس‌گیری سطح دیده نشد"
 
     side, swept_level, sweep_extreme, sweep_age = setup
     if side == "LONG":
