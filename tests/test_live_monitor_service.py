@@ -72,7 +72,7 @@ class LiveOutcomePipelineTests(unittest.TestCase):
             "stop_loss": 98.0, "take_profit_1": 102.0,
             "take_profit_2": 104.0, "candle_close_time": 900,
         }
-        record = make_trade_record(signal, {"engine": "BOS"}, int(time.time() * 1000) - 10_000)
+        record = make_trade_record(signal, {"engine": "BOS", "price_source": "Binance Spot"}, int(time.time() * 1000) - 10_000)
         record["telegram_message_id"] = 700
         return {"trades": {record["trade_id"]: record}}, record
 
