@@ -534,8 +534,10 @@ def add_market_universe_candidates(
     Channel alerts remain first priority; market candidates follow them.
     """
     from oi_engine.signal_engine import get_active_symbols
-    symbols = [symbol for symbol in get_active_symbols()
-               if _has_supported_perpetual(client, symbol)]
+    symbols = get_active_symbols()
+    # Production Coinalyze client validates each derivatives mapping.
+    if callable(getattr(client, "resolve_market", None)):
+        symbols = [symbol for symbol in symbols if _has_supported_perpetual(client, symbol)]
     if not symbols:
         print("Market-universe scan: provider returned no supported USDT perpetuals")
         return last_universe_symbol, 0
