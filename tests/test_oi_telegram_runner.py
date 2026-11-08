@@ -437,7 +437,7 @@ class TelegramRunnerTests(unittest.TestCase):
              patch.object(telegram_runner, "OUTCOME_PATH", outcome_path), \
              patch.dict(os.environ, env), \
              patch.object(telegram_runner, "CoinalyzeClient", return_value=FakeClient()), \
-             patch.object(telegram_runner, "fetch_live_price", return_value=100.0), \
+             patch.object(telegram_runner, "fetch_live_price_with_source", return_value=(100.0, "Binance USD-M Futures (USDT perpetual)")), \
              patch.object(telegram_runner, "verify_telegram_connection"), \
              patch.object(telegram_runner, "poll_public_channel_alerts", return_value=public_result) as poll, \
              patch.object(telegram_runner, "scan_watchlist", return_value=scan_result), \
@@ -445,6 +445,17 @@ class TelegramRunnerTests(unittest.TestCase):
              patch.object(telegram_runner.time, "time", return_value=now if now is not None else 2000000):
             telegram_runner.main()
         return state_path, watch_path, poll, send
+
+    def test_signal_is_not_sent_if_long_entry_was_already_touched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signal, metrics = sample_signal(), sample_metrics()
+            signal.entry = 100.0
+            _, _, _, send = self._run_main(
+                directory, ([(signal, metrics)], {"TESTUSDT": {"status": "تأیید LONG"}}),
+            )
+            # _run_main's fresh quote is 100.0: exactly at the LONG limit,
+            # so it is already touched and must not be published as waiting.
+            send.assert_not_called()
 
     def test_confirmed_signal_is_sent_and_public_cursor_persisted(self):
         with tempfile.TemporaryDirectory() as directory:
