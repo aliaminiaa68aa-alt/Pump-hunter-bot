@@ -8,7 +8,7 @@ on:
       - ".github/workflows/high-timeframe.yml"
       - "tests/test_high_timeframe_bot.py"
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
