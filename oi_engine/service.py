@@ -61,6 +61,7 @@ def monitor_live_outcomes_once() -> dict:
             if (
                 record.get("status") in {"WAITING_ENTRY", "OPEN", "TP1_HIT"}
                 and record.get("telegram_delivery_status", "sent") != "pending"
+                and record.get("source", {}).get("price_source") == "Binance Spot"
             )
         }
         active.discard("")
