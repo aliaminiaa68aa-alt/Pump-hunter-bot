@@ -423,7 +423,10 @@ class TelegramRunnerTests(unittest.TestCase):
         finally:
             telegram_runner.MAX_MARKET_QUEUE_SYMBOLS = original_limit
 
-    def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None, send_side_effect=None, fresh_price=101.0):
+    def _run_main(self, directory, scan_result, public_result=(123, 1), sent_state=None, initial_watchlist=None, now=None, send_side_effect=None, fresh_price=None):
+        if fresh_price is None:
+            first_signal = scan_result[0][0][0] if scan_result[0] else None
+            fresh_price = 99.0 if first_signal is not None and first_signal.side == "SHORT" else 101.0
         state_path = Path(directory) / "sent_signals.json"
         watch_path = Path(directory) / "watchlist.json"
         outcome_path = Path(directory) / "trade_outcomes.json"
