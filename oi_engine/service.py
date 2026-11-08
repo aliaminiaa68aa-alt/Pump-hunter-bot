@@ -17,7 +17,7 @@ from oi_engine.telegram_runner import (
     main as run_signal_scan,
 )
 
-BINANCE_TICKER_URLS = ("https://api.binance.com/api/v3/ticker/price", "https://data-api.binance.vision/api/v3/ticker/price")
+BINANCE_TICKER_URLS = ("https://data-api.binance.vision/api/v3/ticker/price", "https://api.binance.com/api/v3/ticker/price")
 
 
 def fetch_binance_last_prices(symbols: set[str]) -> Dict[str, float]:
