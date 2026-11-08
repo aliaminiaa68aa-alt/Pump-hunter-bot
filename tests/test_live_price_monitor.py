@@ -54,21 +54,21 @@ class LivePriceMonitorTests(unittest.TestCase):
         self.assertEqual([e["event"] for e in record["events"]], ["MISSED_ENTRY"])
         self.assertEqual(record["events"][0]["observed_price"], 101.0)
 
-    def test_adverse_gap_beyond_slippage_limit_is_rejected_for_short(self):
+    def test_favorable_gap_through_short_limit_is_still_a_valid_entry(self):
         journal, record = make_journal("SHORT")
         apply_live_prices(journal, {"TESTUSDT": 99.0}, now_ms=2_000)
         apply_live_prices(journal, {"TESTUSDT": 100.2}, now_ms=3_000)
-        self.assertEqual(record["status"], "MISSED_ENTRY")
-        self.assertEqual([e["event"] for e in record["events"]], ["MISSED_ENTRY"])
-        self.assertAlmostEqual(record["entry_slippage_pct"], 0.2)
+        self.assertEqual(record["status"], "OPEN")
+        self.assertEqual([e["event"] for e in record["events"]], ["ENTRY"])
+        self.assertEqual(record["entry_fill_price"], 100.0)
 
-    def test_adverse_gap_beyond_slippage_limit_is_rejected_for_long(self):
+    def test_favorable_gap_through_long_limit_is_still_a_valid_entry(self):
         journal, record = make_journal("LONG")
         apply_live_prices(journal, {"TESTUSDT": 101.0}, now_ms=2_000)
         apply_live_prices(journal, {"TESTUSDT": 99.8}, now_ms=3_000)
-        self.assertEqual(record["status"], "MISSED_ENTRY")
-        self.assertEqual([e["event"] for e in record["events"]], ["MISSED_ENTRY"])
-        self.assertAlmostEqual(record["entry_slippage_pct"], 0.2)
+        self.assertEqual(record["status"], "OPEN")
+        self.assertEqual([e["event"] for e in record["events"]], ["ENTRY"])
+        self.assertEqual(record["entry_fill_price"], 100.0)
 
     def test_long_setup_expires_if_tp1_is_reached_before_entry(self):
         journal, record = make_journal("LONG")
