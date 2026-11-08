@@ -31,7 +31,7 @@ def make_candles(side="LONG"):
         # Latest closed candle sweeps the prior 12-candle low and reclaims it.
         prior_low = min(x["low"] for x in rows[-13:-1])
         last = rows[-1]
-        last.update({"open": 107.0, "low": prior_low - 0.5,
+        last.update({"open": prior_low + 0.5, "low": prior_low - 0.5,
                      "close": prior_low + 1.0, "high": prior_low + 1.2})
     else:
         rows[50]["low"] = 95.0
@@ -40,7 +40,7 @@ def make_candles(side="LONG"):
         rows[52]["low"] = 112.0
         prior_high = max(x["high"] for x in rows[-13:-1])
         last = rows[-1]
-        last.update({"open": 113.0, "high": prior_high + 0.5,
+        last.update({"open": prior_high - 0.5, "high": prior_high + 0.5,
                      "close": prior_high - 1.0, "low": prior_high - 1.2})
     return rows
 
