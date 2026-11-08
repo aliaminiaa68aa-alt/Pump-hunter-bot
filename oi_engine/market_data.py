@@ -4,7 +4,7 @@ import math
 import time
 import requests
 
-BASE_URL = "https://api.binance.com"
+BASE_URL = "https://data-api.binance.vision"
 INTERVALS = {"15": "15m", "15m": "15m", "1": "1m", "1m": "1m"}
 
 def fetch_spot_rows(symbol: str, interval: str, start_ms: int | None = None,
