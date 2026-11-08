@@ -185,20 +185,11 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
             ).astimezone(timezone(timedelta(hours=3, minutes=30))).strftime("%H:%M:%S")
     except (TypeError, ValueError, OverflowError, OSError):
         pass
-    price_source_label = html.escape(str(metrics.get("price_source", "Binance Futures")))
-    raw_price_source = str(metrics.get("price_source", "unknown"))
-    if raw_price_source.startswith("Bybit"):
-        chart_exchange = "Bybit"
-    elif raw_price_source.startswith("Gate.io"):
-        chart_exchange = "Gate.io"
-    elif raw_price_source.startswith("Binance"):
-        chart_exchange = "Binance"
-    else:
-        chart_exchange = raw_price_source.split(" ", 1)[0] or "نامشخص"
-    chart_exchange_label = html.escape(chart_exchange)
+    price_source_label = html.escape(str(metrics.get("price_source", "Binance Spot")))
+    chart_exchange_label = "Binance Spot"
     chart_contract_line = (
         f"📈 صرافی نمودار TradingView: <b>{chart_exchange_label}</b> "
-        f"| قرارداد: <code>{html.escape(str(signal.symbol))}</code> Perpetual (USDT)\n"
+        f"| بازار اسپات: <code>BINANCE:{symbol}</code>\n"
     )
     if current_price is None:
         current_price_line = f"💹 قیمت فعلی {price_source_label}: <b>ناموجود</b>\n"
