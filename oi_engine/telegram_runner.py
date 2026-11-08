@@ -872,6 +872,10 @@ def main() -> None:
                 record["source_side"] = recovered_side
 
     client = CoinalyzeClient(api_key=api_key, include_optional_metrics=False)
+    from oi_engine.signal_engine import get_active_symbols
+    spot_symbols = set(get_active_symbols())
+    # Discard cached futures-only symbols: every price and candle must have an exact Spot pair.
+    watchlist = {symbol: record for symbol, record in watchlist.items() if symbol in spot_symbols}
     # All trade prices, candles and outcome replay use Binance Spot only.
     # Coinalyze is exclusively a derivatives-metrics provider.
     binance_feed = {"15m": None, "1m": None}
@@ -895,7 +899,7 @@ def main() -> None:
     try:
         public_last_id, public_added = poll_public_channel_alerts(
             public_channel, public_last_id, watchlist,
-            symbol_validator=lambda symbol: _has_supported_perpetual(client, symbol)
+            symbol_validator=lambda symbol: symbol in spot_symbols and _has_supported_perpetual(client, symbol)
         )
         added += public_added
         print(f"Public Telegram source @{public_channel}: new_alerts={public_added}")
