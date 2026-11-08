@@ -1107,7 +1107,7 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
             with patch.object(telegram_runner, "save_outcome_journal"):
-                with patch.object(telegram_runner, "send_telegram", side_effect=[101, 102]) as send:
+                with patch.object(telegram_runner, "send_telegram", side_effect=[101, 102, 103]) as send:
                     result = telegram_runner.dispatch_outcome_notifications(
                         journal, "token", "chat"
                     )
