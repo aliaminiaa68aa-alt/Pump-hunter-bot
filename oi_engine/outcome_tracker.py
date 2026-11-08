@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List
 
 import requests
 
-BASE_URL = "https://api.binance.com"
+BASE_URLS = ("https://api.binance.com", "https://data-api.binance.vision")
 INTERVAL_MS = 15 * 60 * 1000
 MAX_ACTIVE_HOURS = 96
 MAX_PENDING_ENTRY_HOURS = 1
@@ -19,21 +19,26 @@ MAX_PENDING_ENTRY_HOURS = 1
 
 def _fetch_with_fallback(symbol: str, interval: str, start_ms: int, end_ms: int,
                           limit: int) -> List[list]:
-    """Fetch Binance Spot candles only; never fall back to futures or other venues."""
+    """Fetch Binance Spot candles; fall back only to Binance official Spot data host."""
     if interval not in {"15m", "1m"}:
         raise ValueError("Unsupported Binance Spot interval: " + interval)
-    response = requests.get(
-        BASE_URL + "/api/v3/klines",
-        params={"symbol": symbol, "interval": interval, "startTime": int(start_ms),
-                "endTime": int(end_ms), "limit": min(int(limit), 1000)},
-        timeout=15, headers={"User-Agent": "Pump-Hunter/1.0"},
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        raise RuntimeError("Unexpected Binance Spot kline response")
-    _fetch_with_fallback.last_source = "Binance Spot"
-    return payload
+    params = {"symbol": symbol, "interval": interval, "startTime": int(start_ms),
+              "endTime": int(end_ms), "limit": min(int(limit), 1000)}
+    errors = []
+    for base_url in BASE_URLS:
+        try:
+            response = requests.get(base_url + "/api/v3/klines", params=params, timeout=15,
+                                    headers={"User-Agent": "Pump-Hunter/1.0"})
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise RuntimeError("Unexpected Binance Spot kline response")
+            _fetch_with_fallback.last_source = "Binance Spot"
+            return payload
+        except (requests.RequestException, ValueError, RuntimeError) as exc:
+            errors.append(base_url + ": " + type(exc).__name__ + ": " + str(exc))
+    _fetch_with_fallback.last_source = "unavailable"
+    raise RuntimeError("Binance Spot candles unavailable: " + " | ".join(errors))
 
 
 def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> List[list]:
