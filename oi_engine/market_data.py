@@ -1,203 +1,52 @@
-"""Public Bybit linear-perpetual OHLCV fallback for Binance market candles.
-
-Coinalyze remains exclusively a derivatives-metrics provider. This module
-never requests OI, funding, or other derivatives positioning data.
-"""
+"""Binance Spot public market-data helpers. No derivatives venue is used for prices."""
 from __future__ import annotations
-
+import math
 import time
-from typing import Any
-
 import requests
 
-BYBIT_BASE_URL = "https://api.bybit.com"
-GATE_BASE_URLS = ("https://api.gateio.ws", "https://fx-api.gateio.ws")
-INTERVAL_MS = {"15": 15 * 60 * 1000, "1": 60 * 1000}
+BASE_URL = "https://api.binance.com"
+INTERVALS = {"15": "15m", "15m": "15m", "1": "1m", "1m": "1m"}
 
-
-def fetch_bybit_rows(symbol: str, interval: str, start_ms: int | None = None,
-                     end_ms: int | None = None, limit: int = 1000) -> list[list]:
-    if interval not in INTERVAL_MS:
-        raise ValueError(f"Unsupported Bybit interval: {interval}")
-    params: dict[str, Any] = {
-        "category": "linear", "symbol": symbol, "interval": interval,
-        "limit": min(max(int(limit), 1), 1000),
-    }
+def fetch_spot_rows(symbol: str, interval: str, start_ms: int | None = None,
+                    end_ms: int | None = None, limit: int = 1000) -> list[list]:
+    interval = INTERVALS.get(str(interval))
+    if interval is None:
+        raise ValueError("Unsupported Binance Spot interval")
+    params = {"symbol": str(symbol).upper(), "interval": interval,
+              "limit": min(max(int(limit), 1), 1000)}
     if start_ms is not None:
-        params["start"] = int(start_ms)
+        params["startTime"] = int(start_ms)
     if end_ms is not None:
-        params["end"] = int(end_ms)
-    response = requests.get(
-        BYBIT_BASE_URL + "/v5/market/kline", params=params, timeout=15,
-        headers={"User-Agent": "Pump-Hunter/1.0"},
-    )
+        params["endTime"] = int(end_ms)
+    response = requests.get(BASE_URL + "/api/v3/klines", params=params, timeout=15,
+                            headers={"User-Agent": "Pump-Hunter/1.0"})
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict) or payload.get("retCode") != 0:
-        raise RuntimeError(f"Bybit kline API error: {payload}")
-    result = payload.get("result") or {}
-    rows = result.get("list")
+    rows = response.json()
     if not isinstance(rows, list):
-        raise RuntimeError("Unexpected Bybit kline response")
+        raise RuntimeError("Unexpected Binance Spot kline response")
+    duration = 900_000 if interval == "15m" else 60_000
     now_ms = int(time.time() * 1000)
-    duration = INTERVAL_MS[interval]
-    normalized = []
-    for row in rows:
-        if not isinstance(row, (list, tuple)) or len(row) < 7:
-            continue
-        start = int(row[0])
-        close_time = start + duration - 1
-        if start_ms is not None and start < int(start_ms):
-            continue
-        if end_ms is not None and start > int(end_ms):
-            continue
-        # Exclude the currently-forming candle for both analysis and replay.
-        if close_time >= now_ms:
-            continue
-        normalized.append([
-            start, str(row[1]), str(row[2]), str(row[3]), str(row[4]),
-            str(row[5]), close_time, str(row[6]), "0", "0", "0", "0",
-        ])
-    normalized.sort(key=lambda row: int(row[0]))
-    return normalized
+    return [row for row in rows if isinstance(row, list) and len(row) >= 12
+            and int(row[0]) + duration - 1 < now_ms]
 
-
-def bybit_rows_to_snapshot(rows: list[list], symbol: str) -> dict:
-    candles = [{
-        "open_time": int(row[0]), "open": float(row[1]),
-        "high": float(row[2]), "low": float(row[3]), "close": float(row[4]),
-        "volume": float(row[5]), "quote_volume": float(row[7]),
-        "taker_buy_quote": 0.0, "close_time": int(row[6]),
-    } for row in rows]
-    return {"symbol": symbol, "candles": candles, "price_source": "Bybit linear perpetual"}
-
-
-
-def fetch_gateio_rows(symbol: str, interval: str, start_ms: int | None = None,
-                      end_ms: int | None = None, limit: int = 1000) -> list[list]:
-    """Fetch public Gate.io USDT perpetual candles and normalize to Binance row layout."""
-    if interval not in {"15m", "1m"}:
-        raise ValueError(f"Unsupported Gate.io interval: {interval}")
-    contract = symbol[:-4] + "_USDT" if symbol.endswith("USDT") else symbol
-    params: dict[str, Any] = {"contract": contract, "interval": interval}
-    if start_ms is not None and end_ms is not None:
-        params["from"] = int(start_ms) // 1000
-        params["to"] = int(end_ms) // 1000
-    else:
-        params["limit"] = min(max(int(limit), 1), 2000)
-    last_error: Exception | None = None
-    payload = None
-    for base in GATE_BASE_URLS:
-        try:
-            response = requests.get(
-                base + "/api/v4/futures/usdt/candlesticks",
-                params=params, timeout=15,
-                headers={"Accept": "application/json", "User-Agent": "Pump-Hunter/1.0"},
-            )
-            response.raise_for_status()
-            payload = response.json()
-            break
-        except Exception as exc:
-            last_error = exc
-    if payload is None:
-        raise RuntimeError(f"Gate.io candle API unavailable: {last_error}")
-    if not isinstance(payload, list):
-        raise RuntimeError(f"Unexpected Gate.io candle response: {payload}")
-    duration = 15 * 60 * 1000 if interval == "15m" else 60 * 1000
-    now_ms = int(time.time() * 1000)
-    normalized = []
-    for row in payload:
-        if isinstance(row, dict):
-            start = int(row.get("t", 0)) * 1000
-            open_price, high, low, close = row.get("o"), row.get("h"), row.get("l"), row.get("c")
-            volume = row.get("v", 0)
-            quote_volume = row.get("sum", row.get("v", 0))
-        elif isinstance(row, (list, tuple)) and len(row) >= 6:
-            start = int(row[0]) * 1000
-            volume, close, high, low, open_price = row[1:6]
-            quote_volume = row[6] if len(row) > 6 else volume
-        else:
-            continue
-        close_time = start + duration - 1
-        if start_ms is not None and start < int(start_ms):
-            continue
-        if end_ms is not None and start > int(end_ms):
-            continue
-        if close_time >= now_ms:
-            continue
-        normalized.append([
-            start, str(open_price), str(high), str(low), str(close), str(volume),
-            close_time, str(quote_volume), "0", "0", "0", "0",
-        ])
-    normalized.sort(key=lambda row: int(row[0]))
-    return normalized
-
-
-
-def fetch_bybit_live_price(symbol: str) -> float:
-    """Fetch the live price from the same Bybit linear contract as its candles."""
-    response = requests.get(
-        BYBIT_BASE_URL + "/v5/market/tickers",
-        params={"category": "linear", "symbol": symbol},
-        timeout=12, headers={"User-Agent": "Pump-Hunter/1.0"},
-    )
+def fetch_spot_live_price(symbol: str) -> float:
+    response = requests.get(BASE_URL + "/api/v3/ticker/price",
+                            params={"symbol": str(symbol).upper()}, timeout=12,
+                            headers={"User-Agent": "Pump-Hunter/1.0"})
     response.raise_for_status()
     payload = response.json()
-    if not isinstance(payload, dict) or payload.get("retCode") != 0:
-        raise RuntimeError(f"Bybit ticker API error: {payload}")
-    rows = (payload.get("result") or {}).get("list") or []
-    if not rows:
-        raise RuntimeError(f"Bybit ticker missing {symbol}")
-    price = float(rows[0].get("lastPrice", 0))
-    if not (price > 0 and price < float("inf")):
-        raise RuntimeError(f"Invalid Bybit live price for {symbol}")
+    price = float(payload.get("price", 0)) if isinstance(payload, dict) else 0
+    if not math.isfinite(price) or price <= 0:
+        raise RuntimeError("Invalid Binance Spot ticker price")
     return price
 
-
-def fetch_gateio_live_price(symbol: str) -> float:
-    """Fetch the live price from the same Gate.io USDT perpetual as its candles."""
-    contract = symbol[:-4] + "_USDT" if symbol.endswith("USDT") else symbol
-    last_error = None
-    for base in GATE_BASE_URLS:
-        try:
-            response = requests.get(
-                base + "/api/v4/futures/usdt/tickers",
-                params={"contract": contract}, timeout=12,
-                headers={"Accept": "application/json", "User-Agent": "Pump-Hunter/1.0"},
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, list) or not payload:
-                raise RuntimeError(f"Gate.io ticker missing {contract}")
-            price = float(payload[0].get("last", 0))
-            if not (price > 0 and price < float("inf")):
-                raise RuntimeError(f"Invalid Gate.io live price for {contract}")
-            return price
-        except Exception as exc:
-            last_error = exc
-    raise RuntimeError(f"Gate.io ticker unavailable for {contract}: {last_error}")
-
-
-def fetch_bybit_active_symbols(limit: int = 500) -> list[str]:
-    """Discover active USDT linear perpetuals when Binance universe API is blocked."""
-    response = requests.get(
-        BYBIT_BASE_URL + "/v5/market/tickers",
-        params={"category": "linear"}, timeout=15,
-        headers={"User-Agent": "Pump-Hunter/1.0"},
-    )
+def fetch_spot_active_symbols() -> list[str]:
+    response = requests.get(BASE_URL + "/api/v3/exchangeInfo", timeout=15,
+                            headers={"User-Agent": "Pump-Hunter/1.0"})
     response.raise_for_status()
     payload = response.json()
-    if not isinstance(payload, dict) or payload.get("retCode") != 0:
-        raise RuntimeError(f"Bybit ticker universe API error: {payload}")
-    rows = (payload.get("result") or {}).get("list") or []
-    ranked = []
-    for row in rows:
-        symbol = str(row.get("symbol", ""))
-        try:
-            turnover = float(row.get("turnover24h", 0))
-        except (TypeError, ValueError):
-            continue
-        if symbol.endswith("USDT") and turnover > 0 and turnover < float("inf"):
-            ranked.append((turnover, symbol))
-    ranked.sort(reverse=True)
-    return [symbol for _, symbol in ranked[:limit]]
+    if not isinstance(payload, dict):
+        raise RuntimeError("Unexpected Binance Spot exchangeInfo response")
+    return [str(item["symbol"]) for item in payload.get("symbols", [])
+            if item.get("status") == "TRADING" and item.get("isSpotTradingAllowed", True)
+            and item.get("quoteAsset") == "USDT" and str(item.get("symbol", "")).endswith("USDT")]
