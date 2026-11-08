@@ -25,7 +25,7 @@ from oi_engine.signal_engine import fetch_live_price
 STATE_PATH = Path(".oi_state/sent_signals.json")
 WATCHLIST_PATH = Path(".oi_state/watchlist.json")
 OUTCOME_PATH = Path(".oi_state/trade_outcomes.json")
-MAX_WATCHLIST_SYMBOLS = 12  # 12 symbols x 3 core Coinalyze calls + 2 discovery calls = 38/min cold-start budget.
+MAX_WATCHLIST_SYMBOLS = 9  # 9 symbols x 4 Coinalyze calls + 2 discovery calls = 38/min cold-start budget.
 MAX_MARKET_QUEUE_SYMBOLS = 60
 MARKET_DISCOVERY_PER_RUN = 12
 WATCHLIST_TTL_SECONDS = 24 * 60 * 60
