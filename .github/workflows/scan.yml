@@ -72,6 +72,8 @@ jobs:
 
           checks = {
               "BINANCE_SPOT_TIME": "https://api.binance.com/api/v3/time",
+              "BINANCE_PUBLIC_DATA_TIME": "https://data-api.binance.vision/api/v3/time",
+              "BINANCE_PUBLIC_DATA_TICKER": "https://data-api.binance.vision/api/v3/ticker/price?symbol=BTCUSDT",
               "BINANCE_SPOT_EXCHANGE_INFO": "https://api.binance.com/api/v3/exchangeInfo",
               "BINANCE_SPOT_BTCUSDT_TICKER": "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
           }
