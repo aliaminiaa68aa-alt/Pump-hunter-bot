@@ -42,13 +42,13 @@ def evaluate_liquidity_sweep(
     if not math.isfinite(atr) or atr <= 0:
         return None, "ATR معتبر برای تعیین حد ضرر وجود ندارد"
 
-    # Search the latest three CLOSED candles for a completed sweep/reclaim.
+    # Search the latest six CLOSED candles for a completed sweep/reclaim.
     # If the sweep occurred one or two candles earlier, require the newest
     # closed candle to continue away from the reclaimed level before entering.
     setup = None
     sweep_seen = False
     continuation_seen = False
-    for sweep_index in range(len(candles) - 1, max(10, len(candles) - 4), -1):
+    for sweep_index in range(len(candles) - 1, max(10, len(candles) - 7), -1):
         sweep = candles[sweep_index]
         previous = candles[sweep_index - 12:sweep_index]
         if len(previous) != 12:
@@ -96,10 +96,10 @@ def evaluate_liquidity_sweep(
     if setup is None:
         if sweep_seen and not continuation_seen:
             return None, (
-                "شکار نقدینگی در ۳ کندل اخیر دیده شد، اما کندل بسته‌شده بعدی "
+                "شکار نقدینگی در ۶ کندل اخیر دیده شد، اما کندل بسته‌شده بعدی "
                 "ادامه برگشت را تأیید نکرد؛ برای جلوگیری از ورود زودهنگام سیگنال صادر نشد"
             )
-        return None, "در ۳ کندل بسته‌شده اخیر شکست معتبر سقف/کف ۱۲ کندل قبل و بازپس‌گیری سطح دیده نشد"
+        return None, "در ۶ کندل بسته‌شده اخیر شکست معتبر سقف/کف ۱۲ کندل قبل و بازپس‌گیری سطح دیده نشد"
 
     side, swept_level, sweep_extreme, sweep_age = setup
     if side == "LONG":
