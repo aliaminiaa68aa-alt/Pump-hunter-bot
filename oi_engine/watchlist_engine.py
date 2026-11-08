@@ -165,7 +165,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     funding_rate = metrics.get("funding_rate")
     oi_text = f"{float(oi_change):+.2f}%" if oi_change is not None else "—"
     taker_text = f"{float(taker_ratio):.0%}" if taker_ratio is not None else "—"
-    funding_text = f"{float(funding_rate):+.4%}" if funding_rate is not None else "—"
+    funding_text = f"{float(funding_rate):+.8g}" if funding_rate is not None else "—"
 
     entry = float(signal.entry)
     try:
@@ -214,7 +214,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         f"⚖️ نسبت سود به ریسک تا هدف ۱: <b>{rr_tp1:.2f}R</b>\n"
         "━━━━━━━━━━━━━━\n"
         f"📊 OI ۱۵دقیقه: <b>{oi_text}</b>  |  جریان {taker_text}\n"
-        f"💸 Funding: <b>{funding_text}</b> (اطلاعات زمینه‌ای، نه فیلتر جهت‌دار)\n"
+        f"💸 Funding API خام: <b>{funding_text}</b> (واحد در مستندات API مشخص نشده)\n"
         f"⚙️ حجم: {signal.volume_ratio:.1f}x  |  روش: {engine}\n"
         f"🧭 تایم‌فریم: {html.escape(str(metrics.get('sweep_timeframe', '15m')))}\n"
         f"💧 شکار نقدینگی: {html.escape(str(metrics.get('sweep_reason', 'تأیید شد')))}"
