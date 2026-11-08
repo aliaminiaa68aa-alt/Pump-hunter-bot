@@ -358,6 +358,10 @@ def make_message(s: Setup) -> str:
     )
 
 
+class TelegramDeliveryError(RuntimeError):
+    pass
+
+
 def send_telegram(text: str) -> None:
     token = os.getenv("HIGH_TF_BOT_TOKEN") or os.getenv("BOT_TOKEN")
     chat_id = os.getenv("HIGH_TF_CHAT_ID") or os.getenv("CHAT_ID")
@@ -415,11 +419,16 @@ def run_once() -> dict:
                 setup.funding_pct = funding_pct
                 setup.coinalyze_exchanges = exchanges
                 # Persist only after Telegram confirms delivery.
-                send_telegram(make_message(setup))
+                try:
+                    send_telegram(make_message(setup))
+                except Exception as exc:
+                    raise TelegramDeliveryError(f"Telegram delivery failed for {key}: {exc}") from exc
                 state["sent"][key] = {"sent_at": int(time.time()), "setup": asdict(setup)}
                 save_state(state)
                 stats["sent"].append(key)
                 LOG.info("Telegram signal delivered: %s", key)
+            except TelegramDeliveryError:
+                raise
             except Exception as exc:
                 stats["analysis_errors"] += 1
                 LOG.exception("%s %s scan error: %s", symbol, tf, exc)
