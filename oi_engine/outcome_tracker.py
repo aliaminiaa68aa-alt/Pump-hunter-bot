@@ -99,10 +99,20 @@ def make_trade_record(signal: Any, metrics: Dict[str, Any], sent_at_ms: int) -> 
             "coinalyze_oi_change_15m_pct": metrics.get("oi_change_15m_window_pct"),
             "coinalyze_taker_buy_ratio": metrics.get("taker_buy_ratio"),
             "funding_rate_raw": metrics.get("funding_rate"),
+            "price_source": metrics.get("price_source", "unknown"),
             "predicted_funding_rate_raw": metrics.get("predicted_funding_rate"),
         },
         "sent_at_ms": int(sent_at_ms),
         "last_checked_ms": int(sent_at_ms),  # Never count price action before the alert reached Telegram.
+        # The fresh executable quote is the pre-alert baseline. This lets the
+        # first monitor poll detect a crossing that happened after signal send.
+        "live_last_price": (
+            float(metrics["current_price"])
+            if metrics.get("current_price") is not None
+            and math.isfinite(float(metrics["current_price"]))
+            and float(metrics["current_price"]) > 0 else None
+        ),
+        "live_last_price_ms": int(sent_at_ms),
         "status": "WAITING_ENTRY",
         "events": [],
         "entry_fill_price": None,
