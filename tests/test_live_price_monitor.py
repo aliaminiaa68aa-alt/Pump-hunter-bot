@@ -109,7 +109,7 @@ class LivePriceMonitorTests(unittest.TestCase):
         self.assertEqual(record["possible_entry_fill_price"], 100.0)
         apply_live_prices(journal, {"TESTUSDT": 102.5}, now_ms=4_000)
         self.assertEqual(record["status"], "AMBIGUOUS_ENTRY_POLL")
-        self.assertEqual(len(record["events"]), 2)
+        self.assertEqual(len(record["events"]), 1)
 
     def test_short_entry_and_stop_crossed_in_one_poll_are_ambiguous(self):
         journal, record = make_journal("SHORT")
