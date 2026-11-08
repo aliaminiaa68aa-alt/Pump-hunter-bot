@@ -198,10 +198,10 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     chart_exchange_label = html.escape(chart_exchange)
     chart_contract_line = (
         f"📈 صرافی نمودار TradingView: <b>{chart_exchange_label}</b> "
-        f"| قرارداد: <code>{html.escape(str(signal.symbol))}</code> Perpetual (USDT)\\n"
+        f"| قرارداد: <code>{html.escape(str(signal.symbol))}</code> Perpetual (USDT)\n"
     )
     if current_price is None:
-        current_price_line = f"💹 قیمت فعلی {price_source_label}: <b>ناموجود</b>\\n"
+        current_price_line = f"💹 قیمت فعلی {price_source_label}: <b>ناموجود</b>\n"
     else:
         current_price_gap = (current_price - entry) / entry * 100.0
         current_price_line = (
