@@ -625,11 +625,16 @@ def add_market_universe_candidates(
     return next_cursor, added
 
 
-def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIST_SYMBOLS):
-    """Prioritize fresh alerts while reserving capacity for expiring pullback setups."""
-    symbols = list(watchlist)
+def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIST_SYMBOLS, now=None):
+    """Prioritize fresh alerts and pending setups while honoring temporary data-error cooldowns."""
+    current_time = int(now if now is not None else time.time())
+    symbols = [
+        symbol for symbol, record in watchlist.items()
+        if isinstance(record, dict)
+        and _safe_int(record.get("retry_after", 0)) <= current_time
+    ]
     if not symbols:
-        return {}, ""
+        return {}, last_scanned_symbol
 
     count = min(max(1, _safe_int(limit, MAX_WATCHLIST_SYMBOLS)), len(symbols))
     score = lambda symbol: _safe_float(watchlist[symbol].get("oi_priority_score", 0.0))
