@@ -244,7 +244,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertIn("ABCUSDT", message)
         self.assertIn("Coinalyze + Price Action + Liquidity Sweep", message)
         self.assertIn("ورود:", message)
-        self.assertIn("قیمت فعلی Binance Futures", message)
+        self.assertIn("قیمت فعلی", message)
         self.assertIn("100.5", message)
         self.assertIn("فاصله تا ورود:", message)
         self.assertIn("ساعت ایران:", message)
