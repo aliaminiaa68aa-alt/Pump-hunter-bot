@@ -1,4 +1,4 @@
-"""Continuous live outcome monitor with an independent periodic signal scanner."""
+"""Continuous live outcome monitor with independent multi-provider price fallback."""
 from __future__ import annotations
 
 import os
@@ -21,30 +21,52 @@ BINANCE_TICKER_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
 
 
 def fetch_binance_last_prices(symbols: set[str]) -> Dict[str, float]:
-    """Fetch one Binance USD-M last-price snapshot for all active symbols."""
+    """Fetch live prices with per-symbol Binance -> Bybit -> Gate.io fallback."""
     if not symbols:
         return {}
-    response = requests.get(BINANCE_TICKER_URL, timeout=8)
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        raise ValueError("Unexpected Binance ticker response")
     wanted = {symbol.upper() for symbol in symbols}
     result: Dict[str, float] = {}
-    for item in payload:
-        symbol = str(item.get("symbol", "")).upper()
-        if symbol in wanted:
+    errors: Dict[str, list[str]] = {symbol: [] for symbol in wanted}
+    try:
+        response = requests.get(BINANCE_TICKER_URL, timeout=8)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise ValueError("Unexpected Binance ticker response")
+        for item in payload:
+            symbol = str(item.get("symbol", "")).upper()
+            if symbol not in wanted:
+                continue
             try:
                 price = float(item.get("price"))
             except (TypeError, ValueError, OverflowError):
                 continue
             if price > 0 and price < float("inf"):
                 result[symbol] = price
-    # A partial ticker response must not block every other active trade.
-    # Missing symbols remain untouched by apply_live_prices; only a completely
-    # empty usable snapshot fails closed so stale data can never create fills.
+    except Exception as exc:
+        for symbol in wanted:
+            errors[symbol].append(f"Binance {type(exc).__name__}: {exc}")
+
+    from oi_engine.market_data import fetch_bybit_live_price, fetch_gateio_live_price
+    for symbol in sorted(wanted - result.keys()):
+        try:
+            result[symbol] = float(fetch_bybit_live_price(symbol))
+            print(f"Live price fallback: {symbol} Binance unavailable; Bybit OK", flush=True)
+            continue
+        except Exception as exc:
+            errors[symbol].append(f"Bybit {type(exc).__name__}: {exc}")
+        try:
+            result[symbol] = float(fetch_gateio_live_price(symbol))
+            print(f"Live price fallback: {symbol} Binance and Bybit unavailable; Gate.io OK", flush=True)
+        except Exception as exc:
+            errors[symbol].append(f"Gate.io {type(exc).__name__}: {exc}")
+
+    missing = wanted - result.keys()
+    if missing:
+        detail = "; ".join(f"{symbol}: {' | '.join(errors[symbol])}" for symbol in sorted(missing))
+        print(f"Live price unavailable for symbols: {detail}", flush=True)
     if not result:
-        raise RuntimeError(f"Binance ticker returned no usable active symbols: {sorted(wanted)}")
+        raise RuntimeError(f"No usable live prices from Binance, Bybit or Gate.io: {sorted(wanted)}")
     return result
 
 
