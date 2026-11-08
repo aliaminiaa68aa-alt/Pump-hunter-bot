@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 BASE_URL = "https://api.binance.com"
-BASE_URLS = (BASE_URL, "https://data-api.binance.vision")
+BASE_URLS = ("https://data-api.binance.vision", BASE_URL)
 INTERVAL = "15m"
 MIN_OI_CHANGE_PCT = 0.10
 MIN_DIRECTIONAL_PRICE_CHANGE_PCT = 0.03
