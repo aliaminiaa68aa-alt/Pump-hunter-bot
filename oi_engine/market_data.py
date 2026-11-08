@@ -131,3 +131,73 @@ def fetch_gateio_rows(symbol: str, interval: str, start_ms: int | None = None,
         ])
     normalized.sort(key=lambda row: int(row[0]))
     return normalized
+
+
+
+def fetch_bybit_live_price(symbol: str) -> float:
+    """Fetch the live price from the same Bybit linear contract as its candles."""
+    response = requests.get(
+        BYBIT_BASE_URL + "/v5/market/tickers",
+        params={"category": "linear", "symbol": symbol},
+        timeout=12, headers={"User-Agent": "Pump-Hunter/1.0"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or payload.get("retCode") != 0:
+        raise RuntimeError(f"Bybit ticker API error: {payload}")
+    rows = (payload.get("result") or {}).get("list") or []
+    if not rows:
+        raise RuntimeError(f"Bybit ticker missing {symbol}")
+    price = float(rows[0].get("lastPrice", 0))
+    if not (price > 0 and price < float("inf")):
+        raise RuntimeError(f"Invalid Bybit live price for {symbol}")
+    return price
+
+
+def fetch_gateio_live_price(symbol: str) -> float:
+    """Fetch the live price from the same Gate.io USDT perpetual as its candles."""
+    contract = symbol[:-4] + "_USDT" if symbol.endswith("USDT") else symbol
+    last_error = None
+    for base in GATE_BASE_URLS:
+        try:
+            response = requests.get(
+                base + "/api/v4/futures/usdt/tickers",
+                params={"contract": contract}, timeout=12,
+                headers={"Accept": "application/json", "User-Agent": "Pump-Hunter/1.0"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list) or not payload:
+                raise RuntimeError(f"Gate.io ticker missing {contract}")
+            price = float(payload[0].get("last", 0))
+            if not (price > 0 and price < float("inf")):
+                raise RuntimeError(f"Invalid Gate.io live price for {contract}")
+            return price
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(f"Gate.io ticker unavailable for {contract}: {last_error}")
+
+
+def fetch_bybit_active_symbols(limit: int = 500) -> list[str]:
+    """Discover active USDT linear perpetuals when Binance universe API is blocked."""
+    response = requests.get(
+        BYBIT_BASE_URL + "/v5/market/tickers",
+        params={"category": "linear"}, timeout=15,
+        headers={"User-Agent": "Pump-Hunter/1.0"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or payload.get("retCode") != 0:
+        raise RuntimeError(f"Bybit ticker universe API error: {payload}")
+    rows = (payload.get("result") or {}).get("list") or []
+    ranked = []
+    for row in rows:
+        symbol = str(row.get("symbol", ""))
+        try:
+            turnover = float(row.get("turnover24h", 0))
+        except (TypeError, ValueError):
+            continue
+        if symbol.endswith("USDT") and turnover > 0 and turnover < float("inf"):
+            ranked.append((turnover, symbol))
+    ranked.sort(reverse=True)
+    return [symbol for _, symbol in ranked[:limit]]
