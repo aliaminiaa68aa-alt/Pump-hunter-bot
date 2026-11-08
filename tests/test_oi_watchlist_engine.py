@@ -110,6 +110,25 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertEqual(found[0][0].side, "SHORT")
         self.assertIn("1 کندل قبل", updated["ABCUSDT"]["reason"])
 
+    def test_long_accepts_sweep_four_closed_candles_ago_with_latest_confirmation(self):
+        candles = make_candles("LONG")
+        candles[-4].update({
+            "open": 99.5, "high": 101.0, "low": 98.0, "close": 100.5,
+            "quote_volume": 180.0, "taker_buy_quote": 120.0,
+        })
+        candles[-1].update({
+            "open": 100.5, "high": 101.8, "low": 100.2, "close": 101.4,
+            "quote_volume": 160.0, "taker_buy_quote": 110.0,
+        })
+        with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                   return_value={"symbol": "ABCUSDT", "candles": candles, "live_price": candles[-1]["close"]}):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {}}, FakeClient(make_metrics("LONG")), now=1000
+            )
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0].side, "LONG")
+        self.assertIn("3 کندل قبل", updated["ABCUSDT"]["reason"])
+
     def test_low_volume_sweep_is_not_sent_as_entry(self):
         for side in ("LONG", "SHORT"):
             with self.subTest(side=side):
