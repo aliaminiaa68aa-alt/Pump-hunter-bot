@@ -183,12 +183,13 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
             ).astimezone(timezone(timedelta(hours=3, minutes=30))).strftime("%H:%M:%S")
     except (TypeError, ValueError, OverflowError, OSError):
         pass
+    price_source_label = html.escape(str(metrics.get("price_source", "قیمت بازار")))
     if current_price is None:
-        current_price_line = "💹 قیمت فعلی Binance Futures: <b>ناموجود</b>\n"
+        current_price_line = f"💹 قیمت فعلی {price_source_label}: <b>ناموجود</b>\\n"
     else:
         current_price_gap = (current_price - entry) / entry * 100.0
         current_price_line = (
-            f"💹 قیمت فعلی Binance Futures: <code>{current_price:.8g}</code>"
+            f"💹 قیمت فعلی {price_source_label}: <code>{current_price:.8g}</code>"
             f" | فاصله تا ورود: <b>{current_price_gap:+.2f}%</b>"
             f" | ساعت ایران: <b>{price_time_label}</b>\n"
         )
@@ -235,10 +236,10 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
         # an earlier successful attempt when the current price fetch fails.
         record.pop("data_source", None)
         try:
-            # Binance supplies executable market prices and OHLCV candles.
-            # Coinalyze is used ONLY for derivatives/positioning metrics, never prices.
+            # One exchange supplies both OHLCV and live price; Coinalyze supplies
+            # derivatives/positioning metrics only. Never combine exchange prices.
             snapshot = fetch_snapshot(symbol)
-            record["data_source"] = f"{snapshot.get('price_source', 'Binance USD-M Futures')} prices + Coinalyze derivatives metrics"
+            record["data_source"] = f"{snapshot.get('price_source', 'market feed')} prices + Coinalyze derivatives metrics"
             metrics = client.fetch_metrics(symbol, now=timestamp)
             # OI change and taker flow must describe the very same closed
             # 15m candle as the price-action liquidity sweep. Reject stale or
@@ -267,14 +268,13 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 # materially away before the alert is generated.
                 live_price = snapshot.get("live_price")
                 atr_for_entry = _atr(snapshot.get("candles") or [])
-                is_live_binance_snapshot = snapshot.get("price_source") == "Binance USD-M Futures (USDT perpetual)"
-                if is_live_binance_snapshot and (live_price is None or not math.isfinite(float(live_price)) or float(live_price) <= 0):
-                    geometry_rejection = "قیمت لحظه‌ای Binance Futures موجود نیست؛ سیگنال برای جلوگیری از ورود با قیمت قدیمی رد شد"
-                elif is_live_binance_snapshot and abs(float(live_price) - float(signal.entry)) > max(atr_for_entry * 0.50, float(signal.entry) * 0.001):
+                if live_price is None or not math.isfinite(float(live_price)) or float(live_price) <= 0:
+                    geometry_rejection = "قیمت لحظه‌ای همان صرافیِ کندل موجود نیست؛ سیگنال با داده ناقص رد شد"
+                elif abs(float(live_price) - float(signal.entry)) > max(atr_for_entry * 0.50, float(signal.entry) * 0.001):
                     deviation_pct = abs(float(live_price) - float(signal.entry)) / float(signal.entry) * 100.0
                     geometry_rejection = (
-                        f"فاصله قیمت زنده Binance تا ورود کندل {deviation_pct:.2f}٪ است؛ "
-                        "ورود قدیمی/دور رد شد"
+                        f"فاصله قیمت زنده {snapshot.get('price_source', 'بازار')} تا ورود کندل "
+                        f"{deviation_pct:.2f}٪ است؛ ورود قدیمی/دور رد شد"
                     )
                 else:
                     geometry_rejection = signal_price_geometry_rejection(
