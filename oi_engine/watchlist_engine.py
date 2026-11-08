@@ -183,13 +183,13 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
             ).astimezone(timezone(timedelta(hours=3, minutes=30))).strftime("%H:%M:%S")
     except (TypeError, ValueError, OverflowError, OSError):
         pass
-    price_source_label = html.escape(str(metrics.get("price_source", "قیمت بازار")))
+    price_source_label = html.escape(str(metrics.get("price_source", "Binance Futures")))
     if current_price is None:
-        current_price_line = f"💹 قیمت فعلی {price_source_label}: <b>ناموجود</b>\\n"
+        current_price_line = f"💹 قیمت فعلی Binance Futures / {price_source_label}: <b>ناموجود</b>\\n"
     else:
         current_price_gap = (current_price - entry) / entry * 100.0
         current_price_line = (
-            f"💹 قیمت فعلی {price_source_label}: <code>{current_price:.8g}</code>"
+            f"💹 قیمت فعلی Binance Futures / {price_source_label}: <code>{current_price:.8g}</code>"
             f" | فاصله تا ورود: <b>{current_price_gap:+.2f}%</b>"
             f" | ساعت ایران: <b>{price_time_label}</b>\n"
         )
