@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Tuple
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
 from oi_engine.signal_engine import MarketDataError, Signal, _atr, fetch_snapshot
 from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep
+from oi_engine.trend_engine import analyze_trend_1h, confirm_trend_15m, TrendDataError
 
 DATA_ERROR_RETRY_SECONDS = 300
 
@@ -247,8 +248,33 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             # One exchange supplies both OHLCV and live price; Coinalyze supplies
             # derivatives/positioning metrics only. Never combine exchange prices.
             snapshot = fetch_snapshot(symbol)
+            # Journal order: establish the 1h direction first, then require
+            # independent 15m structure confirmation before derivatives/setup work.
+            trend_1h = analyze_trend_1h(symbol)
+            if trend_1h["direction"] == "NEUTRAL":
+                record["status"] = "روند یک‌ساعته خنثی/نامعتبر"
+                record["reason"] = (
+                    "ساختار HH/HL یا LH/LL و جایگاه EMA50/EMA200 هم‌جهت نیست؛ "
+                    "تا تعیین جهت معتبر هیچ LONG/SHORT بررسی نمی‌شود"
+                )
+                record["last_checked"] = timestamp
+                record.pop("retry_after", None)
+                continue
+            if not confirm_trend_15m(snapshot.get("candles") or [], trend_1h["direction"]):
+                record["status"] = "تأیید روند ۱۵دقیقه دریافت نشد"
+                record["reason"] = (
+                    f"روند ۱ساعته {trend_1h['direction']} است، اما ساختار و EMA تایم ۱۵دقیقه "
+                    "هم‌جهت نیست؛ سیگنال صادر نشد"
+                )
+                record["last_checked"] = timestamp
+                record.pop("retry_after", None)
+                continue
+            record["trend_1h"] = trend_1h
+            record["trend_15m_confirmed"] = True
             record["data_source"] = f"{snapshot.get('price_source', 'market feed')} prices + Coinalyze derivatives metrics"
             metrics = client.fetch_metrics(symbol, now=timestamp)
+            metrics["trend_1h"] = trend_1h["direction"]
+            metrics["trend_15m_confirmed"] = True
             # OI change and taker flow must describe the very same closed
             # 15m candle as the price-action liquidity sweep. Reject stale or
             # cross-candle derivatives data rather than mixing timestamps.
@@ -322,7 +348,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
 
             record["last_checked"] = timestamp
             record.pop("retry_after", None)
-        except (CoinalyzeError, MarketDataError, OSError, ValueError, KeyError) as exc:
+        except (CoinalyzeError, MarketDataError, TrendDataError, OSError, ValueError, KeyError) as exc:
             record["status"] = "خطای دریافت داده"
             record["reason"] = f"{type(exc).__name__}: {exc}"
             record["last_checked"] = timestamp
