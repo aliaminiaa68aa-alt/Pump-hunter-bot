@@ -225,7 +225,9 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         f"📊 OI ۱۵دقیقه: <b>{oi_text}</b>  |  جریان {taker_text}\n"
         f"💸 Funding API خام: <b>{funding_text}</b> (واحد در مستندات API مشخص نشده)\n"
         f"⚙️ حجم: {signal.volume_ratio:.1f}x  |  روش: {engine}\n"
-        f"🧭 تایم‌فریم: {html.escape(str(metrics.get('sweep_timeframe', '15m')))}\n"
+        f"🧭 روند ۱ساعته: {html.escape(str(metrics.get('trend_1h', 'نامشخص')))}"
+        f" | تأیید ۱۵دقیقه: {'بله' if metrics.get('trend_15m_confirmed') else 'خیر'}\n"
+        f"⏱ تایم‌فریم شکار نقدینگی: {html.escape(str(metrics.get('sweep_timeframe', '15m')))}\n"
         f"💧 شکار نقدینگی: {html.escape(str(metrics.get('sweep_reason', 'تأیید شد')))}"
     )
 
