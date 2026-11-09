@@ -1,7 +1,8 @@
 import unittest
+from unittest.mock import patch
 
 from high_timeframe_bot import (
-    Setup, analyze_candles, atr, ema, make_message, pivot_levels, signal_key,
+    Setup, analyze_candles, atr, btc_risk_filter, ema, make_message, pivot_levels, signal_key,
 )
 
 
@@ -59,6 +60,7 @@ class HighTimeframeScannerTests(unittest.TestCase):
         self.assertGreaterEqual(setup.room_to_tp1_pct, 5.0)
         self.assertGreaterEqual(setup.room_to_tp2_pct, 8.0)
         self.assertLess(setup.stop, setup.entry)
+        self.assertGreaterEqual(setup.room_to_tp1_pct / setup.risk_pct, 2.0)
 
     def test_short_setup_requires_closed_candle_sweep(self):
         rows = make_candles("SHORT")
@@ -68,11 +70,49 @@ class HighTimeframeScannerTests(unittest.TestCase):
         self.assertGreaterEqual(setup.room_to_tp1_pct, 5.0)
         self.assertGreaterEqual(setup.room_to_tp2_pct, 8.0)
         self.assertGreater(setup.stop, setup.entry)
+        self.assertGreaterEqual(setup.room_to_tp1_pct / setup.risk_pct, 2.0)
 
     def test_stale_price_is_rejected(self):
         rows = make_candles("LONG")
         setup = analyze_candles("TESTUSDT", "4h", rows, rows[-1]["close"] * 1.10)
         self.assertIsNone(setup)
+
+    @patch("high_timeframe_bot.atr", return_value=7.0)
+    def test_rejects_setup_below_two_to_one_reward_to_tp1(self, _atr):
+        rows = make_candles("LONG")
+        self.assertIsNone(
+            analyze_candles("TESTUSDT", "4h", rows, rows[-1]["close"])
+        )
+
+    def test_btc_selloff_of_two_percent_pauses_entries(self):
+        rows = [
+            [0, "100", "101", "99", "100", "1", 900000, "100"],
+            [0, "100", "101", "97.9", "97.9", "1", 950000, "100"],
+        ]
+        with patch("high_timeframe_bot.get_json", return_value=rows), \
+             patch("high_timeframe_bot.time.time", return_value=1000.0):
+            allowed, change = btc_risk_filter()
+        self.assertFalse(allowed)
+        self.assertAlmostEqual(change, -2.1, places=6)
+
+    def test_routine_btc_pullback_does_not_pause_entries(self):
+        rows = [
+            [0, "100", "101", "99", "100", "1", 900000, "100"],
+            [0, "100", "101", "99", "99.8", "1", 950000, "100"],
+        ]
+        with patch("high_timeframe_bot.get_json", return_value=rows), \
+             patch("high_timeframe_bot.time.time", return_value=1000.0):
+            allowed, change = btc_risk_filter()
+        self.assertTrue(allowed)
+        self.assertAlmostEqual(change, -0.2, places=6)
+
+    def test_missing_btc_closed_candles_fail_closed(self):
+        rows = [[0, "100", "101", "99", "100", "1", 950000, "100"]]
+        with patch("high_timeframe_bot.get_json", return_value=rows), \
+             patch("high_timeframe_bot.time.time", return_value=1000.0):
+            allowed, change = btc_risk_filter()
+        self.assertFalse(allowed)
+        self.assertIsNone(change)
 
     def test_no_sweep_means_no_signal(self):
         rows = make_candles("LONG")
