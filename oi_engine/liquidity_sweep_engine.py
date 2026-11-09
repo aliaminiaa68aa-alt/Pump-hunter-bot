@@ -109,17 +109,47 @@ def evaluate_liquidity_sweep(
         if oi_change <= 0 or taker_ratio >= 0.50:
             return None, "نقدینگی سقف زده شده، اما OI و جریان فروش Coinalyze برگشت SHORT را تأیید نمی‌کنند"
 
-    # Stop is placed beyond the actual sweep extreme, with a modest ATR safety buffer.
+    # Prepare a LIMIT pullback at the reclaimed liquidity level. The signal is
+    # published before touch; the live monitor is responsible for confirming fill.
+    entry = float(swept_level)
+    if side == "LONG" and entry >= float(snapshot.get("live_price", entry + 1e-12)):
+        return None, "قیمت ورود پولبک قبلاً لمس یا از دست رفته؛ سیگنال دیرهنگام صادر نشد"
+    if side == "SHORT" and entry <= float(snapshot.get("live_price", entry - 1e-12)):
+        return None, "قیمت ورود پولبک قبلاً لمس یا از دست رفته؛ سیگنال دیرهنگام صادر نشد"
+
+    # Structural stop remains beyond the actual sweep extreme with an ATR buffer.
     buffer = max(atr * 0.10, entry * 0.0005)
     stop = sweep_extreme - buffer if side == "LONG" else sweep_extreme + buffer
     risk = entry - stop if side == "LONG" else stop - entry
     if risk <= 0 or risk / entry > 0.04:
         return None, "فاصله حد ضرر ساختاری نامعتبر یا بیش از ۴٪ است"
 
-    tp1 = entry + risk if side == "LONG" else entry - risk
-    tp2 = entry + 2.0 * risk if side == "LONG" else entry - 2.0 * risk
+    # Find the nearest two confirmed opposing swing levels as structural targets.
+    # Only closed candles are considered; no arbitrary fixed-R targets.
+    levels = []
+    history = candles[-51:-1]
+    for index in range(1, len(history) - 1):
+        row = history[index]
+        try:
+            level = float(row["high"] if side == "LONG" else row["low"])
+            left = float(history[index - 1]["high"] if side == "LONG" else history[index - 1]["low"])
+            right = float(history[index + 1]["high"] if side == "LONG" else history[index + 1]["low"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        pivot = level > left and level >= right if side == "LONG" else level < left and level <= right
+        beyond_entry = level > entry + risk * 0.25 if side == "LONG" else level < entry - risk * 0.25
+        if pivot and beyond_entry:
+            levels.append(level)
+    levels = sorted(set(levels), reverse=(side == "SHORT"))
+    if len(levels) < 2:
+        return None, "دو سطح نقدینگی/مقاومت معتبر برای تعیین اهداف ساختاری پیدا نشد"
+    tp1, tp2 = levels[0], levels[1]
+    if side == "LONG" and not stop < entry < tp1 < tp2:
+        return None, "ترتیب سطوح ساختاری LONG معتبر نیست"
+    if side == "SHORT" and not stop > entry > tp1 > tp2:
+        return None, "ترتیب سطوح ساختاری SHORT معتبر نیست"
     previous_close = float(candles[-2]["close"])
-    price_change = (entry / previous_close - 1.0) * 100.0
+    price_change = (float(last["close"]) / previous_close - 1.0) * 100.0
     baseline = candles[-21:-1]
     avg_volume = sum(float(row["quote_volume"]) for row in baseline) / len(baseline)
     volume_ratio = float(last["quote_volume"]) / avg_volume if avg_volume > 0 else 0.0
