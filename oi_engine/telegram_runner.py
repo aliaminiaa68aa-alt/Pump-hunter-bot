@@ -415,15 +415,11 @@ def dispatch_outcome_notifications(journal: Dict[str, Any], token: str, chat_id:
                 else:
                     label = "⚠️ ورود با پایش زنده تأیید نشد؛ نتیجه تاریخی این سیگنال معامله‌شده محسوب نمی‌شود."
             elif name == "MISSED_ENTRY":
-                planned = _safe_float(event.get("planned_entry"), 0.0)
-                observed = _safe_float(event.get("observed_price"), 0.0)
-                slip = _safe_float(event.get("slippage_pct"), 0.0)
-                label = (
-                    "⛔ ورود انجام نشد؛ قیمت با تأخیر و خارج از محدوده مجاز رسید"
-                    f"\nورود برنامه‌ریزی‌شده: {planned:.8g}"
-                    f"\nقیمت مشاهده‌شده: {observed:.8g}"
-                    f"\nاختلاف نامطلوب: {slip:.2f}%"
-                )
+                # A missed/late entry is not a trade update. Never send a
+                # late-entry warning or imply that an unfilled order activated.
+                delivery[key] = {"status": "ignored", "reason": "late_entry_alert_disabled"}
+                save_outcome_journal(journal)
+                continue
             elif name == "AMBIGUOUS_ENTRY_POLL":
                 label = "⚠️ ورود و حد ضرر در یک بازه پایش لمس شدند؛ نتیجه معامله قابل تأیید نیست"
             elif name == "AMBIGUOUS_ENTRY_CANDLE":

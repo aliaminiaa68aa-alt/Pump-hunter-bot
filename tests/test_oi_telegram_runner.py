@@ -1267,6 +1267,46 @@ class TelegramRunnerTests(unittest.TestCase):
 
 
 
+
+    def test_missed_entry_event_never_sends_late_entry_alert(self):
+        now_ms = 2_000_000
+        journal = {
+            "trades": {
+                "unfilled-late": {
+                    "status": "MISSED_ENTRY",
+                    "entry_missed": True,
+                    "sent_at_ms": 1_000_000,
+                    "telegram_message_id": 95,
+                    "signal": {
+                        "symbol": "NOFILLUSDT", "side": "LONG",
+                        "entry": 100.0, "stop_loss": 98.0,
+                        "take_profit_1": 102.0, "take_profit_2": 104.0,
+                    },
+                    "events": [{
+                        "event": "MISSED_ENTRY",
+                        "time_ms": 1_500_000,
+                        "planned_entry": 100.0,
+                        "observed_price": 101.5,
+                        "slippage_pct": 1.5,
+                    }],
+                }
+            }
+        }
+        with patch.object(telegram_runner.time, "time", return_value=now_ms / 1000):
+            with patch.object(telegram_runner, "save_outcome_journal"):
+                with patch.object(telegram_runner, "send_telegram") as send:
+                    result = telegram_runner.dispatch_outcome_notifications(
+                        journal, "token", "chat"
+                    )
+        self.assertEqual(send.call_count, 0)
+        record = result["trades"]["unfilled-late"]
+        self.assertEqual(record["notification_state"]["0"]["status"], "ignored")
+        self.assertEqual(
+            record["notification_state"]["0"]["reason"],
+            "late_entry_alert_disabled",
+        )
+
+
 class TelegramSendReliabilityTests(unittest.TestCase):
     def _response(self, payload, status_code=200):
         response = unittest.mock.Mock()
