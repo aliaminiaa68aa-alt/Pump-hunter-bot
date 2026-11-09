@@ -21,6 +21,7 @@ TIMEFRAMES = {"4h": 4 * 60 * 60 * 1000, "1d": 24 * 60 * 60 * 1000}
 MIN_TP1_PCT = 5.0
 MIN_TP2_PCT = 8.0
 MAX_RISK_PCT = 5.0
+BTC_MAX_DRAWDOWN_15M_PCT = -2.0
 STATE_PATH = Path(os.getenv("HIGH_TF_STATE_PATH", ".state/high_tf_sent.json"))
 MAX_SYMBOLS = max(10, min(200, int(os.getenv("HIGH_TF_MAX_SYMBOLS", "100"))))
 LOG = logging.getLogger("high_timeframe_bot")
@@ -63,6 +64,41 @@ def get_json(base: str, path: str, params: Optional[dict] = None,
     response.raise_for_status()
     payload = response.json()
     return payload
+
+
+def btc_risk_filter() -> tuple[bool, Optional[float]]:
+    """Fail closed when BTC 15m closed-candle data is missing or drops by 2%+."""
+    try:
+        rows = get_json(BINANCE, "/api/v3/klines", {
+            "symbol": "BTCUSDT", "interval": "15m", "limit": 4,
+        })
+        if not isinstance(rows, list):
+            raise ValueError("Unexpected BTC 15m kline response")
+        now_ms = int(time.time() * 1000)
+        closed = []
+        for row in rows:
+            if not isinstance(row, list) or len(row) < 7:
+                continue
+            try:
+                close_time = int(row[6])
+                close_price = float(row[4])
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if close_time < now_ms and math.isfinite(close_price) and close_price > 0:
+                closed.append((close_time, close_price))
+        closed.sort(key=lambda item: item[0])
+        if len(closed) < 2:
+            raise ValueError("Fewer than two valid closed BTC 15m candles")
+        previous_close = closed[-2][1]
+        latest_close = closed[-1][1]
+        change_pct = (latest_close / previous_close - 1.0) * 100.0
+        if not math.isfinite(change_pct):
+            raise ValueError("Invalid BTC 15m percentage change")
+        return change_pct > BTC_MAX_DRAWDOWN_15M_PCT, change_pct
+    except Exception as exc:
+        LOG.warning("BTC 15m risk filter unavailable; final entries paused: %s",
+                    type(exc).__name__)
+        return False, None
 
 
 def load_state() -> dict:
@@ -242,7 +278,7 @@ def analyze_candles(symbol: str, tf: str, cs: list[dict],
         return None
 
     tp1 = entry * (1 + MIN_TP1_PCT / 100) if side == "LONG" else entry * (1 - MIN_TP1_PCT / 100)
-    if (MIN_TP1_PCT / risk_pct) < 1.0:
+    if (MIN_TP1_PCT / risk_pct) < 2.0:
         return None
     levels = pivot_levels(cs[:-1], side, entry)
     if not levels:
@@ -434,10 +470,16 @@ def run_once() -> dict:
     pairs = universe()
     if not pairs:
         raise RuntimeError("Binance returned no eligible liquid USDT Spot symbols")
+    btc_ok, btc_change = btc_risk_filter()
+    LOG.info("BTC 15m risk filter: change=%s%%; final_entries_allowed=%s",
+             f"{btc_change:.3f}" if btc_change is not None else "unavailable",
+             btc_ok)
     stats = {"symbols": len(pairs), "timeframes_checked": 0,
              "technical_setups": 0, "sent": [], "duplicates": 0,
              "analysis_errors": 0, "coinalyze_errors": 0,
-             "insufficient_history": 0}
+             "insufficient_history": 0, "btc_rejected": 0,
+             "btc_15m_change_pct": btc_change,
+             "final_entries_allowed": btc_ok}
     for symbol, current_price in pairs:
         for tf in TIMEFRAMES:
             stats["timeframes_checked"] += 1
@@ -447,6 +489,9 @@ def run_once() -> dict:
                 if setup is None:
                     continue
                 stats["technical_setups"] += 1
+                if not btc_ok:
+                    stats["btc_rejected"] += 1
+                    continue
                 key = signal_key(setup)
                 if key in state.setdefault("sent", {}):
                     stats["duplicates"] += 1
