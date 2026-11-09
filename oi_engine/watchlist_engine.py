@@ -299,23 +299,29 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     f"یک‌ساعته ({trend_1h['direction']}) مخالف است؛ سیگنال رد شد"
                 )
             if signal is not None:
-                # The signal entry is the last closed Binance Spot 15m candle close.
-                # Do not publish it if Binance Spot live price has moved
-                # materially away before the alert is generated.
+                # A LIMIT pullback signal must be published while price is still
+                # on the continuation side of entry, before the level is touched.
                 live_price = snapshot.get("live_price")
                 atr_for_entry = _atr(snapshot.get("candles") or [])
                 if live_price is None or not math.isfinite(float(live_price)) or float(live_price) <= 0:
-                    geometry_rejection = "قیمت لحظه‌ای همان صرافیِ کندل موجود نیست؛ سیگنال با داده ناقص رد شد"
-                elif abs(float(live_price) - float(signal.entry)) > max(atr_for_entry * 0.50, float(signal.entry) * 0.001):
-                    deviation_pct = abs(float(live_price) - float(signal.entry)) / float(signal.entry) * 100.0
-                    geometry_rejection = (
-                        f"فاصله قیمت زنده {snapshot.get('price_source', 'بازار')} تا ورود کندل "
-                        f"{deviation_pct:.2f}٪ است؛ ورود قدیمی/دور رد شد"
-                    )
+                    geometry_rejection = "قیمت لحظه‌ای Binance Spot موجود نیست؛ سیگنال با داده ناقص رد شد"
                 else:
-                    geometry_rejection = signal_price_geometry_rejection(
-                        signal, min_tp1_distance_pct=0.0
-                    )
+                    live_price = float(live_price)
+                    entry_price = float(signal.entry)
+                    max_pullback_gap = max(atr_for_entry * 2.0, entry_price * 0.01)
+                    gap = (live_price - entry_price) if signal.side == "LONG" else (entry_price - live_price)
+                    if gap <= 0:
+                        geometry_rejection = "سطح پولبک قبلاً لمس شده؛ از ارسال سیگنال دیرهنگام جلوگیری شد"
+                    elif gap > max_pullback_gap:
+                        deviation_pct = gap / entry_price * 100.0
+                        geometry_rejection = (
+                            f"فاصله قیمت زنده تا سطح پولبک {deviation_pct:.2f}٪ است؛ "
+                            "حرکت بیش از حد از نقطه ورود انجام شده"
+                        )
+                    else:
+                        geometry_rejection = signal_price_geometry_rejection(
+                            signal, min_tp1_distance_pct=0.0
+                        )
                 if geometry_rejection:
                     record["status"] = "رد سیگنال؛ قیمت ورود نامعتبر"
                     record["reason"] = geometry_rejection
