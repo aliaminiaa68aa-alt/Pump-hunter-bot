@@ -60,13 +60,14 @@ def _ema(values: list[float], period: int) -> float:
 
 def _swings(candles: list[dict]) -> tuple[list[float], list[float]]:
     highs, lows = [], []
-    # Two candles on each side confirm a pivot; no unconfirmed right edge.
-    for i in range(2, len(candles) - 2):
+    # One closed candle on each side confirms a pivot. This keeps the
+    # structure testable on 15m history while excluding the live right edge.
+    for i in range(1, len(candles) - 1):
         high = float(candles[i]["high"])
         low = float(candles[i]["low"])
-        if all(high > float(candles[j]["high"]) for j in (i-2, i-1, i+1, i+2)):
+        if high > float(candles[i-1]["high"]) and high > float(candles[i+1]["high"]):
             highs.append(high)
-        if all(low < float(candles[j]["low"]) for j in (i-2, i-1, i+1, i+2)):
+        if low < float(candles[i-1]["low"]) and low < float(candles[i+1]["low"]):
             lows.append(low)
     return highs[-2:], lows[-2:]
 

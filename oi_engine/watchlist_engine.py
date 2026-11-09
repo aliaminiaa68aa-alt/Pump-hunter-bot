@@ -15,16 +15,15 @@ DATA_ERROR_RETRY_SECONDS = 300
 
 
 def coinalyze_rejection_reasons(signal: Signal, metrics: Dict[str, Any]) -> List[str]:
-    """Return precise derivatives-gate failures for diagnostics; never loosen a gate."""
+    """Require OI and directional flow; Funding is context, never a signal veto."""
     try:
         oi_change = float(metrics["oi_change_15m_window_pct"])
         taker_ratio = float(metrics["taker_buy_ratio"])
-        funding = float(metrics["funding_rate"])
     except (KeyError, TypeError, ValueError, OverflowError):
-        return ["داده اصلی OI، جریان خرید/فروش یا Funding ناقص است"]
+        return ["داده اصلی OI یا جریان خرید/فروش ناقص است"]
 
-    if not all(math.isfinite(value) for value in (oi_change, taker_ratio, funding)):
-        return ["داده OI، جریان یا Funding معتبر نیست"]
+    if not all(math.isfinite(value) for value in (oi_change, taker_ratio)):
+        return ["داده OI یا جریان معتبر نیست"]
     reasons = []
     if oi_change < 0.30:
         reasons.append(f"رشد OI کافی نیست ({oi_change:+.2f}٪؛ حداقل +0.30٪)")
@@ -48,22 +47,17 @@ def coinalyze_rejection_reasons(signal: Signal, metrics: Dict[str, Any]) -> List
     if signal.side == "LONG":
         if taker_ratio < 0.55:
             reasons.append(f"جریان خرید کافی نیست ({taker_ratio:.1%}؛ حداقل 55٪)")
-        if funding > 0.0005:
-            reasons.append(f"Funding برای LONG بیش از حد مثبت است ({funding:+.5%})")
         if long_share is not None and long_share > 0.70:
             reasons.append(f"ازدحام لانگ بالاست ({long_share:.1%}؛ حداکثر 70٪)")
     elif signal.side == "SHORT":
         short_share = None if long_share is None else 1.0 - long_share
         if taker_ratio > 0.45:
             reasons.append(f"جریان فروش کافی نیست ({1.0-taker_ratio:.1%}؛ حداقل 55٪)")
-        if funding < -0.0005:
-            reasons.append(f"Funding برای SHORT بیش از حد منفی است ({funding:+.5%})")
         if short_share is not None and short_share > 0.70:
             reasons.append(f"ازدحام شورت بالاست ({short_share:.1%}؛ حداکثر 70٪)")
     else:
         reasons.append("جهت سیگنال نامعتبر است")
     return reasons
-
 
 def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
     """Require fresh core derivatives evidence; treat ancillary metrics as optional."""

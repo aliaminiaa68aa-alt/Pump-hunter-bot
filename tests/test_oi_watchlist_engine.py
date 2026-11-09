@@ -4,7 +4,7 @@ from unittest.mock import patch
 from oi_engine.signal_engine import MarketDataError
 from oi_engine.watchlist_engine import (
     DATA_ERROR_RETRY_SECONDS, scan_watchlist, format_confirmed_signal,
-    signal_price_geometry_rejection,
+    signal_price_geometry_rejection, coinalyze_rejection_reasons,
 )
 
 
@@ -51,6 +51,33 @@ class FakeClient:
 
 
 class LiquiditySweepWatchlistTests(unittest.TestCase):
+    def setUp(self):
+        self.trend_direction = "LONG"
+        self._trend_patcher = patch(
+            "oi_engine.watchlist_engine.analyze_trend_1h",
+            side_effect=lambda symbol: {"direction": self.trend_direction},
+        )
+        self._confirm_patcher = patch(
+            "oi_engine.watchlist_engine.confirm_trend_15m", return_value=True
+        )
+        self._trend_patcher.start()
+        self._confirm_patcher.start()
+        self.addCleanup(self._trend_patcher.stop)
+        self.addCleanup(self._confirm_patcher.stop)
+
+    def test_funding_is_context_only_and_does_not_veto_long_or_short(self):
+        long_signal = type("SignalStub", (), {"side": "LONG"})()
+        short_signal = type("SignalStub", (), {"side": "SHORT"})()
+        long_metrics = {"oi_change_15m_window_pct": 0.8, "taker_buy_ratio": 0.67, "funding_rate": 0.02}
+        short_metrics = {"oi_change_15m_window_pct": 0.8, "taker_buy_ratio": 0.33, "funding_rate": -0.02}
+        self.assertEqual(coinalyze_rejection_reasons(long_signal, long_metrics), [])
+        self.assertEqual(coinalyze_rejection_reasons(short_signal, short_metrics), [])
+
+    def test_missing_funding_does_not_veto_valid_oi_and_flow(self):
+        long_signal = type("SignalStub", (), {"side": "LONG"})()
+        metrics = {"oi_change_15m_window_pct": 0.8, "taker_buy_ratio": 0.67}
+        self.assertEqual(coinalyze_rejection_reasons(long_signal, metrics), [])
+
     def test_long_requires_sweep_reclaim_and_bullish_flow(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
                    return_value=make_snapshot("LONG")):
@@ -63,6 +90,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertIn("Liquidity Sweep LONG", updated["ABCUSDT"]["reason"])
 
     def test_short_requires_sweep_reclaim_and_bearish_flow(self):
+        self.trend_direction = "SHORT"
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
                    return_value=make_snapshot("SHORT")):
             found, updated = scan_watchlist(
@@ -92,6 +120,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertIn("1 کندل قبل", updated["ABCUSDT"]["reason"])
 
     def test_short_accepts_recent_sweep_with_next_candle_confirmation(self):
+        self.trend_direction = "SHORT"
         candles = make_candles("SHORT")
         candles[-2].update({
             "open": 100.5, "high": 102.0, "low": 99.0, "close": 99.5,
@@ -131,6 +160,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
 
     def test_low_volume_sweep_is_not_sent_as_entry(self):
         for side in ("LONG", "SHORT"):
+            self.trend_direction = side
             with self.subTest(side=side):
                 snapshot = make_snapshot(side)
                 snapshot["candles"][-1]["quote_volume"] = 40.0
@@ -216,11 +246,13 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertNotIn("retry_after", recovered["ABCUSDT"])
 
     def test_signal_levels_have_correct_long_and_short_geometry(self):
+        self.trend_direction = "LONG"
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
                    return_value=make_snapshot("LONG")):
             long_found, _ = scan_watchlist(
                 {"ABCUSDT": {}}, FakeClient(make_metrics("LONG")), now=1000
             )
+        self.trend_direction = "SHORT"
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
                    return_value=make_snapshot("SHORT")):
             short_found, _ = scan_watchlist(
