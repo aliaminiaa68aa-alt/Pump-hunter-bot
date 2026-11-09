@@ -19,8 +19,8 @@ class TrendStructureTests(unittest.TestCase):
         self.assertEqual(_structure_direction(candles), "LONG")
 
     def test_lower_highs_and_lower_lows_are_bearish(self):
-        highs = [15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 10, 9]
-        lows = [13, 12, 12, 11, 11, 10, 10, 9, 9, 8, 8, 7]
+        highs = [15, 16, 14, 15, 13, 14, 12, 13, 11, 12, 10, 11]
+        lows = [13, 14, 12, 13, 11, 12, 10, 11, 9, 10, 8, 9]
         candles = make_candles(highs, lows)
         self.assertEqual(_structure_direction(candles), "SHORT")
 
