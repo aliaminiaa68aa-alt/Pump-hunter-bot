@@ -296,6 +296,12 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["coinalyze"] = dict(metrics)
 
             signal, reason = evaluate_liquidity_sweep(snapshot, metrics)
+            if signal is not None and signal.side != trend_1h["direction"]:
+                signal = None
+                reason = (
+                    f"شکار نقدینگی {reason} را نشان داد، اما جهت آن با روند تأییدشده "
+                    f"یک‌ساعته ({trend_1h['direction']}) مخالف است؛ سیگنال رد شد"
+                )
             if signal is not None:
                 # The signal entry is the last closed Binance Spot 15m candle close.
                 # Do not publish it if Binance Spot live price has moved
