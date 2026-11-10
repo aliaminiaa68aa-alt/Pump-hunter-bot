@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Tuple
 
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
 from oi_engine.signal_engine import MarketDataError, Signal, _atr, fetch_snapshot
-from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep
+from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep, MIN_CONFIRMED_ENTRY_RR
 from oi_engine.trend_engine import analyze_trend_1h, confirm_trend_15m, TrendDataError
 
 DATA_ERROR_RETRY_SECONDS = 300
@@ -114,8 +114,12 @@ def source_oi_priority(source_text: str) -> Dict[str, Any]:
     }
 
 
-def signal_price_geometry_rejection(signal: Signal, min_tp1_distance_pct: float = 1.0) -> str | None:
-    """Fail closed on malformed levels or a first target that is too close."""
+def signal_price_geometry_rejection(
+    signal: Signal,
+    min_tp1_distance_pct: float = 1.0,
+    min_risk_reward: float = MIN_CONFIRMED_ENTRY_RR,
+) -> str | None:
+    """Fail closed on malformed levels, too-close targets, or sub-2R geometry."""
     try:
         entry = float(signal.entry)
         stop = float(signal.stop_loss)
@@ -139,6 +143,20 @@ def signal_price_geometry_rejection(signal: Signal, min_tp1_distance_pct: float 
         return (
             f"فاصله هدف اول فقط {tp1_pct:.2f}٪ است؛ "
             f"حداقل مجاز {min_tp1_distance_pct:.2f}٪ است"
+        )
+    risk_distance = entry - stop if side == "LONG" else stop - entry
+    reward_distance = tp1 - entry if side == "LONG" else entry - tp1
+    try:
+        minimum_rr = float(min_risk_reward)
+    except (TypeError, ValueError, OverflowError):
+        return "حداقل نسبت سود به ریسک پیکربندی نامعتبر است"
+    if not math.isfinite(minimum_rr) or minimum_rr <= 0 or risk_distance <= 0:
+        return "حداقل نسبت سود به ریسک یا فاصله ریسک نامعتبر است"
+    risk_reward = reward_distance / risk_distance
+    if not math.isfinite(risk_reward) or risk_reward + 1e-9 < minimum_rr:
+        return (
+            f"نسبت سود به ریسک تا هدف اول فقط {risk_reward:.2f}R است؛ "
+            f"حداقل مجاز {minimum_rr:.2f}R است"
         )
     return None
 
@@ -320,7 +338,8 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                         )
                     else:
                         geometry_rejection = signal_price_geometry_rejection(
-                            signal, min_tp1_distance_pct=0.0
+                            signal, min_tp1_distance_pct=0.0,
+                        min_risk_reward=MIN_CONFIRMED_ENTRY_RR,
                         )
                 if geometry_rejection:
                     record["status"] = "رد سیگنال؛ قیمت ورود نامعتبر"

@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from oi_engine.signal_engine import MarketDataError
+from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep
 from oi_engine.watchlist_engine import (
     DATA_ERROR_RETRY_SECONDS, scan_watchlist, format_confirmed_signal,
     signal_price_geometry_rejection, coinalyze_rejection_reasons,
@@ -17,6 +18,12 @@ def make_candles(side="LONG"):
             "volume": 100.0, "quote_volume": 100.0,
             "taker_buy_quote": 60.0, "close_time": (i + 1) * 900000 - 1,
         })
+    if side == "LONG":
+        rows[12]["high"] = 102.0
+        rows[20]["high"] = 103.0
+    else:
+        rows[12]["low"] = 98.0
+        rows[20]["low"] = 97.0
     last = rows[-1]
     if side == "LONG":
         last.update({"open": 99.5, "high": 101.0, "low": 98.0,
@@ -245,6 +252,31 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         )
         self.assertNotIn("retry_after", recovered["ABCUSDT"])
 
+    def test_sweep_is_rejected_when_nearest_structural_target_is_below_two_r(self):
+        candles = make_candles("LONG")
+        candles[12]["high"] = 101.2
+        candles[20]["high"] = 102.0
+        signal, reason = evaluate_liquidity_sweep(
+            {"symbol": "ABCUSDT", "candles": candles, "live_price": 100.5},
+            make_metrics("LONG"),
+        )
+        self.assertIsNone(signal)
+        self.assertIn("2.00R", reason)
+
+    def test_signal_price_geometry_rejects_sub_two_r_for_both_sides(self):
+        cases = (
+            ("LONG", 100.0, 99.0, 101.0, 102.0),
+            ("SHORT", 100.0, 101.0, 99.0, 98.0),
+        )
+        for side, entry, stop, tp1, tp2 in cases:
+            with self.subTest(side=side):
+                signal = type("SignalStub", (), {
+                    "side": side, "entry": entry, "stop_loss": stop,
+                    "take_profit_1": tp1, "take_profit_2": tp2,
+                })()
+                reason = signal_price_geometry_rejection(signal, min_tp1_distance_pct=0.0)
+                self.assertIn("2.00R", reason)
+
     def test_signal_levels_have_correct_long_and_short_geometry(self):
         self.trend_direction = "LONG"
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
@@ -260,10 +292,16 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
             )
         self.assertIsNone(signal_price_geometry_rejection(long_found[0][0], 0.0))
         self.assertIsNone(signal_price_geometry_rejection(short_found[0][0], 0.0))
-        self.assertAlmostEqual(
+        long_rr = (
             (long_found[0][0].take_profit_1 - long_found[0][0].entry)
-            / (long_found[0][0].entry - long_found[0][0].stop_loss), 1.0
+            / (long_found[0][0].entry - long_found[0][0].stop_loss)
         )
+        short_rr = (
+            (short_found[0][0].entry - short_found[0][0].take_profit_1)
+            / (short_found[0][0].stop_loss - short_found[0][0].entry)
+        )
+        self.assertGreaterEqual(long_rr, 2.0)
+        self.assertGreaterEqual(short_rr, 2.0)
 
     def test_telegram_card_contains_strategy_and_actionable_levels(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",

@@ -6,6 +6,8 @@ from typing import Any, Dict, Optional, Tuple
 
 from oi_engine.signal_engine import Signal, _atr, score_signal_components
 
+MIN_CONFIRMED_ENTRY_RR = 2.0
+
 
 def evaluate_liquidity_sweep(
     snapshot: Dict[str, Any], metrics: Dict[str, Any]
@@ -148,6 +150,12 @@ def evaluate_liquidity_sweep(
         return None, "ترتیب سطوح ساختاری LONG معتبر نیست"
     if side == "SHORT" and not stop > entry > tp1 > tp2:
         return None, "ترتیب سطوح ساختاری SHORT معتبر نیست"
+    risk_reward = (tp1 - entry) / risk if side == "LONG" else (entry - tp1) / risk
+    if not math.isfinite(risk_reward) or risk_reward + 1e-9 < MIN_CONFIRMED_ENTRY_RR:
+        return None, (
+            f"نسبت سود به ریسک تا هدف اول {risk_reward:.2f}R است؛ "
+            f"حداقل مجاز {MIN_CONFIRMED_ENTRY_RR:.2f}R است"
+        )
     previous_close = float(candles[-2]["close"])
     price_change = (float(last["close"]) / previous_close - 1.0) * 100.0
     baseline = candles[-21:-1]
