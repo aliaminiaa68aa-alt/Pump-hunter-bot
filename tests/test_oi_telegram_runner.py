@@ -229,7 +229,7 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(list(batch)[0], "OIUSDT")
         self.assertEqual(len(batch), 5)
 
-    def test_market_universe_gets_scan_slots_during_large_channel_backlog(self):
+    def test_fresh_oi_backlog_reclaims_market_reserve_when_needed(self):
         watchlist = {
             **{
                 f"CHANNEL{i}USDT": {
@@ -249,16 +249,39 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=12)
         self.assertEqual(len(batch), 12)
-        self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 10)
-        self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 2)
+        self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 12)
+        self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 0)
 
-    def test_eight_symbol_batch_rotates_two_independent_market_candidates(self):
+    def test_oi_backlog_displaces_only_the_market_slots_it_would_otherwise_use(self):
         watchlist = {
             **{
                 f"CHANNEL{i}USDT": {
                     "source_type": "oi_channel",
                     "last_alert_received_at": 200 + i,
                     "last_checked": 0,
+                }
+                for i in range(11)
+            },
+            **{
+                f"MARKET{i}USDT": {
+                    "source_type": "market_universe",
+                    "last_checked": 0,
+                }
+                for i in range(8)
+            },
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=12)
+        self.assertEqual(len(batch), 12)
+        self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 11)
+        self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 1)
+
+    def test_market_reserve_remains_when_channel_alerts_are_already_checked(self):
+        watchlist = {
+            **{
+                f"CHANNEL{i}USDT": {
+                    "source_type": "oi_channel",
+                    "last_alert_received_at": 200 + i,
+                    "last_checked": 200 + i,
                 }
                 for i in range(20)
             },
@@ -281,7 +304,7 @@ class TelegramRunnerTests(unittest.TestCase):
                 f"CHANNEL{i}USDT": {
                     "source_type": "oi_channel",
                     "last_alert_received_at": 200 + i,
-                    "last_checked": 0,
+                    "last_checked": 200 + i,
                 }
                 for i in range(20)
             },
