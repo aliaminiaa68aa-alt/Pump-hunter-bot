@@ -746,11 +746,11 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
     # guarantee forward progress through the independent market universe.
     market_added = 0
     for symbol in market_candidates:
+        if market_added >= market_reserve or len(selected) >= count:
+            break
         if symbol not in selected:
             selected.append(symbol)
             market_added += 1
-            if market_added >= market_reserve or len(selected) >= count:
-                break
 
     remaining_slots = count - len(selected)
     if remaining_slots <= 0:
