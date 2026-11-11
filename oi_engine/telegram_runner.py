@@ -710,12 +710,20 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         _safe_int(watchlist[symbol].get("last_attempted_at", 0)),
         _safe_int(watchlist[symbol].get("first_seen", 0)),
     ))
-    # Guarantee up to two independent-market slots in the 8-symbol batch.
-    # This keeps the 60-coin universe moving while preserving channel priority.
+    # Keep the broader market rotating, but never let its reserved slots
+    # displace a fresh Open Interest channel alert. Pending setups retain their
+    # separate reserve because they may expire before the next scan cycle.
     market_reserve = (
         min(len(market_candidates), min(2, max(1, count // 4)))
         if market_candidates and count >= 3 else 0
     )
+    fresh_oi_alerts = sum(
+        1 for symbol in fresh_alerts
+        if watchlist[symbol].get("source_type", "oi_channel") == "oi_channel"
+    )
+    fresh_oi_capacity = max(0, count - pending_target - market_reserve)
+    if fresh_oi_alerts > fresh_oi_capacity:
+        market_reserve = 0
     fresh_limit = max(0, count - pending_target - market_reserve)
     selected = fresh_alerts[:fresh_limit]
 
