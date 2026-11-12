@@ -264,31 +264,25 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             snapshot = fetch_snapshot(symbol)
             # Journal order: establish the 1h direction first, then require
             # independent 15m structure confirmation before derivatives/setup work.
-            trend_1h = analyze_trend_1h(symbol)
-            if trend_1h["direction"] == "NEUTRAL":
-                record["status"] = "روند یک‌ساعته خنثی/نامعتبر"
-                record["reason"] = (
-                    "ساختار HH/HL یا LH/LL و جایگاه EMA50/EMA200 هم‌جهت نیست؛ "
-                    "تا تعیین جهت معتبر هیچ LONG/SHORT بررسی نمی‌شود"
-                )
-                record["last_checked"] = timestamp
-                record.pop("retry_after", None)
-                continue
-            if not confirm_trend_15m(snapshot.get("candles") or [], trend_1h["direction"]):
-                record["status"] = "تأیید روند ۱۵دقیقه دریافت نشد"
-                record["reason"] = (
-                    f"روند ۱ساعته {trend_1h['direction']} است، اما ساختار و EMA تایم ۱۵دقیقه "
-                    "هم‌جهت نیست؛ سیگنال صادر نشد"
-                )
-                record["last_checked"] = timestamp
-                record.pop("retry_after", None)
-                continue
+            # Trend is context, not a hard veto. The former strict EMA + two-swing
+            # gate on BOTH 1h and 15m suppressed nearly every otherwise valid
+            # liquidity-sweep setup. Keep the trend read for reporting and only
+            # reject a sweep when a clear 1h direction directly conflicts.
+            try:
+                trend_1h = analyze_trend_1h(symbol)
+            except TrendDataError as trend_exc:
+                print(f"Trend context unavailable for {symbol}; continuing with sweep checks: {trend_exc}")
+                trend_1h = {"direction": "NEUTRAL", "structure": "UNAVAILABLE"}
+            trend_15m_confirmed = (
+                confirm_trend_15m(snapshot.get("candles") or [], trend_1h["direction"])
+                if trend_1h["direction"] in {"LONG", "SHORT"} else False
+            )
             record["trend_1h"] = trend_1h
-            record["trend_15m_confirmed"] = True
+            record["trend_15m_confirmed"] = trend_15m_confirmed
             record["data_source"] = f"{snapshot.get('price_source', 'market feed')} prices + Coinalyze derivatives metrics"
             metrics = client.fetch_metrics(symbol, now=timestamp)
             metrics["trend_1h"] = trend_1h["direction"]
-            metrics["trend_15m_confirmed"] = True
+            metrics["trend_15m_confirmed"] = trend_15m_confirmed
             # OI change and taker flow must describe the very same closed
             # 15m candle as the price-action liquidity sweep. Reject stale or
             # cross-candle derivatives data rather than mixing timestamps.
@@ -310,11 +304,15 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["coinalyze"] = dict(metrics)
 
             signal, reason = evaluate_liquidity_sweep(snapshot, metrics)
-            if signal is not None and signal.side != trend_1h["direction"]:
+            if (
+                signal is not None
+                and trend_1h["direction"] in {"LONG", "SHORT"}
+                and signal.side != trend_1h["direction"]
+            ):
                 signal = None
                 reason = (
-                    f"شکار نقدینگی {reason} را نشان داد، اما جهت آن با روند تأییدشده "
-                    f"یک‌ساعته ({trend_1h['direction']}) مخالف است؛ سیگنال رد شد"
+                    f"جهت شکار نقدینگی با روند روشن یک‌ساعته "
+                    f"({trend_1h['direction']}) مخالف است؛ سیگنال رد شد"
                 )
             if signal is not None:
                 # A LIMIT pullback signal must be published while price is still
