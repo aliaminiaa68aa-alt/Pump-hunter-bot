@@ -304,6 +304,17 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["coinalyze"] = dict(metrics)
 
             signal, reason = evaluate_liquidity_sweep(snapshot, metrics)
+            if signal is not None:
+                # The sweep engine validates direction at a basic level. Apply
+                # the dedicated Coinalyze confirmation policy here as well so
+                # positive-but-weak OI/flow cannot bypass the intended final gate.
+                derivatives_rejections = coinalyze_rejection_reasons(signal, metrics)
+                if derivatives_rejections:
+                    signal = None
+                    reason = (
+                        "تأیید مشتقات Coinalyze ناکافی است: "
+                        + "؛ ".join(derivatives_rejections)
+                    )
             if (
                 signal is not None
                 and trend_1h["direction"] in {"LONG", "SHORT"}
