@@ -85,6 +85,39 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         metrics = {"oi_change_15m_window_pct": 0.8, "taker_buy_ratio": 0.67}
         self.assertEqual(coinalyze_rejection_reasons(long_signal, metrics), [])
 
+    def test_scan_watchlist_applies_minimum_oi_confirmation_to_long_sweep(self):
+        from unittest.mock import Mock
+
+        signal = type("SignalStub", (), {"side": "LONG"})()
+        metrics = {**make_metrics("LONG"), "oi_change_15m_window_pct": 0.29}
+        evaluator = Mock(return_value=(signal, "test sweep/reclaim"))
+        with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                   return_value=make_snapshot("LONG")), \
+             patch("oi_engine.watchlist_engine.evaluate_liquidity_sweep", evaluator):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {}}, FakeClient(metrics), now=1000
+            )
+        self.assertEqual(found, [])
+        self.assertIn("حداقل +0.30٪", updated["ABCUSDT"]["reason"])
+        evaluator.assert_called_once()
+
+    def test_scan_watchlist_applies_minimum_sell_flow_to_short_sweep(self):
+        from unittest.mock import Mock
+
+        self.trend_direction = "SHORT"
+        signal = type("SignalStub", (), {"side": "SHORT"})()
+        metrics = {**make_metrics("SHORT"), "taker_buy_ratio": 0.46}
+        evaluator = Mock(return_value=(signal, "test sweep/reclaim"))
+        with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                   return_value=make_snapshot("SHORT")), \
+             patch("oi_engine.watchlist_engine.evaluate_liquidity_sweep", evaluator):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {}}, FakeClient(metrics), now=1000
+            )
+        self.assertEqual(found, [])
+        self.assertIn("حداقل 55٪", updated["ABCUSDT"]["reason"])
+        evaluator.assert_called_once()
+
     def test_long_requires_sweep_reclaim_and_bullish_flow(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
                    return_value=make_snapshot("LONG")):
