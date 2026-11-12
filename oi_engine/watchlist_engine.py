@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Tuple
 
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
-from oi_engine.signal_engine import MarketDataError, Signal, _atr, fetch_snapshot, evaluate_snapshot
-MIN_CONFIRMED_ENTRY_RR = 2.0
+from oi_engine.signal_engine import MarketDataError, Signal, _atr, fetch_snapshot
+from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep, MIN_CONFIRMED_ENTRY_RR
 from oi_engine.trend_engine import analyze_trend_1h, confirm_trend_15m, TrendDataError
 
 DATA_ERROR_RETRY_SECONDS = 300
@@ -173,7 +173,7 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         title = "🔴 <b>SHORT</b>"
         side_label = "فروش"
 
-    engine_names = {"PRICE_ACTION_BREAKOUT": "Coinalyze + Price Action + Structure Break"}
+    engine_names = {"LIQUIDITY_SWEEP": "Coinalyze + Price Action + Liquidity Sweep"}
     engine = engine_names.get(str(metrics.get("engine", "")), "OI Signal")
     oi_change = metrics.get("oi_change_15m_window_pct")
     taker_ratio = metrics.get("taker_buy_ratio")
@@ -239,14 +239,14 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
         f"⚙️ حجم: {signal.volume_ratio:.1f}x  |  روش: {engine}\n"
         f"🧭 روند ۱ساعته: {html.escape(str(metrics.get('trend_1h', 'نامشخص')))}"
         f" | تأیید ۱۵دقیقه: {'بله' if metrics.get('trend_15m_confirmed') else 'خیر'}\n"
-        f"⏱ تایم‌فریم تحلیل ساختار: 15m\n"
-        f"📐 تأیید ساختار: {html.escape(str(metrics.get('structure_reason', 'شکست ساختار و تأیید OI/جریان')))}"
+        f"⏱ تایم‌فریم شکار نقدینگی: {html.escape(str(metrics.get('sweep_timeframe', '15m')))}\n"
+        f"💧 شکار نقدینگی: {html.escape(str(metrics.get('sweep_reason', 'تأیید شد')))}"
     )
 
 
 def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient | None = None,
                    now: int | None = None) -> Tuple[List[Tuple[Signal, Dict[str, Any]]], Dict[str, Dict[str, Any]]]:
-    """Use Binance Spot price action + Coinalyze metrics; emit confirmed structure-break entries."""
+    """Use Coinalyze as the primary source and emit only confirmed liquidity-sweep entries."""
     client = client or CoinalyzeClient()
     timestamp = int(now if now is not None else time.time())
     confirmed: List[Tuple[Signal, Dict[str, Any]]] = []
@@ -296,30 +296,14 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     "زمان کندل OI/جریان Coinalyze با کندل قیمت یکسان نیست؛ "
                     f"price={price_candle_time}, derivatives={int(derivatives_candle_time)}"
                 )
-            # Transfer only Coinalyze OI history/timestamp into the Binance Spot
-            # snapshot. All entry price action and candles remain Binance Spot.
-            derivatives_snapshot = metrics.pop("market_snapshot", None) or {}
-            oi_values = derivatives_snapshot.get("oi_values") or []
-            oi_timestamp = derivatives_snapshot.get("oi_timestamp")
-            if len(oi_values) < 3 or oi_timestamp is None:
-                raise CoinalyzeError("تاریخچه OI هم‌زمان و کافی برای تأیید ساختار موجود نیست")
-            analysis_snapshot = dict(snapshot)
-            analysis_snapshot["oi_values"] = oi_values
-            analysis_snapshot["oi_timestamp"] = oi_timestamp
-            analysis_snapshot["funding_rate"] = float(metrics.get("funding_rate") or 0.0)
+            # Discard any provider-side OHLCV snapshot: it must not affect entries.
+            metrics.pop("market_snapshot", None)
             metrics.update(source_oi_priority(record.get("source_text", "")))
             record["oi_priority_score"] = metrics["oi_priority_score"]
             record["oi_priority_tier"] = metrics["oi_priority_tier"]
             record["coinalyze"] = dict(metrics)
 
-            signal = evaluate_snapshot(analysis_snapshot)
-            reason = (
-                "شکست ساختار ۱۵دقیقه با تأیید OI و جریان سفارش Coinalyze"
-                if signal is not None else
-                "شکست ساختار ۱۵دقیقه همراه با تأیید هم‌زمان OI، جریان سفارش، حجم و جهت قیمت دیده نشد"
-            )
-            if signal is not None:
-                signal.execution_mode = "MARKET"
+            signal, reason = evaluate_liquidity_sweep(snapshot, metrics)
             if (
                 signal is not None
                 and trend_1h["direction"] in {"LONG", "SHORT"}
@@ -327,12 +311,12 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             ):
                 signal = None
                 reason = (
-                    f"جهت شکست ساختار با روند روشن یک‌ساعته "
+                    f"جهت شکار نقدینگی با روند روشن یک‌ساعته "
                     f"({trend_1h['direction']}) مخالف است؛ سیگنال رد شد"
                 )
             if signal is not None:
-                # A MARKET breakout signal is valid only while live price remains
-                # on the continuation side and has not stretched too far.
+                # A LIMIT pullback signal must be published while price is still
+                # on the continuation side of entry, before the level is touched.
                 live_price = snapshot.get("live_price")
                 atr_for_entry = _atr(snapshot.get("candles") or [])
                 if live_price is None or not math.isfinite(float(live_price)) or float(live_price) <= 0:
@@ -360,11 +344,11 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     record["reason"] = geometry_rejection
                 else:
                     signal_metrics = dict(metrics)
-                    signal_metrics["engine"] = "PRICE_ACTION_BREAKOUT"
+                    signal_metrics["engine"] = "LIQUIDITY_SWEEP"
                     signal_metrics["coinalyze_confirmed"] = True
-                    signal_metrics["structure_break_confirmed"] = True
-                    signal_metrics["structure_timeframe"] = "15m"
-                    signal_metrics["structure_reason"] = reason
+                    signal_metrics["liquidity_sweep_confirmed"] = True
+                    signal_metrics["sweep_timeframe"] = "15m"
+                    signal_metrics["sweep_reason"] = reason
                     signal_metrics["current_price"] = float(live_price) if live_price is not None else None
                     signal_metrics["current_price_time_ms"] = int(
                         snapshot.get("live_price_time_ms") or time.time() * 1000
@@ -383,7 +367,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     record["status"] = f"سیگنال {signal.side} آماده ارسال"
                     record["reason"] = reason
             else:
-                record["status"] = "در حال رصد شکست ساختار"
+                record["status"] = "در حال رصد نقدینگی"
                 record["reason"] = reason
                 record.pop("pending_setup", None)
 
