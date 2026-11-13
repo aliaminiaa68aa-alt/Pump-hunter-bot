@@ -64,12 +64,21 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
             "oi_engine.watchlist_engine.analyze_trend_1h",
             side_effect=lambda symbol: {"direction": self.trend_direction},
         )
+        self._higher_trend_patcher = patch(
+            "oi_engine.watchlist_engine.analyze_trend_4h_1d",
+            return_value={
+                "4h": {"direction": "LONG"},
+                "1d": {"direction": "LONG"},
+            },
+        )
         self._confirm_patcher = patch(
             "oi_engine.watchlist_engine.confirm_trend_15m", return_value=True
         )
         self._trend_patcher.start()
+        self._higher_trend_patcher.start()
         self._confirm_patcher.start()
         self.addCleanup(self._trend_patcher.stop)
+        self.addCleanup(self._higher_trend_patcher.stop)
         self.addCleanup(self._confirm_patcher.stop)
 
     def test_funding_is_context_only_and_does_not_veto_long_or_short(self):
@@ -131,6 +140,12 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
 
     def test_short_requires_sweep_reclaim_and_bearish_flow(self):
         self.trend_direction = "SHORT"
+        self._higher_trend_patcher.stop()
+        self._higher_trend_patcher = patch(
+            "oi_engine.watchlist_engine.analyze_trend_4h_1d",
+            return_value={"4h": {"direction": "SHORT"}, "1d": {"direction": "SHORT"}},
+        )
+        self._higher_trend_patcher.start()
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
                    return_value=make_snapshot("SHORT")):
             found, updated = scan_watchlist(
@@ -161,6 +176,12 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
 
     def test_short_accepts_recent_sweep_with_next_candle_confirmation(self):
         self.trend_direction = "SHORT"
+        self._higher_trend_patcher.stop()
+        self._higher_trend_patcher = patch(
+            "oi_engine.watchlist_engine.analyze_trend_4h_1d",
+            return_value={"4h": {"direction": "SHORT"}, "1d": {"direction": "SHORT"}},
+        )
+        self._higher_trend_patcher.start()
         candles = make_candles("SHORT")
         candles[-2].update({
             "open": 100.5, "high": 102.0, "low": 99.0, "close": 99.5,
@@ -309,6 +330,20 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
                 })()
                 reason = signal_price_geometry_rejection(signal, min_tp1_distance_pct=0.0)
                 self.assertIn("2.00R", reason)
+
+    def test_both_higher_timeframes_opposing_signal_block_entry(self):
+        self._higher_trend_patcher.stop()
+        self._higher_trend_patcher = patch(
+            "oi_engine.watchlist_engine.analyze_trend_4h_1d",
+            return_value={"4h": {"direction": "SHORT"}, "1d": {"direction": "SHORT"}},
+        )
+        self._higher_trend_patcher.start()
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value=make_snapshot("LONG")):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {}}, FakeClient(make_metrics("LONG")), now=1000
+            )
+        self.assertEqual(found, [])
+        self.assertIn("هر دو تایم‌فریم بالاتر", updated["ABCUSDT"]["reason"])
 
     def test_signal_levels_have_correct_long_and_short_geometry(self):
         self.trend_direction = "LONG"
