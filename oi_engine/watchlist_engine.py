@@ -260,6 +260,14 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
         # an earlier successful attempt when the current price fetch fails.
         record.pop("data_source", None)
         try:
+            source_side = str(record.get("source_side", "")).upper()
+            is_oi_alert = record.get("source_type") == "oi_channel"
+            if is_oi_alert and source_side not in {"LONG", "SHORT"}:
+                record["status"] = "هشدار بدون جهت معتبر؛ سیگنال صادر نشد"
+                record["reason"] = "جهت LONG/SHORT در پیام منبع قابل تشخیص نیست؛ از حدس‌زدن جهت خودداری شد"
+                record["last_checked"] = timestamp
+                continue
+            required_side = source_side if is_oi_alert else None
             # One exchange supplies both OHLCV and live price; Coinalyze supplies
             # derivatives/positioning metrics only. Never combine exchange prices.
             snapshot = fetch_snapshot(symbol)
@@ -316,7 +324,9 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["oi_priority_tier"] = metrics["oi_priority_tier"]
             record["coinalyze"] = dict(metrics)
 
-            signal, reason = evaluate_liquidity_sweep(snapshot, metrics)
+            signal, reason = evaluate_liquidity_sweep(
+                snapshot, metrics, required_side=required_side
+            )
             if signal is not None:
                 # The sweep engine validates direction at a basic level. Apply
                 # the dedicated Coinalyze confirmation policy here as well so
