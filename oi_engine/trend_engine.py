@@ -18,26 +18,26 @@ class TrendDataError(RuntimeError):
     pass
 
 
-def _fetch_1h(symbol: str, limit: int = 240) -> list[dict]:
+def _fetch_timeframe(symbol: str, timeframe: str, limit: int = 240) -> list[dict]:
     errors = []
     for base in BASES:
         try:
             response = SESSION.get(
                 base + "/api/v3/klines",
-                params={"symbol": symbol, "interval": "1h", "limit": limit},
+                params={"symbol": symbol, "interval": timeframe, "limit": limit},
                 timeout=12,
             )
             response.raise_for_status()
             rows = response.json()
             if not isinstance(rows, list) or len(rows) < 205:
-                raise TrendDataError("Binance Spot 1h history is insufficient")
+                raise TrendDataError("Binance Spot higher-timeframe history is insufficient")
             # Exclude the still-forming final candle.
             closed = rows[:-1]
             result = []
             for row in closed:
                 values = [float(row[i]) for i in (1, 2, 3, 4)]
                 if not all(math.isfinite(v) and v > 0 for v in values):
-                    raise TrendDataError("Invalid Binance Spot 1h candle")
+                    raise TrendDataError("Invalid Binance Spot higher-timeframe candle")
                 result.append({
                     "open": values[0], "high": values[1],
                     "low": values[2], "close": values[3],
@@ -45,7 +45,7 @@ def _fetch_1h(symbol: str, limit: int = 240) -> list[dict]:
             return result
         except (requests.RequestException, ValueError, TypeError, TrendDataError) as exc:
             errors.append(f"{base}: {type(exc).__name__}: {exc}")
-    raise TrendDataError("Binance Spot 1h candles unavailable: " + " | ".join(errors))
+    raise TrendDataError("Binance Spot higher-timeframe candles unavailable: " + " | ".join(errors))
 
 
 def _ema(values: list[float], period: int) -> float:
@@ -83,8 +83,10 @@ def _structure_direction(candles: list[dict]) -> str:
     return "NEUTRAL"
 
 
-def analyze_trend_1h(symbol: str) -> dict:
-    candles = _fetch_1h(symbol)
+def analyze_trend_timeframe(symbol: str, timeframe: str) -> dict:
+    if timeframe not in {"1h", "4h", "1d"}:
+        raise ValueError(f"Unsupported trend timeframe: {timeframe}")
+    candles = _fetch_timeframe(symbol, timeframe)
     closes = [row["close"] for row in candles]
     ema50 = _ema(closes, 50)
     ema200 = _ema(closes, 200)
@@ -93,16 +95,29 @@ def analyze_trend_1h(symbol: str) -> dict:
     structure = _structure_direction(candles[-100:])
     if close > ema50 > ema200 and ema50 > ema50_previous and structure == "LONG":
         direction = "LONG"
-    elif close < ema50 < ema200 and ema50 < ema50_previous and structure == "SHORT":
+    elif close < ema50 < ema200 and ema50 < ema200 and ema50 < ema50_previous and structure == "SHORT":
         direction = "SHORT"
     else:
         direction = "NEUTRAL"
     return {
+        "timeframe": timeframe,
         "direction": direction,
         "close": close,
         "ema50": ema50,
         "ema200": ema200,
         "structure": structure,
+    }
+
+
+def analyze_trend_1h(symbol: str) -> dict:
+    return analyze_trend_timeframe(symbol, "1h")
+
+
+def analyze_trend_4h_1d(symbol: str) -> dict:
+    """Fetch 4h and daily structure independently for multi-timeframe context."""
+    return {
+        "4h": analyze_trend_timeframe(symbol, "4h"),
+        "1d": analyze_trend_timeframe(symbol, "1d"),
     }
 
 
