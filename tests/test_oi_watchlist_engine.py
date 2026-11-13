@@ -353,6 +353,12 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
                 {"ABCUSDT": {}}, FakeClient(make_metrics("LONG")), now=1000
             )
         self.trend_direction = "SHORT"
+        self._higher_trend_patcher.stop()
+        self._higher_trend_patcher = patch(
+            "oi_engine.watchlist_engine.analyze_trend_4h_1d",
+            return_value={"4h": {"direction": "SHORT"}, "1d": {"direction": "SHORT"}},
+        )
+        self._higher_trend_patcher.start()
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
                    return_value=make_snapshot("SHORT")):
             short_found, _ = scan_watchlist(
