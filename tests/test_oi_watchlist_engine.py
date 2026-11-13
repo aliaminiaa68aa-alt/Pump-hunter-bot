@@ -331,6 +331,32 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
                 reason = signal_price_geometry_rejection(signal, min_tp1_distance_pct=0.0)
                 self.assertIn("2.00R", reason)
 
+    def test_oi_alert_long_never_emits_short_even_when_short_sweep_is_present(self):
+        snapshot = make_snapshot("SHORT")
+        signal, reason = evaluate_liquidity_sweep(
+            snapshot, make_metrics("SHORT"), required_side="LONG"
+        )
+        self.assertIsNone(signal)
+        self.assertIn("جهت هشدار منبع LONG", reason)
+
+    def test_oi_alert_short_never_emits_long_even_when_long_sweep_is_present(self):
+        snapshot = make_snapshot("LONG")
+        signal, reason = evaluate_liquidity_sweep(
+            snapshot, make_metrics("LONG"), required_side="SHORT"
+        )
+        self.assertIsNone(signal)
+        self.assertIn("جهت هشدار منبع SHORT", reason)
+
+    def test_oi_channel_alert_without_parsed_side_fails_closed(self):
+        with patch("oi_engine.watchlist_engine.fetch_snapshot",
+                   return_value=make_snapshot("LONG")):
+            found, updated = scan_watchlist(
+                {"ABCUSDT": {"source_type": "oi_channel", "source_side": None}},
+                FakeClient(make_metrics("LONG")), now=1000
+            )
+        self.assertEqual(found, [])
+        self.assertEqual(updated["ABCUSDT"]["status"], "هشدار بدون جهت معتبر؛ سیگنال صادر نشد")
+
     def test_both_higher_timeframes_opposing_signal_block_entry(self):
         self._higher_trend_patcher.stop()
         self._higher_trend_patcher = patch(
