@@ -1,8 +1,7 @@
-"""Higher-timeframe trend gate for Pump Hunter.
+"""Multi-timeframe trend context for Pump Hunter.
 
-All OHLCV comes from Binance Spot. A direction is accepted only when the
-1h EMA structure and confirmed swing sequence agree; 15m must independently
-show the same swing direction before liquidity-sweep analysis is allowed.
+All OHLCV comes from Binance Spot. 15m supplies the liquidity-sweep setup;
+1h, 4h and 1d provide independently calculated EMA and swing-structure context.
 """
 from __future__ import annotations
 
@@ -95,7 +94,7 @@ def analyze_trend_timeframe(symbol: str, timeframe: str) -> dict:
     structure = _structure_direction(candles[-100:])
     if close > ema50 > ema200 and ema50 > ema50_previous and structure == "LONG":
         direction = "LONG"
-    elif close < ema50 < ema200 and ema50 < ema200 and ema50 < ema50_previous and structure == "SHORT":
+    elif close < ema50 < ema200 and ema50 < ema50_previous and structure == "SHORT":
         direction = "SHORT"
     else:
         direction = "NEUTRAL"
@@ -114,11 +113,19 @@ def analyze_trend_1h(symbol: str) -> dict:
 
 
 def analyze_trend_4h_1d(symbol: str) -> dict:
-    """Fetch 4h and daily structure independently for multi-timeframe context."""
-    return {
-        "4h": analyze_trend_timeframe(symbol, "4h"),
-        "1d": analyze_trend_timeframe(symbol, "1d"),
-    }
+    """Fetch 4h and daily context independently; one provider failure must not erase the other."""
+    results = {}
+    for timeframe in ("4h", "1d"):
+        try:
+            results[timeframe] = analyze_trend_timeframe(symbol, timeframe)
+        except TrendDataError as exc:
+            results[timeframe] = {
+                "timeframe": timeframe,
+                "direction": "NEUTRAL",
+                "structure": "UNAVAILABLE",
+                "error": str(exc),
+            }
+    return results
 
 
 def confirm_trend_15m(candles: list[dict], direction: str) -> bool:
