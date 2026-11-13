@@ -10,7 +10,8 @@ MIN_CONFIRMED_ENTRY_RR = 2.0
 
 
 def evaluate_liquidity_sweep(
-    snapshot: Dict[str, Any], metrics: Dict[str, Any]
+    snapshot: Dict[str, Any], metrics: Dict[str, Any],
+    required_side: Optional[str] = None,
 ) -> Tuple[Optional[Signal], str]:
     """Create an entry only after a closed 15m candle sweeps and reclaims liquidity.
 
@@ -18,6 +19,9 @@ def evaluate_liquidity_sweep(
     SHORT: take the prior swing high, then close bearish back below it.
     Coinalyze OI expansion and taker flow must agree with the reversal.
     """
+    if required_side not in {None, "LONG", "SHORT"}:
+        return None, "جهت هشدار Open Interest مشخص نیست؛ سیگنال صادر نشد"
+
     candles = snapshot.get("candles") or []
     if len(candles) < 30:
         return None, "برای تشخیص ساختار و نقدینگی، حداقل ۳۰ کندل بسته‌شده لازم است"
@@ -50,6 +54,7 @@ def evaluate_liquidity_sweep(
     setup = None
     sweep_seen = False
     continuation_seen = False
+    opposite_sweep_seen = False
     for sweep_index in range(len(candles) - 1, max(10, len(candles) - 7), -1):
         sweep = candles[sweep_index]
         previous = candles[sweep_index - 12:sweep_index]
@@ -75,6 +80,9 @@ def evaluate_liquidity_sweep(
             and (sweep_high - sweep_close) / span >= 0.60
         )
         if long_sweep and not short_sweep:
+            if required_side == "SHORT":
+                opposite_sweep_seen = True
+                continue
             sweep_seen = True
             continued = (
                 entry > prior_low and
@@ -85,6 +93,9 @@ def evaluate_liquidity_sweep(
                 setup = ("LONG", prior_low, sweep_low, len(candles) - 1 - sweep_index)
                 break
         elif short_sweep and not long_sweep:
+            if required_side == "LONG":
+                opposite_sweep_seen = True
+                continue
             sweep_seen = True
             continued = (
                 entry < prior_high and
@@ -96,6 +107,10 @@ def evaluate_liquidity_sweep(
                 break
 
     if setup is None:
+        if opposite_sweep_seen and required_side in {"LONG", "SHORT"}:
+            return None, (
+                f"جهت هشدار منبع {required_side} است؛ شکار نقدینگی در جهت مخالف نادیده گرفته شد"
+            )
         if sweep_seen and not continuation_seen:
             return None, (
                 "شکار نقدینگی در ۶ کندل اخیر دیده شد، اما کندل بسته‌شده بعدی "
