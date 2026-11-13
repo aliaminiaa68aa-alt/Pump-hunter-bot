@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from oi_engine.trend_engine import _structure_direction, confirm_trend_15m
+from oi_engine.trend_engine import _structure_direction, confirm_trend_15m, analyze_trend_timeframe
 
 
 def make_candles(highs, lows, closes=None):
@@ -31,6 +32,21 @@ class TrendStructureTests(unittest.TestCase):
 
     def test_15m_confirmation_rejects_neutral_direction(self):
         self.assertFalse(confirm_trend_15m([], "NEUTRAL"))
+
+    def test_only_supported_higher_timeframes_are_accepted(self):
+        with self.assertRaises(ValueError):
+            analyze_trend_timeframe("ABCUSDT", "15m")
+
+    def test_timeframe_analysis_returns_named_direction_context(self):
+        candles = [
+            {"open": 100 + i, "high": 102 + i, "low": 99 + i, "close": 101 + i}
+            for i in range(240)
+        ]
+        with patch("oi_engine.trend_engine._fetch_timeframe", return_value=candles):
+            result = analyze_trend_timeframe("ABCUSDT", "4h")
+        self.assertEqual(result["timeframe"], "4h")
+        self.assertIn(result["direction"], {"LONG", "SHORT", "NEUTRAL"})
+        self.assertEqual(result["close"], candles[-1]["close"])
 
 
 if __name__ == "__main__":
