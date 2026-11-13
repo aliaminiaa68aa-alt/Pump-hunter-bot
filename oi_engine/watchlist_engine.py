@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
 from oi_engine.signal_engine import MarketDataError, Signal, _atr, fetch_snapshot
 from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep, MIN_CONFIRMED_ENTRY_RR
-from oi_engine.trend_engine import analyze_trend_1h, confirm_trend_15m, TrendDataError
+from oi_engine.trend_engine import analyze_trend_1h, analyze_trend_4h_1d, confirm_trend_15m, TrendDataError
 
 DATA_ERROR_RETRY_SECONDS = 300
 
@@ -271,17 +271,29 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             try:
                 trend_1h = analyze_trend_1h(symbol)
             except TrendDataError as trend_exc:
-                print(f"Trend context unavailable for {symbol}; continuing with sweep checks: {trend_exc}")
+                print(f"1h trend context unavailable for {symbol}; continuing: {trend_exc}")
                 trend_1h = {"direction": "NEUTRAL", "structure": "UNAVAILABLE"}
+            try:
+                higher_trends = analyze_trend_4h_1d(symbol)
+            except TrendDataError as trend_exc:
+                print(f"4h/1d trend context unavailable for {symbol}; continuing: {trend_exc}")
+                higher_trends = {
+                    "4h": {"direction": "NEUTRAL", "structure": "UNAVAILABLE"},
+                    "1d": {"direction": "NEUTRAL", "structure": "UNAVAILABLE"},
+                }
             trend_15m_confirmed = (
                 confirm_trend_15m(snapshot.get("candles") or [], trend_1h["direction"])
                 if trend_1h["direction"] in {"LONG", "SHORT"} else False
             )
             record["trend_1h"] = trend_1h
+            record["trend_4h"] = higher_trends["4h"]
+            record["trend_1d"] = higher_trends["1d"]
             record["trend_15m_confirmed"] = trend_15m_confirmed
             record["data_source"] = f"{snapshot.get('price_source', 'market feed')} prices + Coinalyze derivatives metrics"
             metrics = client.fetch_metrics(symbol, now=timestamp)
             metrics["trend_1h"] = trend_1h["direction"]
+            metrics["trend_4h"] = higher_trends["4h"]["direction"]
+            metrics["trend_1d"] = higher_trends["1d"]["direction"]
             metrics["trend_15m_confirmed"] = trend_15m_confirmed
             # OI change and taker flow must describe the very same closed
             # 15m candle as the price-action liquidity sweep. Reject stale or
@@ -315,6 +327,11 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                         "تأیید مشتقات Coinalyze ناکافی است: "
                         + "؛ ".join(derivatives_rejections)
                     )
+            higher_conflicts = [
+                timeframe for timeframe in ("4h", "1d")
+                if higher_trends[timeframe]["direction"] in {"LONG", "SHORT"}
+                and higher_trends[timeframe]["direction"] != (signal.side if signal is not None else "")
+            ]
             if (
                 signal is not None
                 and trend_1h["direction"] in {"LONG", "SHORT"}
@@ -324,6 +341,12 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 reason = (
                     f"جهت شکار نقدینگی با روند روشن یک‌ساعته "
                     f"({trend_1h['direction']}) مخالف است؛ سیگنال رد شد"
+                )
+            elif signal is not None and len(higher_conflicts) == 2:
+                signal = None
+                reason = (
+                    "روند هر دو تایم‌فریم بالاتر (۴ساعته و روزانه) خلاف جهت سیگنال است؛ "
+                    "برای جلوگیری از ورود خلاف روند اصلی، سیگنال رد شد"
                 )
             if signal is not None:
                 # A LIMIT pullback signal must be published while price is still
