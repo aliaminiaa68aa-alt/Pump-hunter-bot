@@ -715,6 +715,16 @@ class TelegramRunnerTests(unittest.TestCase):
         )
         self.assertEqual(result["reasons"]["coinalyze_rejected"], 1)
 
+    def test_current_coinalyze_derivatives_rejection_wording_is_counted(self):
+        result = telegram_runner.summarize_scan_diagnostics(
+            {"AUSDT": {}},
+            {"AUSDT": {
+                "status": "در حال رصد نقدینگی",
+                "reason": "تأیید مشتقات Coinalyze ناکافی است: رشد OI کافی نیست (+0.04٪؛ حداقل +0.30٪)",
+            }},
+        )
+        self.assertEqual(result["reasons"]["coinalyze_rejected"], 1)
+
     def test_twelve_symbol_batch_reserves_four_pending_setups(self):
         watchlist = {
             **{
