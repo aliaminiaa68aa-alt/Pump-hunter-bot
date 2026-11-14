@@ -16,49 +16,21 @@ MAX_DERIVATIVES_CANDLE_LAG_MS = 15 * 60 * 1000
 
 
 def coinalyze_rejection_reasons(signal: Signal, metrics: Dict[str, Any]) -> List[str]:
-    """Require OI and directional flow; Funding is context, never a signal veto."""
+    """Validate Coinalyze data integrity only; OI/flow are context, not entry gates."""
     try:
         oi_change = float(metrics["oi_change_15m_window_pct"])
         taker_ratio = float(metrics["taker_buy_ratio"])
     except (KeyError, TypeError, ValueError, OverflowError):
         return ["داده اصلی OI یا جریان خرید/فروش ناقص است"]
-
     if not all(math.isfinite(value) for value in (oi_change, taker_ratio)):
         return ["داده OI یا جریان معتبر نیست"]
-    reasons = []
-    if oi_change < 0.30:
-        reasons.append(f"رشد OI کافی نیست ({oi_change:+.2f}٪؛ حداقل +0.30٪)")
     if not 0.0 <= taker_ratio <= 1.0:
-        reasons.append("نسبت جریان خرید/فروش خارج از محدوده معتبر است")
-
-    raw_lsr = metrics.get("long_short_ratio")
-    long_share = None
-    if raw_lsr is not None:
-        try:
-            ratio = float(raw_lsr)
-        except (TypeError, ValueError, OverflowError):
-            reasons.append("نسبت لانگ/شورت نامعتبر است")
-            ratio = None
-        if ratio is not None:
-            if not math.isfinite(ratio) or ratio <= 0:
-                reasons.append("نسبت لانگ/شورت نامعتبر است")
-            else:
-                long_share = ratio / (1.0 + ratio)
-
-    if signal.side == "LONG":
-        if taker_ratio < 0.55:
-            reasons.append(f"جریان خرید کافی نیست ({taker_ratio:.1%}؛ حداقل 55٪)")
-        if long_share is not None and long_share > 0.70:
-            reasons.append(f"ازدحام لانگ بالاست ({long_share:.1%}؛ حداکثر 70٪)")
-    elif signal.side == "SHORT":
-        short_share = None if long_share is None else 1.0 - long_share
-        if taker_ratio > 0.45:
-            reasons.append(f"جریان فروش کافی نیست ({1.0-taker_ratio:.1%}؛ حداقل 55٪)")
-        if short_share is not None and short_share > 0.70:
-            reasons.append(f"ازدحام شورت بالاست ({short_share:.1%}؛ حداکثر 70٪)")
-    else:
-        reasons.append("جهت سیگنال نامعتبر است")
-    return reasons
+        return ["نسبت جریان خرید/فروش خارج از محدوده معتبر است"]
+    if str(signal.side).upper() not in {"LONG", "SHORT"}:
+        return ["جهت سیگنال نامعتبر است"]
+    # No minimum OI expansion, directional taker-flow, or crowding threshold:
+    # these metrics are displayed and used for ranking/context only.
+    return []
 
 def coinalyze_confirms(signal: Signal, metrics: Dict[str, Any]) -> bool:
     """Require fresh core derivatives evidence; treat ancillary metrics as optional."""
@@ -357,37 +329,13 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 analysis_snapshot, metrics, required_side=required_side
             )
             if signal is not None:
-                # The sweep engine validates direction at a basic level. Apply
-                # the dedicated Coinalyze confirmation policy here as well so
-                # positive-but-weak OI/flow cannot bypass the intended final gate.
+                # OI/flow and multi-timeframe trends remain visible context only.
+                # The directional source alert plus the actual 15m sweep/reclaim
+                # determine the side; no secondary trend/flow veto is applied.
                 derivatives_rejections = coinalyze_rejection_reasons(signal, metrics)
                 if derivatives_rejections:
                     signal = None
-                    reason = (
-                        "تأیید مشتقات Coinalyze ناکافی است: "
-                        + "؛ ".join(derivatives_rejections)
-                    )
-            higher_conflicts = [
-                timeframe for timeframe in ("4h", "1d")
-                if higher_trends[timeframe]["direction"] in {"LONG", "SHORT"}
-                and higher_trends[timeframe]["direction"] != (signal.side if signal is not None else "")
-            ]
-            if (
-                signal is not None
-                and trend_1h["direction"] in {"LONG", "SHORT"}
-                and signal.side != trend_1h["direction"]
-            ):
-                signal = None
-                reason = (
-                    f"جهت شکار نقدینگی با روند روشن یک‌ساعته "
-                    f"({trend_1h['direction']}) مخالف است؛ سیگنال رد شد"
-                )
-            elif signal is not None and len(higher_conflicts) == 2:
-                signal = None
-                reason = (
-                    "روند هر دو تایم‌فریم بالاتر (۴ساعته و روزانه) خلاف جهت سیگنال است؛ "
-                    "برای جلوگیری از ورود خلاف روند اصلی، سیگنال رد شد"
-                )
+                    reason = "داده مشتقات نامعتبر است: " + "؛ ".join(derivatives_rejections)
             if signal is not None:
                 # A LIMIT pullback signal must be published while price is still
                 # on the continuation side of entry, before the level is touched.
