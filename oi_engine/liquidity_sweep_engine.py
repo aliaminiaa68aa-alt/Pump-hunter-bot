@@ -108,8 +108,19 @@ def evaluate_liquidity_sweep(
         return None, "قیمت ورود پولبک قبلاً لمس یا از دست رفته؛ سیگنال دیرهنگام صادر نشد"
 
     # Structural stop remains beyond the actual sweep extreme with an ATR buffer.
-    buffer = max(atr * 0.10, entry * 0.0005)
-    stop = sweep_extreme - buffer if side == "LONG" else sweep_extreme + buffer
+    # Keep the stop beyond the sweep wick, but never let it sit inside
+    # ordinary 15m noise. A half-ATR minimum avoids the tiny 0.2-0.3% stops
+    # seen in the live outcomes while retaining the actual sweep extreme.
+    buffer = max(atr * 0.20, entry * 0.001)
+    structural_stop = (
+        sweep_extreme - buffer if side == "LONG" else sweep_extreme + buffer
+    )
+    minimum_risk = atr * 0.50
+    stop = (
+        min(structural_stop, entry - minimum_risk)
+        if side == "LONG"
+        else max(structural_stop, entry + minimum_risk)
+    )
     risk = entry - stop if side == "LONG" else stop - entry
     if risk <= 0 or risk / entry > 0.04:
         return None, "فاصله حد ضرر ساختاری نامعتبر یا بیش از ۴٪ است"
