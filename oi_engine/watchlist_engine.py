@@ -89,10 +89,10 @@ def source_oi_priority(source_text: str) -> Dict[str, Any]:
 
 def signal_price_geometry_rejection(
     signal: Signal,
-    min_tp1_distance_pct: float = 1.0,
+    min_tp1_distance_pct: float = 0.0,
     min_risk_reward: float = MIN_CONFIRMED_ENTRY_RR,
 ) -> str | None:
-    """Fail closed on malformed levels, too-close targets, or sub-2R geometry."""
+    """Reject malformed price geometry and reward/risk below the 1R floor."""
     try:
         entry = float(signal.entry)
         stop = float(signal.stop_loss)
