@@ -58,6 +58,16 @@ class FakeClient:
 
 
 class LiquiditySweepWatchlistTests(unittest.TestCase):
+    def test_second_target_projects_beyond_tp1_when_only_one_swing_exists(self):
+        from oi_engine.liquidity_sweep_engine import project_second_target
+        self.assertEqual(project_second_target("LONG", 100.0, 1.0, 105.0), 106.0)
+        self.assertEqual(project_second_target("SHORT", 100.0, 1.0, 95.0), 94.0)
+
+    def test_second_target_is_at_least_two_r_from_entry(self):
+        from oi_engine.liquidity_sweep_engine import project_second_target
+        self.assertEqual(project_second_target("LONG", 100.0, 1.0, 101.0), 102.0)
+        self.assertEqual(project_second_target("SHORT", 100.0, 1.0, 99.0), 98.0)
+
     def setUp(self):
         self.trend_direction = "LONG"
         self._trend_patcher = patch(
