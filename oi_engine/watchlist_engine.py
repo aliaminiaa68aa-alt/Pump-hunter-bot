@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 from oi_engine.coinalyze_client import CoinalyzeClient, CoinalyzeError
 from oi_engine.signal_engine import MarketDataError, Signal, _atr, fetch_snapshot
 from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep, MIN_CONFIRMED_ENTRY_RR
-from oi_engine.trend_engine import analyze_trend_1h, analyze_trend_4h_1d, confirm_trend_15m, TrendDataError
+from oi_engine.trend_engine import analyze_trend_1h, analyze_trend_4h_1d, TrendDataError
 
 DATA_ERROR_RETRY_SECONDS = 300
 MAX_DERIVATIVES_CANDLE_LAG_MS = 15 * 60 * 1000
@@ -262,12 +262,8 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             # One exchange supplies both OHLCV and live price; Coinalyze supplies
             # derivatives/positioning metrics only. Never combine exchange prices.
             snapshot = fetch_snapshot(symbol)
-            # Journal order: establish the 1h direction first, then require
-            # independent 15m structure confirmation before derivatives/setup work.
-            # Trend is context, not a hard veto. The former strict EMA + two-swing
-            # gate on BOTH 1h and 15m suppressed nearly every otherwise valid
-            # liquidity-sweep setup. Keep the trend read for reporting and only
-            # reject a sweep when a clear 1h direction directly conflicts.
+            # Trend is context, not a candle-confirmation gate. Keep the
+            # higher-timeframe reads for directional risk control only.
             try:
                 trend_1h = analyze_trend_1h(symbol)
             except TrendDataError as trend_exc:
@@ -326,15 +322,12 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     f"Coinalyze 15m OI/flow candle (lag={candle_lag_ms // 60_000}m)"
                 )
 
-            trend_15m_confirmed = (
-                confirm_trend_15m(aligned_candles, trend_1h["direction"])
-                if trend_1h["direction"] in {"LONG", "SHORT"} else False
-            )
-            record["trend_15m_confirmed"] = trend_15m_confirmed
+            # Do not calculate or wait for a separate 15m trend confirmation:
+            # the sweep/reclaim on the closed 15m candle is the trigger itself.
+            record.pop("trend_15m_confirmed", None)
             metrics["trend_1h"] = trend_1h["direction"]
             metrics["trend_4h"] = higher_trends["4h"]["direction"]
             metrics["trend_1d"] = higher_trends["1d"]["direction"]
-            metrics["trend_15m_confirmed"] = trend_15m_confirmed
             # Discard any provider-side OHLCV snapshot: it must not affect entries.
             metrics.pop("market_snapshot", None)
             metrics.update(source_oi_priority(record.get("source_text", "")))
