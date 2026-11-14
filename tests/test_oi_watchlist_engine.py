@@ -100,8 +100,10 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         signal = type("SignalStub", (), {"side": "LONG", "entry": 100.0, "stop_loss": 99.0, "take_profit_1": 102.0, "take_profit_2": 103.0})()
         metrics = {**make_metrics("LONG"), "oi_change_15m_window_pct": 0.29}
         evaluator = Mock(return_value=(signal, "test sweep/reclaim"))
+        snapshot = make_snapshot("LONG")
+        snapshot["live_price"] = 100.5
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
-                   return_value=make_snapshot("LONG")), \
+                   return_value=snapshot), \
              patch("oi_engine.watchlist_engine.evaluate_liquidity_sweep", evaluator):
             found, updated = scan_watchlist(
                 {"ABCUSDT": {}}, FakeClient(metrics), now=1000
@@ -117,8 +119,10 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         signal = type("SignalStub", (), {"side": "SHORT", "entry": 100.0, "stop_loss": 101.0, "take_profit_1": 98.0, "take_profit_2": 97.0})()
         metrics = {**make_metrics("SHORT"), "taker_buy_ratio": 0.46}
         evaluator = Mock(return_value=(signal, "test sweep/reclaim"))
+        snapshot = make_snapshot("SHORT")
+        snapshot["live_price"] = 99.5
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
-                   return_value=make_snapshot("SHORT")), \
+                   return_value=snapshot), \
              patch("oi_engine.watchlist_engine.evaluate_liquidity_sweep", evaluator):
             found, updated = scan_watchlist(
                 {"ABCUSDT": {}}, FakeClient(metrics), now=1000
@@ -354,8 +358,8 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
 
     def test_signal_price_geometry_rejects_sub_one_r_for_both_sides(self):
         cases = (
-            ("LONG", 100.0, 99.0, 99.5, 101.0),
-            ("SHORT", 100.0, 101.0, 100.5, 99.0),
+            ("LONG", 100.0, 99.0, 100.5, 101.0),
+            ("SHORT", 100.0, 101.0, 99.5, 99.0),
         )
         for side, entry, stop, tp1, tp2 in cases:
             with self.subTest(side=side):
