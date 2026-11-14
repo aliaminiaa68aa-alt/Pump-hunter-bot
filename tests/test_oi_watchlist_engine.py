@@ -66,9 +66,9 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         )
         self._higher_trend_patcher = patch(
             "oi_engine.watchlist_engine.analyze_trend_4h_1d",
-            return_value={
-                "4h": {"direction": "LONG"},
-                "1d": {"direction": "LONG"},
+            side_effect=lambda symbol: {
+                "4h": {"direction": self.trend_direction},
+                "1d": {"direction": self.trend_direction},
             },
         )
         self._confirm_patcher = patch(
