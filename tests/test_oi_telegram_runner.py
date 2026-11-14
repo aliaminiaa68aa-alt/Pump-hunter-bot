@@ -252,6 +252,62 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 12)
         self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 0)
 
+    def test_fresh_oi_alerts_are_not_displaced_by_pending_setups(self):
+        watchlist = {
+            **{
+                f"CHANNEL{i}USDT": {
+                    "source_type": "oi_channel",
+                    "last_alert_received_at": 200 + i,
+                    "last_checked": 0,
+                }
+                for i in range(11)
+            },
+            **{
+                f"PENDING{i}USDT": {
+                    "source_type": "oi_channel",
+                    "pending_setup": {"expires_at_close_time": 9999},
+                    "last_checked": 100,
+                }
+                for i in range(4)
+            },
+            **{
+                f"MARKET{i}USDT": {
+                    "source_type": "market_universe",
+                    "last_checked": 0,
+                }
+                for i in range(5)
+            },
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=12)
+        self.assertEqual(len(batch), 12)
+        self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 11)
+        self.assertEqual(sum(1 for s in batch if s.startswith("PENDING")), 1)
+        self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 0)
+
+    def test_full_fresh_oi_backlog_uses_all_slots_before_pending_setups(self):
+        watchlist = {
+            **{
+                f"CHANNEL{i}USDT": {
+                    "source_type": "oi_channel",
+                    "last_alert_received_at": 200 + i,
+                    "last_checked": 0,
+                }
+                for i in range(16)
+            },
+            **{
+                f"PENDING{i}USDT": {
+                    "source_type": "oi_channel",
+                    "pending_setup": {"expires_at_close_time": 9999},
+                    "last_checked": 100,
+                }
+                for i in range(4)
+            },
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=12)
+        self.assertEqual(len(batch), 12)
+        self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 12)
+        self.assertEqual(sum(1 for s in batch if s.startswith("PENDING")), 0)
+
     def test_oi_backlog_displaces_only_the_market_slots_it_would_otherwise_use(self):
         watchlist = {
             **{
