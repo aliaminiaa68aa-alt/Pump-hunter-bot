@@ -6,18 +6,17 @@ from typing import Any, Dict, Optional, Tuple
 
 from oi_engine.signal_engine import Signal, _atr, score_signal_components
 
-MIN_CONFIRMED_ENTRY_RR = 2.0
+MIN_CONFIRMED_ENTRY_RR = 1.0
 
 
 def evaluate_liquidity_sweep(
     snapshot: Dict[str, Any], metrics: Dict[str, Any],
     required_side: Optional[str] = None,
 ) -> Tuple[Optional[Signal], str]:
-    """Create an entry only after a closed 15m candle sweeps and reclaims liquidity.
+    """Signal on the closed 15m candle that completes a valid sweep/reclaim.
 
-    LONG: take the prior swing low, then close bullish back above it.
-    SHORT: take the prior swing high, then close bearish back below it.
-    Coinalyze OI expansion and taker flow must agree with the reversal.
+    No later-candle continuation, EMA, trend, OI-expansion or taker-flow
+    confirmation is required. The OI alert fixes the allowed direction.
     """
     if required_side not in {None, "LONG", "SHORT"}:
         return None, "جهت هشدار Open Interest مشخص نیست؛ سیگنال صادر نشد"
@@ -48,12 +47,10 @@ def evaluate_liquidity_sweep(
     if not math.isfinite(atr) or atr <= 0:
         return None, "ATR معتبر برای تعیین حد ضرر وجود ندارد"
 
-    # Search the latest six CLOSED candles for a completed sweep/reclaim.
-    # If the sweep occurred one or two candles earlier, require the newest
-    # closed candle to continue away from the reclaimed level before entering.
+    # Search the latest six CLOSED candles. The sweep candle's own reclaim
+    # is the setup; do not wait for a second candle to confirm continuation.
     setup = None
     sweep_seen = False
-    continuation_seen = False
     opposite_sweep_seen = False
     for sweep_index in range(len(candles) - 1, max(10, len(candles) - 7), -1):
         sweep = candles[sweep_index]
@@ -84,48 +81,24 @@ def evaluate_liquidity_sweep(
                 opposite_sweep_seen = True
                 continue
             sweep_seen = True
-            continued = (
-                entry > prior_low and
-                (sweep_index == len(candles) - 1 or (entry > sweep_close and entry > open_price))
-            )
-            if continued:
-                continuation_seen = True
-                setup = ("LONG", prior_low, sweep_low, len(candles) - 1 - sweep_index)
-                break
+            setup = ("LONG", prior_low, sweep_low, len(candles) - 1 - sweep_index)
+            break
         elif short_sweep and not long_sweep:
             if required_side == "LONG":
                 opposite_sweep_seen = True
                 continue
             sweep_seen = True
-            continued = (
-                entry < prior_high and
-                (sweep_index == len(candles) - 1 or (entry < sweep_close and entry < open_price))
-            )
-            if continued:
-                continuation_seen = True
-                setup = ("SHORT", prior_high, sweep_high, len(candles) - 1 - sweep_index)
-                break
+            setup = ("SHORT", prior_high, sweep_high, len(candles) - 1 - sweep_index)
+            break
 
     if setup is None:
         if opposite_sweep_seen and required_side in {"LONG", "SHORT"}:
             return None, (
                 f"جهت هشدار منبع {required_side} است؛ شکار نقدینگی در جهت مخالف نادیده گرفته شد"
             )
-        if sweep_seen and not continuation_seen:
-            return None, (
-                "شکار نقدینگی در ۶ کندل اخیر دیده شد، اما کندل بسته‌شده بعدی "
-                "ادامه برگشت را تأیید نکرد؛ برای جلوگیری از ورود زودهنگام سیگنال صادر نشد"
-            )
         return None, "در ۶ کندل بسته‌شده اخیر شکست معتبر سقف/کف ۱۲ کندل قبل و بازپس‌گیری سطح دیده نشد"
 
     side, swept_level, sweep_extreme, sweep_age = setup
-    if side == "LONG":
-        if oi_change <= 0 or taker_ratio <= 0.50:
-            return None, "نقدینگی کف زده شده، اما OI و جریان خرید Coinalyze برگشت LONG را تأیید نمی‌کنند"
-    else:
-        if oi_change <= 0 or taker_ratio >= 0.50:
-            return None, "نقدینگی سقف زده شده، اما OI و جریان فروش Coinalyze برگشت SHORT را تأیید نمی‌کنند"
-
     # Prepare a LIMIT pullback at the reclaimed liquidity level. The signal is
     # published before touch; the live monitor is responsible for confirming fill.
     entry = float(swept_level)
@@ -158,9 +131,14 @@ def evaluate_liquidity_sweep(
         if pivot and beyond_entry:
             levels.append(level)
     levels = sorted(set(levels), reverse=(side == "SHORT"))
-    if len(levels) < 2:
-        return None, "دو سطح نقدینگی/مقاومت معتبر برای تعیین اهداف ساختاری پیدا نشد"
-    tp1, tp2 = levels[0], levels[1]
+    if not levels:
+        return None, "حتی یک سطح ساختاری معتبر برای هدف اول پیدا نشد"
+    tp1 = levels[0]
+    # Prefer a second confirmed swing; if absent, use a conservative 2R projection.
+    if len(levels) >= 2:
+        tp2 = levels[1]
+    else:
+        tp2 = max(levels[0], entry + 2.0 * risk) if side == "LONG" else min(levels[0], entry - 2.0 * risk)
     if side == "LONG" and not stop < entry < tp1 < tp2:
         return None, "ترتیب سطوح ساختاری LONG معتبر نیست"
     if side == "SHORT" and not stop > entry > tp1 > tp2:
@@ -176,12 +154,6 @@ def evaluate_liquidity_sweep(
     baseline = candles[-21:-1]
     avg_volume = sum(float(row["quote_volume"]) for row in baseline) / len(baseline)
     volume_ratio = float(last["quote_volume"]) / avg_volume if avg_volume > 0 else 0.0
-    # A modest floor blocks very weak sweeps without requiring a volume spike.
-    if not math.isfinite(volume_ratio) or volume_ratio < 0.50:
-        return None, (
-            f"شکار نقدینگی تأیید شد، اما حجم کندل فقط {volume_ratio:.2f}x میانگین است؛ "
-            "حداقل قابل قبول 0.50x است"
-        )
     movement_strength, entry_quality = score_signal_components(
         candles, side, oi_change, price_change, taker_ratio, volume_ratio, atr, swept_level
     )
@@ -199,6 +171,6 @@ def evaluate_liquidity_sweep(
     )
     age_text = "همین کندل" if sweep_age == 0 else f"{sweep_age} کندل قبل"
     return signal, (
-        f"Liquidity Sweep {side}: سطح {swept_level:.8g} در {age_text} شکسته و پس گرفته شد؛ "
-        "کندل بسته‌شده فعلی ادامه برگشت را تأیید کرد"
+        f"Liquidity Sweep {side}: سطح {swept_level:.8g} در {age_text} شکسته و در همان کندل پس گرفته شد؛ "
+        "سیگنال بدون انتظار برای کندل تأییدی بعدی آماده شد"
     )
