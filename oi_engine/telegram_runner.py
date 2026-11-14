@@ -691,10 +691,17 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         _safe_int(watchlist[symbol]["pending_setup"].get("expires_at_close_time", 0)),
     ))
 
-    # Pending setups need frequent rechecks: reserve up to four of twelve
-    # slots, while keeping at least two thirds of capacity for fresh/hot
-    # candidates. Smaller batches retain the previous two-slot ceiling.
+    # Fresh OI alerts must be checked before pending setups. When fresh
+    # alerts are waiting, reserve pending slots only from capacity left after
+    # those alerts; otherwise a backlog of pending setups can delay new alerts.
+    fresh_oi_alerts = sum(
+        1 for symbol in fresh_alerts
+        if watchlist[symbol].get("source_type", "oi_channel") == "oi_channel"
+    )
+    pending_capacity = max(0, count - min(count, len(fresh_alerts)))
     pending_target = (
+        min(len(pending_all), pending_capacity, max(2, min(4, count // 3)))
+        if count >= 2 and pending_all and fresh_oi_alerts else
         min(len(pending_all), max(2, min(4, count // 3)))
         if count >= 2 and pending_all else 0
     )
@@ -717,10 +724,10 @@ def select_watchlist_batch(watchlist, last_scanned_symbol="", limit=MAX_WATCHLIS
         min(len(market_candidates), min(2, max(1, count // 4)))
         if market_candidates and count >= 3 else 0
     )
-    fresh_oi_alerts = sum(
-        1 for symbol in fresh_alerts
-        if watchlist[symbol].get("source_type", "oi_channel") == "oi_channel"
-    )
+    # Do not reserve slots for the broad market while any fresh channel
+    # alert is waiting. Channel alerts remain the first work in the batch.
+    if fresh_oi_alerts:
+        market_reserve = 0
     fresh_oi_capacity = max(0, count - pending_target - market_reserve)
     if fresh_oi_alerts > fresh_oi_capacity:
         market_reserve = 0

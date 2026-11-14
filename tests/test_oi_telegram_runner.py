@@ -252,6 +252,62 @@ class TelegramRunnerTests(unittest.TestCase):
         self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 12)
         self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 0)
 
+    def test_fresh_oi_alerts_are_not_displaced_by_pending_setups(self):
+        watchlist = {
+            **{
+                f"CHANNEL{i}USDT": {
+                    "source_type": "oi_channel",
+                    "last_alert_received_at": 200 + i,
+                    "last_checked": 0,
+                }
+                for i in range(11)
+            },
+            **{
+                f"PENDING{i}USDT": {
+                    "source_type": "oi_channel",
+                    "pending_setup": {"expires_at_close_time": 9999},
+                    "last_checked": 100,
+                }
+                for i in range(4)
+            },
+            **{
+                f"MARKET{i}USDT": {
+                    "source_type": "market_universe",
+                    "last_checked": 0,
+                }
+                for i in range(5)
+            },
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=12)
+        self.assertEqual(len(batch), 12)
+        self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 11)
+        self.assertEqual(sum(1 for s in batch if s.startswith("PENDING")), 1)
+        self.assertEqual(sum(1 for s in batch if s.startswith("MARKET")), 0)
+
+    def test_full_fresh_oi_backlog_uses_all_slots_before_pending_setups(self):
+        watchlist = {
+            **{
+                f"CHANNEL{i}USDT": {
+                    "source_type": "oi_channel",
+                    "last_alert_received_at": 200 + i,
+                    "last_checked": 0,
+                }
+                for i in range(16)
+            },
+            **{
+                f"PENDING{i}USDT": {
+                    "source_type": "oi_channel",
+                    "pending_setup": {"expires_at_close_time": 9999},
+                    "last_checked": 100,
+                }
+                for i in range(4)
+            },
+        }
+        batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=12)
+        self.assertEqual(len(batch), 12)
+        self.assertEqual(sum(1 for s in batch if s.startswith("CHANNEL")), 12)
+        self.assertEqual(sum(1 for s in batch if s.startswith("PENDING")), 0)
+
     def test_oi_backlog_displaces_only_the_market_slots_it_would_otherwise_use(self):
         watchlist = {
             **{
@@ -922,7 +978,7 @@ class TelegramRunnerTests(unittest.TestCase):
         batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=1)
         self.assertEqual(list(batch), ["NEVER_TRIEDUSDT"])
 
-    def test_unscanned_fresh_alerts_keep_priority_while_pending_gets_reserved_slot(self):
+    def test_unscanned_fresh_alerts_keep_priority_ahead_of_pending_setups(self):
         watchlist = {
             f"ALERT{i}USDT": {"last_alert": 1000 + i, "last_checked": 0}
             for i in range(1, 15)
@@ -933,17 +989,14 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         first, cursor = telegram_runner.select_watchlist_batch(watchlist, limit=12)
         self.assertEqual(len(first), 12)
-        self.assertEqual(sum(symbol.startswith("ALERT") for symbol in first), 11)
-        self.assertIn("PENDINGUSDT", first)
-        self.assertEqual(list(first)[-1], "PENDINGUSDT")
+        self.assertEqual(sum(symbol.startswith("ALERT") for symbol in first), 12)
+        self.assertNotIn("PENDINGUSDT", first)
 
         for record in first.values():
             record["last_checked"] = 2000
         second, _ = telegram_runner.select_watchlist_batch(watchlist, cursor, limit=12)
-        # Remaining fresh alerts still lead; pending setup is revisited too.
-        self.assertEqual(
-            list(second)[:3], ["ALERT3USDT", "ALERT2USDT", "ALERT1USDT"]
-        )
+        # Remaining fresh alerts are handled before the pending setup.
+        self.assertEqual(list(second)[:2], ["ALERT2USDT", "ALERT1USDT"])
         self.assertIn("PENDINGUSDT", second)
         self.assertLess(
             list(second).index("ALERT1USDT"),
