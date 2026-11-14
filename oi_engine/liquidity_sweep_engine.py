@@ -9,6 +9,15 @@ from oi_engine.signal_engine import Signal, _atr, score_signal_components
 MIN_CONFIRMED_ENTRY_RR = 1.0
 
 
+def project_second_target(side: str, entry: float, risk: float, tp1: float) -> float:
+    """Project TP2 beyond TP1 when history contains only one confirmed swing."""
+    if side == "LONG":
+        return max(entry + 2.0 * risk, tp1 + risk)
+    if side == "SHORT":
+        return min(entry - 2.0 * risk, tp1 - risk)
+    raise ValueError("side must be LONG or SHORT")
+
+
 def evaluate_liquidity_sweep(
     snapshot: Dict[str, Any], metrics: Dict[str, Any],
     required_side: Optional[str] = None,
@@ -149,7 +158,9 @@ def evaluate_liquidity_sweep(
     if len(levels) >= 2:
         tp2 = levels[1]
     else:
-        tp2 = max(levels[0], entry + 2.0 * risk) if side == "LONG" else min(levels[0], entry - 2.0 * risk)
+        # Do not let TP2 collapse onto TP1 when the nearest swing is already
+        # farther than 2R. Keep TP2 strictly beyond TP1 by at least another 1R.
+        tp2 = project_second_target(side, entry, risk, tp1)
     if side == "LONG" and not stop < entry < tp1 < tp2:
         return None, "ترتیب سطوح ساختاری LONG معتبر نیست"
     if side == "SHORT" and not stop > entry > tp1 > tp2:
