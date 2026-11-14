@@ -218,6 +218,23 @@ def format_confirmed_signal(signal: Signal, metrics: Dict[str, Any]) -> str:
     )
 
 
+def trend_side_rejection(side: str, trend_1h: Dict[str, Any], trend_4h: Dict[str, Any], trend_1d: Dict[str, Any]) -> str | None:
+    """Block counter-trend sweeps when at least two closed higher timeframes agree."""
+    directions = [
+        str((trend_1h or {}).get("direction", "NEUTRAL")).upper(),
+        str((trend_4h or {}).get("direction", "NEUTRAL")).upper(),
+        str((trend_1d or {}).get("direction", "NEUTRAL")).upper(),
+    ]
+    bearish = directions.count("SHORT")
+    bullish = directions.count("LONG")
+    side = str(side).upper()
+    if side == "LONG" and bearish >= 2:
+        return "بازار و ساختار چندتایم‌فریمی نزولی است؛ LONG خلاف جهت غالب رد شد"
+    if side == "SHORT" and bullish >= 2:
+        return "بازار و ساختار چندتایم‌فریمی صعودی است؛ SHORT خلاف جهت غالب رد شد"
+    return None
+
+
 def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient | None = None,
                    now: int | None = None) -> Tuple[List[Tuple[Signal, Dict[str, Any]]], Dict[str, Dict[str, Any]]]:
     """Use Coinalyze as the primary source and emit only confirmed liquidity-sweep entries."""
@@ -329,9 +346,16 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 analysis_snapshot, metrics, required_side=required_side
             )
             if signal is not None:
-                # OI/flow and multi-timeframe trends remain visible context only.
-                # The directional source alert plus the actual 15m sweep/reclaim
-                # determine the side; no secondary trend/flow veto is applied.
+                # A valid sweep is not enough when the broader structure is
+                # decisively against it. Two of 1h/4h/1d must agree to veto;
+                # this keeps the filter directional without demanding unanimity.
+                trend_rejection = trend_side_rejection(
+                    signal.side, trend_1h, higher_trends["4h"], higher_trends["1d"]
+                )
+                if trend_rejection:
+                    signal = None
+                    reason = trend_rejection
+            if signal is not None:
                 derivatives_rejections = coinalyze_rejection_reasons(signal, metrics)
                 if derivatives_rejections:
                     signal = None
