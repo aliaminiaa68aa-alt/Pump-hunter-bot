@@ -978,7 +978,7 @@ class TelegramRunnerTests(unittest.TestCase):
         batch, _ = telegram_runner.select_watchlist_batch(watchlist, limit=1)
         self.assertEqual(list(batch), ["NEVER_TRIEDUSDT"])
 
-    def test_unscanned_fresh_alerts_keep_priority_while_pending_gets_reserved_slot(self):
+    def test_unscanned_fresh_alerts_keep_priority_ahead_of_pending_setups(self):
         watchlist = {
             f"ALERT{i}USDT": {"last_alert": 1000 + i, "last_checked": 0}
             for i in range(1, 15)
@@ -989,17 +989,14 @@ class TelegramRunnerTests(unittest.TestCase):
         }
         first, cursor = telegram_runner.select_watchlist_batch(watchlist, limit=12)
         self.assertEqual(len(first), 12)
-        self.assertEqual(sum(symbol.startswith("ALERT") for symbol in first), 11)
-        self.assertIn("PENDINGUSDT", first)
-        self.assertEqual(list(first)[-1], "PENDINGUSDT")
+        self.assertEqual(sum(symbol.startswith("ALERT") for symbol in first), 12)
+        self.assertNotIn("PENDINGUSDT", first)
 
         for record in first.values():
             record["last_checked"] = 2000
         second, _ = telegram_runner.select_watchlist_batch(watchlist, cursor, limit=12)
-        # Remaining fresh alerts still lead; pending setup is revisited too.
-        self.assertEqual(
-            list(second)[:3], ["ALERT3USDT", "ALERT2USDT", "ALERT1USDT"]
-        )
+        # Remaining fresh alerts are handled before the pending setup.
+        self.assertEqual(list(second)[:2], ["ALERT2USDT", "ALERT1USDT"])
         self.assertIn("PENDINGUSDT", second)
         self.assertLess(
             list(second).index("ALERT1USDT"),
