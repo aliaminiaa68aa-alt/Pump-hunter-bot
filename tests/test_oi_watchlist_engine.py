@@ -234,19 +234,55 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
                 self.assertEqual(updated["ABCUSDT"]["status"], "در حال رصد نقدینگی")
                 self.assertIn("حجم کندل فقط", updated["ABCUSDT"]["reason"])
 
-    def test_mismatched_coinalyze_candle_is_rejected(self):
+    def test_one_candle_coinalyze_lag_aligns_binance_price_history(self):
+        from unittest.mock import Mock
+
         metrics = {
             **make_metrics("LONG"),
             "derivatives_candle_open_time_ms": 28 * 900000,
         }
+        signal = type("SignalStub", (), {
+            "side": "LONG",
+            "entry": 100.0,
+            "stop_loss": 99.0,
+            "take_profit_1": 102.0,
+            "take_profit_2": 103.0,
+        })()
+        evaluator = Mock(return_value=(signal, "test sweep/reclaim"))
+        snapshot = make_snapshot("LONG")
+        with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value=snapshot):
+            with patch("oi_engine.watchlist_engine.evaluate_liquidity_sweep", evaluator):
+                with patch("oi_engine.watchlist_engine.confirm_trend_15m", return_value=True) as confirm:
+                    found, updated = scan_watchlist(
+                        {"ABCUSDT": {}}, FakeClient(metrics), now=1000
+                    )
+
+        self.assertEqual(len(found), 1)
+        aligned_snapshot = evaluator.call_args.args[0]
+        self.assertEqual(len(aligned_snapshot["candles"]), 29)
+        self.assertEqual(aligned_snapshot["candles"][-1]["open_time"], 28 * 900000)
+        confirm.assert_called_once_with(aligned_snapshot["candles"], "LONG")
+        self.assertEqual(updated["ABCUSDT"]["price_derivatives_candle_lag_minutes"], 15)
+
+    def test_two_candle_coinalyze_lag_is_rejected(self):
+        from unittest.mock import Mock
+
+        metrics = {
+            **make_metrics("LONG"),
+            "derivatives_candle_open_time_ms": 27 * 900000,
+        }
+        evaluator = Mock()
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
                    return_value=make_snapshot("LONG")):
-            found, updated = scan_watchlist(
-                {"ABCUSDT": {}}, FakeClient(metrics), now=1000
-            )
+            with patch("oi_engine.watchlist_engine.evaluate_liquidity_sweep", evaluator):
+                found, updated = scan_watchlist(
+                    {"ABCUSDT": {}}, FakeClient(metrics), now=1000
+                )
+
         self.assertEqual(found, [])
         self.assertEqual(updated["ABCUSDT"]["status"], "خطای دریافت داده")
-        self.assertIn("زمان کندل OI/جریان", updated["ABCUSDT"]["reason"])
+        self.assertIn("بیش از یک کندل", updated["ABCUSDT"]["reason"])
+        evaluator.assert_not_called()
 
     def test_no_sweep_means_no_entry(self):
         snapshot = make_snapshot("LONG")

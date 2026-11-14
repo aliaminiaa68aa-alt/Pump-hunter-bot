@@ -12,6 +12,7 @@ from oi_engine.liquidity_sweep_engine import evaluate_liquidity_sweep, MIN_CONFI
 from oi_engine.trend_engine import analyze_trend_1h, analyze_trend_4h_1d, confirm_trend_15m, TrendDataError
 
 DATA_ERROR_RETRY_SECONDS = 300
+MAX_DERIVATIVES_CANDLE_LAG_MS = 15 * 60 * 1000
 
 
 def coinalyze_rejection_reasons(signal: Signal, metrics: Dict[str, Any]) -> List[str]:
@@ -259,6 +260,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
         # Never leave a stale provider label from a previous scanner version or
         # an earlier successful attempt when the current price fetch fails.
         record.pop("data_source", None)
+        record.pop("price_derivatives_candle_lag_minutes", None)
         try:
             source_side = str(record.get("source_side", "")).upper()
             is_oi_alert = record.get("source_type") == "oi_channel"
@@ -290,33 +292,60 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                     "4h": {"direction": "NEUTRAL", "structure": "UNAVAILABLE"},
                     "1d": {"direction": "NEUTRAL", "structure": "UNAVAILABLE"},
                 }
-            trend_15m_confirmed = (
-                confirm_trend_15m(snapshot.get("candles") or [], trend_1h["direction"])
-                if trend_1h["direction"] in {"LONG", "SHORT"} else False
-            )
             record["trend_1h"] = trend_1h
             record["trend_4h"] = higher_trends["4h"]
             record["trend_1d"] = higher_trends["1d"]
-            record["trend_15m_confirmed"] = trend_15m_confirmed
             record["data_source"] = f"{snapshot.get('price_source', 'market feed')} prices + Coinalyze derivatives metrics"
             metrics = client.fetch_metrics(symbol, now=timestamp)
+
+            # Align Binance price action to the exact closed candle represented
+            # by Coinalyze OI/flow. Coinalyze can publish one 15m bar later than
+            # Binance; use the matching older Binance candle rather than mixing
+            # two different candles or discarding an otherwise valid setup.
+            price_candles = snapshot.get("candles") or []
+            latest_price_candle_time = (
+                int(price_candles[-1].get("open_time", 0)) if price_candles else 0
+            )
+            derivatives_candle_time = metrics.get("derivatives_candle_open_time_ms")
+            if not latest_price_candle_time or derivatives_candle_time is None:
+                raise CoinalyzeError("زمان کندل مشتقات Coinalyze یا قیمت موجود نیست")
+            derivatives_candle_time = int(derivatives_candle_time)
+            candle_lag_ms = latest_price_candle_time - derivatives_candle_time
+            if candle_lag_ms < 0 or candle_lag_ms > MAX_DERIVATIVES_CANDLE_LAG_MS:
+                raise CoinalyzeError(
+                    "فاصله کندل مشتقات با آخرین کندل قیمت Binance بیش از یک کندل یا در آینده است؛ "
+                    f"price={latest_price_candle_time}, derivatives={derivatives_candle_time}"
+                )
+            aligned_candles = [
+                candle for candle in price_candles
+                if int(candle.get("open_time", 0) or 0) <= derivatives_candle_time
+            ]
+            if (
+                not aligned_candles
+                or int(aligned_candles[-1].get("open_time", 0) or 0) != derivatives_candle_time
+            ):
+                raise CoinalyzeError(
+                    "کندل دقیق Coinalyze در تاریخچه کندل‌های قیمت Binance موجود نیست"
+                )
+            analysis_snapshot = dict(snapshot)
+            analysis_snapshot["candles"] = aligned_candles
+            metrics["price_derivatives_candle_lag_minutes"] = candle_lag_ms // 60_000
+            record["price_derivatives_candle_lag_minutes"] = candle_lag_ms // 60_000
+            if candle_lag_ms:
+                print(
+                    f"{symbol}: aligned Binance Spot price structure to the matching "
+                    f"Coinalyze 15m OI/flow candle (lag={candle_lag_ms // 60_000}m)"
+                )
+
+            trend_15m_confirmed = (
+                confirm_trend_15m(aligned_candles, trend_1h["direction"])
+                if trend_1h["direction"] in {"LONG", "SHORT"} else False
+            )
+            record["trend_15m_confirmed"] = trend_15m_confirmed
             metrics["trend_1h"] = trend_1h["direction"]
             metrics["trend_4h"] = higher_trends["4h"]["direction"]
             metrics["trend_1d"] = higher_trends["1d"]["direction"]
             metrics["trend_15m_confirmed"] = trend_15m_confirmed
-            # OI change and taker flow must describe the very same closed
-            # 15m candle as the price-action liquidity sweep. Reject stale or
-            # cross-candle derivatives data rather than mixing timestamps.
-            candles = snapshot.get("candles") or []
-            price_candle_time = int(candles[-1].get("open_time", 0)) if candles else 0
-            derivatives_candle_time = metrics.get("derivatives_candle_open_time_ms")
-            if not price_candle_time or derivatives_candle_time is None:
-                raise CoinalyzeError("زمان کندل مشتقات Coinalyze یا قیمت موجود نیست")
-            if abs(int(derivatives_candle_time) - price_candle_time) > 60_000:
-                raise CoinalyzeError(
-                    "زمان کندل OI/جریان Coinalyze با کندل قیمت یکسان نیست؛ "
-                    f"price={price_candle_time}, derivatives={int(derivatives_candle_time)}"
-                )
             # Discard any provider-side OHLCV snapshot: it must not affect entries.
             metrics.pop("market_snapshot", None)
             metrics.update(source_oi_priority(record.get("source_text", "")))
@@ -325,7 +354,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
             record["coinalyze"] = dict(metrics)
 
             signal, reason = evaluate_liquidity_sweep(
-                snapshot, metrics, required_side=required_side
+                analysis_snapshot, metrics, required_side=required_side
             )
             if signal is not None:
                 # The sweep engine validates direction at a basic level. Apply
@@ -363,7 +392,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                 # A LIMIT pullback signal must be published while price is still
                 # on the continuation side of entry, before the level is touched.
                 live_price = snapshot.get("live_price")
-                atr_for_entry = _atr(snapshot.get("candles") or [])
+                atr_for_entry = _atr(analysis_snapshot.get("candles") or [])
                 if live_price is None or not math.isfinite(float(live_price)) or float(live_price) <= 0:
                     geometry_rejection = "قیمت لحظه‌ای Binance Spot موجود نیست؛ سیگنال با داده ناقص رد شد"
                 else:
@@ -399,7 +428,7 @@ def scan_watchlist(watchlist: Dict[str, Dict[str, Any]], client: CoinalyzeClient
                         snapshot.get("live_price_time_ms") or time.time() * 1000
                     )
                     signal_metrics["price_source"] = snapshot.get("price_source", "unknown")
-                    candles = snapshot.get("candles") or []
+                    candles = analysis_snapshot.get("candles") or []
                     atr_value = _atr(candles) if candles else 0.0
                     stop_distance = abs(signal.entry - signal.stop_loss)
                     signal_metrics["atr_15m"] = atr_value if atr_value > 0 else None
