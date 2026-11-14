@@ -265,16 +265,15 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         snapshot = make_snapshot("LONG")
         with patch("oi_engine.watchlist_engine.fetch_snapshot", return_value=snapshot):
             with patch("oi_engine.watchlist_engine.evaluate_liquidity_sweep", evaluator):
-                with patch("oi_engine.watchlist_engine.confirm_trend_15m", return_value=True) as confirm:
-                    found, updated = scan_watchlist(
-                        {"ABCUSDT": {}}, FakeClient(metrics), now=1000
-                    )
+                found, updated = scan_watchlist(
+                    {"ABCUSDT": {}}, FakeClient(metrics), now=1000
+                )
 
         self.assertEqual(len(found), 1)
         aligned_snapshot = evaluator.call_args.args[0]
         self.assertEqual(len(aligned_snapshot["candles"]), 29)
         self.assertEqual(aligned_snapshot["candles"][-1]["open_time"], 28 * 900000)
-        confirm.assert_not_called()
+        self.assertNotIn("trend_15m_confirmed", updated["ABCUSDT"])
         self.assertEqual(updated["ABCUSDT"]["price_derivatives_candle_lag_minutes"], 15)
 
     def test_two_candle_coinalyze_lag_is_rejected(self):
