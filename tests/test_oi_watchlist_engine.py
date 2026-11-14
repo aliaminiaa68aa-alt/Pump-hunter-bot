@@ -274,7 +274,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         aligned_snapshot = evaluator.call_args.args[0]
         self.assertEqual(len(aligned_snapshot["candles"]), 29)
         self.assertEqual(aligned_snapshot["candles"][-1]["open_time"], 28 * 900000)
-        confirm.assert_called_once_with(aligned_snapshot["candles"], "LONG")
+        confirm.assert_not_called()
         self.assertEqual(updated["ABCUSDT"]["price_derivatives_candle_lag_minutes"], 15)
 
     def test_two_candle_coinalyze_lag_is_rejected(self):
