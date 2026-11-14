@@ -97,7 +97,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
     def test_weak_positive_oi_does_not_veto_valid_long_sweep(self):
         from unittest.mock import Mock
 
-        signal = type("SignalStub", (), {"side": "LONG"})()
+        signal = type("SignalStub", (), {"side": "LONG", "entry": 100.0, "stop_loss": 99.0, "take_profit_1": 102.0, "take_profit_2": 103.0})()
         metrics = {**make_metrics("LONG"), "oi_change_15m_window_pct": 0.29}
         evaluator = Mock(return_value=(signal, "test sweep/reclaim"))
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
@@ -114,7 +114,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         from unittest.mock import Mock
 
         self.trend_direction = "SHORT"
-        signal = type("SignalStub", (), {"side": "SHORT"})()
+        signal = type("SignalStub", (), {"side": "SHORT", "entry": 100.0, "stop_loss": 101.0, "take_profit_1": 98.0, "take_profit_2": 97.0})()
         metrics = {**make_metrics("SHORT"), "taker_buy_ratio": 0.46}
         evaluator = Mock(return_value=(signal, "test sweep/reclaim"))
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
