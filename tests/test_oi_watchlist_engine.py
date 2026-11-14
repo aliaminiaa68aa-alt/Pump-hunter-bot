@@ -396,7 +396,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertEqual(found, [])
         self.assertEqual(updated["ABCUSDT"]["status"], "هشدار بدون جهت معتبر؛ سیگنال صادر نشد")
 
-    def test_opposing_higher_timeframes_are_context_not_entry_veto(self):
+    def test_two_bearish_higher_timeframes_block_countertrend_long(self):
         self._higher_trend_patcher.stop()
         self._higher_trend_patcher = patch(
             "oi_engine.watchlist_engine.analyze_trend_4h_1d",
@@ -407,8 +407,22 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
             found, updated = scan_watchlist(
                 {"ABCUSDT": {}}, FakeClient(make_metrics("LONG")), now=1000
             )
-        self.assertEqual(len(found), 1)
-        self.assertEqual(found[0][0].side, "LONG")
+        self.assertEqual(found, [])
+        self.assertIn("چندتایم‌فریمی نزولی", updated["ABCUSDT"]["reason"])
+
+    def test_one_bearish_timeframe_alone_does_not_block_signal(self):
+        from oi_engine.watchlist_engine import trend_side_rejection
+        self.assertIsNone(trend_side_rejection(
+            "LONG", {"direction": "SHORT"},
+            {"direction": "NEUTRAL"}, {"direction": "NEUTRAL"}
+        ))
+
+    def test_two_bullish_timeframes_block_countertrend_short(self):
+        from oi_engine.watchlist_engine import trend_side_rejection
+        self.assertIn("صعودی", trend_side_rejection(
+            "SHORT", {"direction": "LONG"},
+            {"direction": "LONG"}, {"direction": "NEUTRAL"}
+        ))
 
     def test_signal_levels_have_correct_long_and_short_geometry(self):
         self.trend_direction = "LONG"
