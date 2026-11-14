@@ -38,7 +38,14 @@ def evaluate_liquidity_sweep(
     try:
         oi_change = float(metrics["oi_change_15m_window_pct"])
         taker_ratio = float(metrics["taker_buy_ratio"])
-        funding = float(metrics["funding_rate"])
+        # Funding is display/context only. Missing or malformed funding data
+        # must never veto an otherwise valid price-action liquidity sweep.
+        try:
+            funding = float(metrics.get("funding_rate", 0.0))
+        except (TypeError, ValueError, OverflowError):
+            funding = 0.0
+        if not math.isfinite(funding):
+            funding = 0.0
         entry = float(last["close"])
         open_price = float(last["open"])
         high = float(last["high"])
@@ -46,7 +53,7 @@ def evaluate_liquidity_sweep(
     except (KeyError, TypeError, ValueError, OverflowError):
         return None, "داده‌های Coinalyze یا OHLCV ناقص است"
 
-    values = (oi_change, taker_ratio, funding, entry, open_price, high, low)
+    values = (oi_change, taker_ratio, entry, open_price, high, low)
     if not all(math.isfinite(value) for value in values):
         return None, "داده‌های بازار معتبر نیست"
     if not (0.0 <= taker_ratio <= 1.0) or min(entry, open_price, high, low) <= 0:
