@@ -94,7 +94,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         metrics = {"oi_change_15m_window_pct": 0.8, "taker_buy_ratio": 0.67}
         self.assertEqual(coinalyze_rejection_reasons(long_signal, metrics), [])
 
-    def test_scan_watchlist_applies_minimum_oi_confirmation_to_long_sweep(self):
+    def test_weak_positive_oi_does_not_veto_valid_long_sweep(self):
         from unittest.mock import Mock
 
         signal = type("SignalStub", (), {"side": "LONG"})()
@@ -106,11 +106,11 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
             found, updated = scan_watchlist(
                 {"ABCUSDT": {}}, FakeClient(metrics), now=1000
             )
-        self.assertEqual(found, [])
-        self.assertIn("حداقل +0.30٪", updated["ABCUSDT"]["reason"])
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0].side, "LONG")
         evaluator.assert_called_once()
 
-    def test_scan_watchlist_applies_minimum_sell_flow_to_short_sweep(self):
+    def test_mixed_taker_flow_does_not_veto_valid_short_sweep(self):
         from unittest.mock import Mock
 
         self.trend_direction = "SHORT"
@@ -123,8 +123,8 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
             found, updated = scan_watchlist(
                 {"ABCUSDT": {}}, FakeClient(metrics), now=1000
             )
-        self.assertEqual(found, [])
-        self.assertIn("حداقل 55٪", updated["ABCUSDT"]["reason"])
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0].side, "SHORT")
         evaluator.assert_called_once()
 
     def test_long_requires_sweep_reclaim_and_bullish_flow(self):
@@ -219,7 +219,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertEqual(found[0][0].side, "LONG")
         self.assertIn("3 کندل قبل", updated["ABCUSDT"]["reason"])
 
-    def test_low_volume_sweep_is_not_sent_as_entry(self):
+    def test_low_volume_sweep_is_not_blocked_by_volume_filter(self):
         for side in ("LONG", "SHORT"):
             self.trend_direction = side
             with self.subTest(side=side):
@@ -230,9 +230,8 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
                     found, updated = scan_watchlist(
                         {"ABCUSDT": {}}, FakeClient(make_metrics(side)), now=1000
                     )
-                self.assertEqual(found, [])
-                self.assertEqual(updated["ABCUSDT"]["status"], "در حال رصد نقدینگی")
-                self.assertIn("حجم کندل فقط", updated["ABCUSDT"]["reason"])
+                self.assertEqual(len(found), 1)
+                self.assertEqual(found[0][0].side, side)
 
     def test_one_candle_coinalyze_lag_aligns_binance_price_history(self):
         from unittest.mock import Mock
@@ -294,7 +293,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertEqual(found, [])
         self.assertEqual(updated["ABCUSDT"]["status"], "در حال رصد نقدینگی")
 
-    def test_wrong_order_flow_blocks_sweep(self):
+    def test_opposing_taker_flow_does_not_veto_sweep(self):
         with patch("oi_engine.watchlist_engine.fetch_snapshot",
                    return_value=make_snapshot("LONG")):
             found, updated = scan_watchlist(
@@ -302,8 +301,8 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
                 FakeClient({**make_metrics("LONG"), "taker_buy_ratio": 0.48}),
                 now=1000,
             )
-        self.assertEqual(found, [])
-        self.assertIn("جریان خرید", updated["ABCUSDT"]["reason"])
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0].side, "LONG")
 
     def test_binance_price_failure_fails_closed_and_never_uses_coinalyze_snapshot(self):
         error = MarketDataError("Binance unavailable")
@@ -342,7 +341,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         )
         self.assertNotIn("retry_after", recovered["ABCUSDT"])
 
-    def test_sweep_is_rejected_when_nearest_structural_target_is_below_two_r(self):
+    def test_sweep_is_accepted_when_nearest_structural_target_is_at_least_one_r(self):
         candles = make_candles("LONG")
         candles[12]["high"] = 101.2
         candles[20]["high"] = 102.0
@@ -350,13 +349,13 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
             {"symbol": "ABCUSDT", "candles": candles, "live_price": 100.5},
             make_metrics("LONG"),
         )
-        self.assertIsNone(signal)
-        self.assertIn("2.00R", reason)
+        self.assertIsNotNone(signal)
+        self.assertIn("Liquidity Sweep LONG", reason)
 
-    def test_signal_price_geometry_rejects_sub_two_r_for_both_sides(self):
+    def test_signal_price_geometry_rejects_sub_one_r_for_both_sides(self):
         cases = (
-            ("LONG", 100.0, 99.0, 101.0, 102.0),
-            ("SHORT", 100.0, 101.0, 99.0, 98.0),
+            ("LONG", 100.0, 99.0, 99.5, 101.0),
+            ("SHORT", 100.0, 101.0, 100.5, 99.0),
         )
         for side, entry, stop, tp1, tp2 in cases:
             with self.subTest(side=side):
@@ -365,7 +364,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
                     "take_profit_1": tp1, "take_profit_2": tp2,
                 })()
                 reason = signal_price_geometry_rejection(signal, min_tp1_distance_pct=0.0)
-                self.assertIn("2.00R", reason)
+                self.assertIn("1.00R", reason)
 
     def test_oi_alert_long_never_emits_short_even_when_short_sweep_is_present(self):
         snapshot = make_snapshot("SHORT")
@@ -393,7 +392,7 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         self.assertEqual(found, [])
         self.assertEqual(updated["ABCUSDT"]["status"], "هشدار بدون جهت معتبر؛ سیگنال صادر نشد")
 
-    def test_both_higher_timeframes_opposing_signal_block_entry(self):
+    def test_opposing_higher_timeframes_are_context_not_entry_veto(self):
         self._higher_trend_patcher.stop()
         self._higher_trend_patcher = patch(
             "oi_engine.watchlist_engine.analyze_trend_4h_1d",
@@ -404,8 +403,8 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
             found, updated = scan_watchlist(
                 {"ABCUSDT": {}}, FakeClient(make_metrics("LONG")), now=1000
             )
-        self.assertEqual(found, [])
-        self.assertIn("هر دو تایم‌فریم بالاتر", updated["ABCUSDT"]["reason"])
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0].side, "LONG")
 
     def test_signal_levels_have_correct_long_and_short_geometry(self):
         self.trend_direction = "LONG"
