@@ -355,6 +355,22 @@ class LiquiditySweepWatchlistTests(unittest.TestCase):
         )
         self.assertNotIn("retry_after", recovered["ABCUSDT"])
 
+    def test_missing_funding_does_not_block_valid_liquidity_sweep(self):
+        metrics = make_metrics("LONG")
+        metrics.pop("funding_rate", None)
+        snapshot = make_snapshot("LONG")
+        signal, reason = evaluate_liquidity_sweep(snapshot, metrics)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.funding_rate, 0.0)
+
+    def test_invalid_funding_is_context_only_and_does_not_block_sweep(self):
+        metrics = make_metrics("SHORT")
+        metrics["funding_rate"] = "unavailable"
+        snapshot = make_snapshot("SHORT")
+        signal, reason = evaluate_liquidity_sweep(snapshot, metrics)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.funding_rate, 0.0)
+
     def test_sweep_is_accepted_when_nearest_structural_target_is_at_least_one_r(self):
         candles = make_candles("LONG")
         candles[12]["high"] = 101.2
